@@ -11,7 +11,6 @@
 
 use std::f32::consts::PI;
 use std::f32::consts::TAU;
-use std::path::PathBuf;
 
 use super::Color;
 use super::Path;
@@ -22,6 +21,7 @@ use super::lerp;
 use super::noise;
 use super::palette;
 use super::pt;
+use super::puppet;
 use super::rig;
 use super::rig::Gait;
 use super::rig::Legs;
@@ -124,9 +124,9 @@ pub struct Look {
 	/// Mouth width multiplier; Stinky's mouth is the star of his book.
 	pub mouth_size: f32,
 	pub seed: u64,
-	/// The character's authored part file (see [`parts`](super::parts)), once they have been
-	/// redrawn as an authored puppet.
-	pub puppet: Option<PathBuf>,
+	/// The character's authored puppet (see [`puppet`](super::puppet)), once they have been
+	/// redrawn; otherwise they are drawn by this module's parametric puppet.
+	pub puppet: Option<puppet::Authored>,
 }
 
 impl Look {
@@ -135,10 +135,14 @@ impl Look {
 	/// rather than the build, so a character can bring its own measurements (as authored
 	/// puppets will) without touching the stage, video or sheets.
 	pub fn frame(&self) -> Frame {
-		Frame::of(self.build)
+		if self.puppet.is_some() {
+			Frame::authored_kid()
+		} else {
+			Frame::of(self.build)
+		}
 	}
 
-	fn has(&self, extra: Extra) -> bool {
+	pub(crate) fn has(&self, extra: Extra) -> bool {
 		self.extras.contains(&extra)
 	}
 
@@ -273,8 +277,9 @@ pub enum Anchor {
 	Mouth,
 }
 
-/// A hand target: an anchor plus an offset in head-radius units. Positive `x` points away from
-/// the body on that hand's side, so one definition serves both arms.
+/// A hand target: an anchor plus an offset in reach units (the head radius, for the parametric
+/// puppet). Positive `x` points away from the body on that hand's side, so one definition serves
+/// both arms.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Reach {
 	pub anchor: Anchor,
@@ -480,11 +485,48 @@ pub struct Frame {
 	pub arm_width: f32,
 	pub arm_len: f32,
 	hand_r: f32,
+	limbs: Limbs,
+	/// The nose and the middle of the mouth, relative to the head centre, front-on.
+	nose: Pt,
+	mouth: Pt,
+	/// How far the face slides sideways per unit of `facing`.
+	face_slide: f32,
+	/// The units pose reaches are measured in (see [`Reach`]), across and up or down.
+	reach: Pt,
 }
 
 impl Frame {
+	/// A frame with nothing derived yet, for the constructors above to fill in.
+	const UNSET: Frame = Frame {
+		head: pt(0.0, 0.0),
+		head_r: 0.0,
+		body_top: 0.0,
+		body_bottom: 0.0,
+		shoulder_half: 0.0,
+		hip_half: 0.0,
+		shoulder_y: 0.0,
+		leg_top: 0.0,
+		leg_width: 0.0,
+		arm_width: 0.0,
+		arm_len: 0.0,
+		hand_r: 0.0,
+		limbs: Limbs {
+			pelvis_y: 0.0,
+			ankle_y: 0.0,
+			hip_spread: 0.0,
+			thigh: 0.0,
+			shin: 0.0,
+			upper_arm: 0.0,
+			forearm: 0.0,
+		},
+		nose: pt(0.0, 0.0),
+		mouth: pt(0.0, 0.0),
+		face_slide: 0.0,
+		reach: pt(0.0, 0.0),
+	};
+
 	pub fn of(build: Build) -> Frame {
-		match build {
+		let frame = match build {
 			Build::Kid => {
 				Frame {
 					head: pt(0.0, -300.0),
@@ -499,6 +541,7 @@ impl Frame {
 					arm_width: 23.0,
 					arm_len: 132.0,
 					hand_r: 20.0,
+					..Frame::UNSET
 				}
 			}
 			Build::Grownup => {
@@ -515,8 +558,45 @@ impl Frame {
 					arm_width: 26.0,
 					arm_len: 190.0,
 					hand_r: 22.0,
+					..Frame::UNSET
 				}
 			}
+		};
+
+		Frame {
+			limbs: frame.build_limbs(),
+			nose: pt(0.0, frame.head_r * 0.12),
+			mouth: pt(0.0, frame.head_r * 0.45),
+			face_slide: frame.head_r * 0.2,
+			reach: pt(frame.head_r, frame.head_r),
+			..frame
+		}
+	}
+
+	/// The measurements every authored kid puppet is drawn to (see [`puppet`](super::puppet)).
+	pub fn authored_kid() -> Frame {
+		Frame {
+			head: puppet::NECK + pt(0.0, -puppet::HEAD_ABOVE_NECK),
+			head_r: 100.0,
+			body_top: -232.0,
+			body_bottom: -112.0,
+			shoulder_half: 40.0,
+			hip_half: 40.0,
+			shoulder_y: puppet::SHOULDER_Y,
+			leg_top: -94.0,
+			leg_width: 14.0,
+			arm_width: 12.0,
+			arm_len: puppet::KID_LIMBS.upper_arm + puppet::KID_LIMBS.forearm,
+			hand_r: 14.0,
+			limbs: puppet::KID_LIMBS,
+			// Where a hand reaching for the nose puts its wrist: a hand's length below the nose,
+			// so the fingers, not the wrist, are on it.
+			nose: pt(0.0, 50.0),
+			mouth: pt(0.0, 58.0),
+			face_slide: puppet::FACE_SLIDE,
+			// Shorter arms on a narrower body: hands hang close to the sides and still reach
+			// above the head.
+			reach: pt(50.0, 80.0),
 		}
 	}
 
@@ -527,6 +607,16 @@ impl Frame {
 
 	/// Joint measurements for the rig.
 	pub fn limbs(&self) -> Limbs {
+		self.limbs
+	}
+
+	/// Where the middle of the mouth is when the face is turned by `facing`.
+	pub fn mouth_at(&self, facing: f32) -> Pt {
+		self.head + self.mouth + pt(facing * self.face_slide, 0.0)
+	}
+
+	/// The parametric puppet's limbs, worked out from its body measurements.
+	fn build_limbs(&self) -> Limbs {
 		let ankle_y = -24.0;
 		// The hip joints sit up inside the body (hidden by it), the way animation rigs give
 		// short cartoon legs enough bone to bend visibly at the knee.
@@ -555,19 +645,20 @@ impl Frame {
 	}
 
 	fn anchor(&self, anchor: Anchor, side: f32, facing: f32) -> Pt {
-		let face_x = facing * self.head_r * 0.2;
+		let face = self.head + pt(facing * self.face_slide, 0.0);
 
 		match anchor {
 			Anchor::Shoulder => self.shoulder(side),
 			Anchor::Chest => pt(0.0, self.shoulder_y + 40.0),
 			Anchor::Hip => pt(side * self.hip_half * 0.8, self.body_bottom - 25.0),
-			Anchor::Nose => self.head + pt(face_x, self.head_r * 0.12),
-			Anchor::Mouth => self.head + pt(face_x, self.head_r * 0.45),
+			Anchor::Nose => face + self.nose,
+			Anchor::Mouth => face + self.mouth,
 		}
 	}
 
 	fn resolve(&self, reach: Reach, side: f32, facing: f32) -> Pt {
-		self.anchor(reach.anchor, side, facing) + pt(side * reach.x, reach.y) * self.head_r
+		self.anchor(reach.anchor, side, facing)
+			+ pt(side * reach.x * self.reach.x, reach.y * self.reach.y)
 	}
 
 	/// Hand positions for a named pose.
@@ -646,6 +737,11 @@ impl FigureState {
 /// The soft contact shadow under a standing figure, drawn at the ground point. `lift` is how far
 /// the figure is off the ground (hops), which shrinks and fades the shadow.
 pub fn shadow(svg: &mut Svg, look: &Look, state: &FigureState, lift: f32) {
+	if look.puppet.is_some() {
+		puppet::shadow(svg, state, lift);
+		return;
+	}
+
 	let frame = look.frame();
 	let feet = (state.legs.feet.1.x - state.legs.feet.0.x).abs() / 2.0 + frame.leg_width * 1.4;
 	let spread = feet.max(frame.stance()) * (1.0 + state.lie * 1.8);
@@ -704,6 +800,11 @@ impl Posed {
 
 /// Draws a figure with its feet at the current origin.
 pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
+	if let Some(authored) = &look.puppet {
+		puppet::draw(svg, look, authored, state);
+		return;
+	}
+
 	let frame = look.frame();
 	let posed = Posed::solve(&frame, state);
 	let lie_lift = state.lie * frame.head_r * 0.95;
@@ -752,6 +853,11 @@ pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
 
 /// Draws the rig's bones and joints over a figure, for model sheets and rig checks.
 pub fn draw_skeleton(svg: &mut Svg, look: &Look, state: &FigureState) {
+	if look.puppet.is_some() {
+		puppet::draw_bones(svg, look, state);
+		return;
+	}
+
 	let frame = look.frame();
 	let posed = Posed::solve(&frame, state);
 	let (shoulders, hips, _) = look.body_widths();
@@ -2259,7 +2365,7 @@ fn draw_hand(
 	svg.end();
 }
 
-fn draw_prop(
+pub(crate) fn draw_prop(
 	svg: &mut Svg,
 	prop: Prop,
 	hand: Pt,

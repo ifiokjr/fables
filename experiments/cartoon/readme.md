@@ -1,6 +1,6 @@
 # Cartoon experiment
 
-Stinky redrawn as an authored cut-out puppet: every part is a hand-placed Bézier drawing (`src/stinky.rs`) hung on the unchanged fables rig (`fables::art::rig`), with lip-sync from `fables::video::lipsync`. Nothing in the main crate was changed.
+Where Stinky's authored cut-out puppet began. His parts now live in `world/puppets/` and the drawing in `fables::art::puppet`, so this crate only arranges him (through the same `FigureState` the books use) for review sheets, one park setting, a composed page and a short film.
 
 ```bash
 devenv shell -- cargo run --release --manifest-path experiments/cartoon/Cargo.toml
@@ -10,8 +10,8 @@ Output goes to `out/experiments/cartoon/`:
 
 | File | What it shows |
 | --- | --- |
-| `compare-now-vs-experiment.png` | The current puppet (tv style) beside the new one |
-| `compare-page.png` | The current "This is Stanley." proof beside the new page |
+| `compare-before-after.png` | The parametric puppet (tv style) beside the authored one |
+| `compare-page.png` | The book's tv proof of "This is Stanley." beside the experiment's page |
 | `model-sheet.png` | Happy, defiant (NOPE), disgusted and grin, front and three-quarter |
 | `turnaround.png` | The turn from three-quarter left to three-quarter right |
 | `mouth-chart.png` | The nine lip-sync shapes and the mood mouths |

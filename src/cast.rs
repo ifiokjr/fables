@@ -25,6 +25,7 @@ use crate::art::figure::Look;
 use crate::art::figure::Nose;
 use crate::art::figure::Pattern;
 use crate::art::palette;
+use crate::art::puppet::Authored;
 use crate::art::seed_of;
 use crate::video::voice::Voice;
 
@@ -126,29 +127,24 @@ impl Cast {
 	pub fn load(path: &Path) -> Result<Cast> {
 		let source = std::fs::read_to_string(path)
 			.with_context(|| format!("could not read cast file {}", path.display()))?;
-		let mut cast = Self::parse(&source).with_context(|| format!("in {}", path.display()))?;
-		let dir = path.parent().unwrap_or(Path::new(""));
-
-		for member in cast.members.values_mut() {
-			if let Kind::Figure(Look {
-				puppet: Some(puppet),
-				..
-			}) = &mut member.kind
-			{
-				*puppet = dir.join(&*puppet);
-			}
-		}
-
-		Ok(cast)
+		Self::parse_in(&source, path.parent().unwrap_or(Path::new("")))
+			.with_context(|| format!("in {}", path.display()))
 	}
 
+	/// Parses a cast file whose puppet part files are relative to the current directory.
 	pub fn parse(source: &str) -> Result<Cast> {
+		Self::parse_in(source, Path::new(""))
+	}
+
+	/// Parses a cast file whose puppet part files are relative to `dir`.
+	pub fn parse_in(source: &str, dir: &Path) -> Result<Cast> {
 		let entries: BTreeMap<String, Entry> =
 			toml::from_str(source).context("cast file is not valid TOML")?;
 		let mut members = BTreeMap::new();
 
 		for (id, entry) in entries {
-			let kind = build_kind(&id, &entry).with_context(|| format!("cast member `{id}`"))?;
+			let kind =
+				build_kind(&id, &entry, dir).with_context(|| format!("cast member `{id}`"))?;
 
 			if let Some(voice) = &entry.voice {
 				voice
@@ -249,11 +245,11 @@ fn color(field: &str, value: Option<&String>, fallback: Color) -> Result<Color> 
 	}
 }
 
-fn build_kind(id: &str, entry: &Entry) -> Result<Kind> {
+fn build_kind(id: &str, entry: &Entry, dir: &Path) -> Result<Kind> {
 	let tint = |fallback| color("colour", entry.colour.as_ref(), fallback);
 
 	match entry.kind.as_str() {
-		"kid" | "grown-up" => Ok(Kind::Figure(build_look(id, entry)?)),
+		"kid" | "grown-up" => Ok(Kind::Figure(build_look(id, entry, dir)?)),
 		"bird" => Ok(Kind::Bird(tint(palette::CORNFLOWER)?)),
 		"dog" => Ok(Kind::Dog(tint(palette::TOFFEE)?)),
 		"worm" => Ok(Kind::Worm),
@@ -278,7 +274,7 @@ fn build_kind(id: &str, entry: &Entry) -> Result<Kind> {
 	}
 }
 
-fn build_look(id: &str, entry: &Entry) -> Result<Look> {
+fn build_look(id: &str, entry: &Entry, dir: &Path) -> Result<Look> {
 	let build = if entry.kind == "grown-up" {
 		Build::Grownup
 	} else {
@@ -354,6 +350,14 @@ fn build_look(id: &str, entry: &Entry) -> Result<Look> {
 		})
 		.collect::<Result<Vec<_>>>()?;
 
+	let puppet = match &entry.puppet {
+		Some(_) if build == Build::Grownup => {
+			bail!("authored puppets are drawn for kids so far; grown-ups come in a later layer")
+		}
+		Some(file) => Some(Authored::load(&dir.join(file))?),
+		None => None,
+	};
+
 	Ok(Look {
 		build,
 		head,
@@ -372,7 +376,7 @@ fn build_look(id: &str, entry: &Entry) -> Result<Look> {
 		extras,
 		mouth_size: entry.mouth.unwrap_or(1.0),
 		seed: seed_of(id),
-		puppet: entry.puppet.clone(),
+		puppet,
 	})
 }
 
@@ -428,18 +432,40 @@ colour = "#c9865a"
 	}
 
 	#[test]
+	fn grown_ups_cannot_have_authored_puppets_yet() {
+		let error = Cast::parse(
+			"[mum]\nname = \"Mum\"\nkind = \"grown-up\"\npuppet = \"world/puppets/stinky.svg\"\n",
+		)
+		.unwrap_err();
+		assert!(format!("{error:#}").contains("drawn for kids"));
+	}
+
+	#[test]
 	fn puppet_files_are_found_beside_the_cast_file() {
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("cast.toml");
+		std::fs::create_dir(dir.path().join("puppets")).unwrap();
+		let world = Path::new(env!("CARGO_MANIFEST_DIR")).join("world/puppets");
+
+		for file in ["kit.svg", "stinky.svg"] {
+			std::fs::copy(world.join(file), dir.path().join("puppets").join(file)).unwrap();
+		}
+
 		std::fs::write(
 			&path,
-			"[kid]\nname = \"Kid\"\npuppet = \"puppets/kid.svg\"\n",
+			"[kid]\nname = \"Kid\"\npuppet = \"puppets/stinky.svg\"\n",
 		)
 		.unwrap();
 		let cast = Cast::load(&path).unwrap();
 		let Kind::Figure(look) = cast.resolve("kid").unwrap() else {
 			panic!("kid is a person");
 		};
-		assert_eq!(look.puppet, Some(dir.path().join("puppets/kid.svg")));
+		let puppet = look.puppet.expect("the kid has a puppet");
+		assert_eq!(puppet.file, dir.path().join("puppets/stinky.svg"));
+		assert!(puppet.parts.get("head.front").is_some());
+		assert!(
+			puppet.parts.get("hand-fist").is_some(),
+			"kit parts come along"
+		);
 	}
 }

@@ -67,8 +67,7 @@ impl Puppet {
 			return None;
 		}
 
-		let frame = look.frame();
-		let local = frame.head + pt(state.facing * frame.head_r * 0.2, frame.head_r * 0.5);
+		let local = look.frame().mouth_at(state.facing);
 
 		Some(self.at + local * self.scale)
 	}

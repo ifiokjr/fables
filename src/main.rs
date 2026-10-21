@@ -570,21 +570,24 @@ fn puppet_file(cast: &Cast, id: &str, cast_path: &Path) -> Result<PathBuf> {
 
 	match &member.kind {
 		fables::cast::Kind::Figure(look) => {
-			look.puppet.clone().with_context(|| {
-				let file = cast_path
-					.with_file_name("puppets")
-					.join(format!("{id}.svg"));
-				let start = if file.exists() {
-					format!("{} exists, so", file.display())
-				} else {
-					format!("start one with `fables puppet template {id}`, then")
-				};
-				format!(
-					"`{id}` has no puppet yet: {start} add `puppet = \"puppets/{id}.svg\"` to \
-					 [{id}] in {}",
-					cast_path.display()
-				)
-			})
+			look.puppet
+				.as_ref()
+				.map(|puppet| puppet.file.clone())
+				.with_context(|| {
+					let file = cast_path
+						.with_file_name("puppets")
+						.join(format!("{id}.svg"));
+					let start = if file.exists() {
+						format!("{} exists, so", file.display())
+					} else {
+						format!("start one with `fables puppet template {id}`, then")
+					};
+					format!(
+						"`{id}` has no puppet yet: {start} add `puppet = \"puppets/{id}.svg\"` to \
+						 [{id}] in {}",
+						cast_path.display()
+					)
+				})
 		}
 		_ => anyhow::bail!("`{id}` is not a person, so has no puppet"),
 	}

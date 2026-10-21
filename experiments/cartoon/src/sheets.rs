@@ -4,28 +4,24 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use anyhow::bail;
 use fables::art::Color;
 use fables::art::Path as Curve;
 use fables::art::Svg;
 use fables::art::escape;
 use fables::art::figure;
 use fables::art::figure::FigureState;
-use fables::art::figure::Mood as OldMood;
-use fables::art::figure::Pose as OldPose;
+use fables::art::figure::Mood;
+use fables::art::figure::Pose;
 use fables::art::figure::Viseme;
+use fables::art::palette;
 use fables::art::rig::Gait;
 use fables::art::rig::Stance;
 use fables::art::style::Style;
 use fables::art::style::StyleName;
-use fables::cast::Cast;
-use fables::cast::Kind;
 use fables::raster;
 
 use crate::stinky;
-use crate::stinky::Arms;
-use crate::stinky::Mood;
-use crate::stinky::Pose;
+use crate::stinky::THREE_QUARTER;
 
 pub const PAPER: Color = Color(0xFB_F3_E4);
 pub const LABEL: Color = Color(0x4A_3A_4E);
@@ -45,16 +41,13 @@ pub fn label(c: &mut Svg, x: f32, y: f32, size: f32, text: &str) {
 	));
 }
 
-/// The pose each mood is shown in on the model sheet.
-pub fn mood_pose(mood: Mood, turn: f32) -> Pose {
-	let arms = match mood {
-		Mood::Happy => Arms::Wave,
-		Mood::Grin => Arms::Hips,
-		Mood::Defiant => Arms::Folded,
-		Mood::Disgusted => Arms::Recoil,
-	};
-	Pose::new(mood, arms, turn)
-}
+/// The moods on the model sheet, each in the pose the book gives it.
+const MOODS: [(Mood, Pose, &str); 4] = [
+	(Mood::Happy, Pose::Wave, "happy"),
+	(Mood::Defiant, Pose::ArmsCrossed, "defiant (NOPE)"),
+	(Mood::Disgusted, Pose::HoldNose, "disgusted"),
+	(Mood::Grin, Pose::Hips, "grin"),
+];
 
 /// Four moods across, front view above and three-quarter view below.
 pub fn model_sheet(out: &Path) -> Result<PathBuf> {
@@ -67,26 +60,18 @@ pub fn model_sheet(out: &Path) -> Result<PathBuf> {
 		width / 2.0,
 		70.0,
 		46.0,
-		"Stinky McStinkbreath: model sheet (experiment)",
+		"Stinky McStinkbreath: model sheet",
 	);
 
-	for (column, mood) in Mood::ALL.into_iter().enumerate() {
-		for (row, turn) in [0.0_f32, 1.0].into_iter().enumerate() {
+	for (column, (mood, pose, name)) in MOODS.into_iter().enumerate() {
+		for (row, facing) in [0.0_f32, THREE_QUARTER].into_iter().enumerate() {
 			let x = cell * (column as f32 + 0.5);
 			let ground = 120.0 + cell * (row as f32 + 1.0) - 70.0;
-			let pose = mood_pose(mood, turn);
 			c.begin(&format!("translate({x:.1} {ground:.1}) scale(0.92)"));
-			stinky::draw_shadow(&mut c, &pose, 0.0);
-			stinky::draw(&mut c, &pose);
+			stinky::draw(&mut c, &stinky::posed(mood, pose, facing));
 			c.end();
 			let view = if row == 0 { "front" } else { "three-quarter" };
-			label(
-				&mut c,
-				x,
-				ground + 48.0,
-				28.0,
-				&format!("{} · {view}", mood.name()),
-			);
+			label(&mut c, x, ground + 48.0, 28.0, &format!("{name} · {view}"));
 		}
 	}
 
@@ -113,10 +98,9 @@ pub fn turnaround(out: &Path) -> Result<PathBuf> {
 	for (index, turn) in turns.into_iter().enumerate() {
 		let x = cell * (index as f32 + 0.5);
 		let ground = height - 130.0;
-		let pose = Pose::new(Mood::Happy, Arms::Relaxed, turn);
+		let state = stinky::posed(Mood::Happy, Pose::Idle, turn * THREE_QUARTER);
 		c.begin(&format!("translate({x:.1} {ground:.1}) scale(2)"));
-		stinky::draw_shadow(&mut c, &pose, 0.0);
-		stinky::draw(&mut c, &pose);
+		stinky::draw(&mut c, &state);
 		c.end();
 		label(&mut c, x, ground + 80.0, 34.0, &format!("turn {turn:+.1}"));
 	}
@@ -125,10 +109,9 @@ pub fn turnaround(out: &Path) -> Result<PathBuf> {
 	save(&svg, &out.join("turnaround.png"))
 }
 
-/// The lip-sync chart: the nine mouth shapes fables' lip-sync already produces, drawn for the
-/// new head, plus the four mood mouths.
+/// The lip-sync chart: the nine mouth shapes fables' lip-sync produces, then some mood mouths.
 pub fn mouth_chart(out: &Path) -> Result<PathBuf> {
-	let shapes: [(&str, Option<Viseme>, Mood); 13] = [
+	let shapes: [(&str, Option<Viseme>, Mood); 15] = [
 		("rest", Some(Viseme::Rest), Mood::Happy),
 		("M B P", Some(Viseme::Mbp), Mood::Happy),
 		("teeth (S T K)", Some(Viseme::Teeth), Mood::Happy),
@@ -142,6 +125,8 @@ pub fn mouth_chart(out: &Path) -> Result<PathBuf> {
 		("mood: NOPE", None, Mood::Defiant),
 		("mood: disgusted", None, Mood::Disgusted),
 		("mood: grin", None, Mood::Grin),
+		("mood: shocked", None, Mood::Shocked),
+		("mood: sad", None, Mood::Sad),
 	];
 	let (cell_w, cell_h, columns) = (380.0, 420.0, 5);
 	let rows = shapes.len().div_ceil(columns);
@@ -153,32 +138,23 @@ pub fn mouth_chart(out: &Path) -> Result<PathBuf> {
 		width / 2.0,
 		80.0,
 		46.0,
-		"Mouth chart: the nine lip-sync shapes, then the mood mouths",
+		"Mouth chart: the nine lip-sync shapes, then mood mouths",
 	);
 
 	for (index, (name, viseme, mood)) in shapes.into_iter().enumerate() {
 		let x = cell_w * ((index % columns) as f32 + 0.5);
 		let y = 130.0 + cell_h * (index / columns) as f32;
-		let mut pose = Pose::new(mood, Arms::Relaxed, 0.7);
-		pose.viseme = viseme;
-		pose.head_tilt = 0.0;
-		pose.tilt = 0.0;
-		c.begin_clip(&Curve::rect(
-			x - cell_w / 2.0 + 14.0,
-			y,
-			cell_w - 28.0,
-			cell_h - 70.0,
-		));
-		c.fill(
-			&Curve::rect(x - cell_w / 2.0 + 14.0, y, cell_w - 28.0, cell_h - 70.0),
-			Color(0xF3_E7_D3),
-		);
+		let mut state = stinky::posed(mood, Pose::Idle, THREE_QUARTER * 0.7);
+		state.viseme = viseme;
+		let card = Curve::rect(x - cell_w / 2.0 + 14.0, y, cell_w - 28.0, cell_h - 70.0);
+		c.begin_clip(&card);
+		c.fill(&card, Color(0xF3_E7_D3));
 		c.begin(&format!(
 			"translate({:.1} {:.1}) scale(1.25)",
 			x - 30.0,
 			y + 545.0
 		));
-		stinky::draw(&mut c, &pose);
+		figure::draw(&mut c, stinky::look(), &state);
 		c.end();
 		c.end();
 		label(&mut c, x, y + cell_h - 25.0, 30.0, name);
@@ -188,10 +164,11 @@ pub fn mouth_chart(out: &Path) -> Result<PathBuf> {
 	save(&svg, &out.join("mouth-chart.png"))
 }
 
-/// The new parts posed by the unchanged fables rig: stances from `Limbs::stance`, a walk from
+/// The authored parts posed by the fables rig: stances from `Limbs::stance`, a walk from
 /// `Limbs::cycle`, elbows and knees from `two_bone`, with the skeleton drawn over the top.
 pub fn rig_sheet(out: &Path) -> Result<PathBuf> {
-	let mut cells: Vec<(String, Pose)> = Vec::new();
+	let frame = stinky::look().frame();
+	let mut cells: Vec<(String, FigureState)> = Vec::new();
 
 	for (name, stance) in [
 		("stand", Stance::Stand),
@@ -199,16 +176,16 @@ pub fn rig_sheet(out: &Path) -> Result<PathBuf> {
 		("jump", Stance::Jump),
 		("tiptoe", Stance::Tiptoe),
 	] {
-		let mut pose = Pose::new(Mood::Happy, Arms::Relaxed, 1.0);
-		pose.legs = stinky::stance(stance, 1.0);
-		cells.push((name.to_owned(), pose));
+		let mut state = stinky::posed(Mood::Happy, Pose::Idle, THREE_QUARTER);
+		state.legs = frame.limbs().stance(stance, THREE_QUARTER);
+		cells.push((name.to_owned(), state));
 	}
 
 	for step in 0..4 {
-		let mut pose = Pose::new(Mood::Happy, Arms::Relaxed, 1.0);
+		let mut state = stinky::posed(Mood::Happy, Pose::Idle, THREE_QUARTER);
 		let phase = step as f32 * std::f32::consts::FRAC_PI_2;
-		pose.gait = Some((Gait::Walk, phase));
-		cells.push((format!("walk {}/4", step + 1), pose));
+		state.gait = Some((Gait::Walk, phase));
+		cells.push((format!("walk {}/4", step + 1), state));
 	}
 
 	let (cell, columns) = (480.0, 4);
@@ -221,10 +198,10 @@ pub fn rig_sheet(out: &Path) -> Result<PathBuf> {
 		width / 2.0,
 		80.0,
 		46.0,
-		"The new parts on the existing fables rig (stances, walk cycle, IK)",
+		"The authored parts on the fables rig (stances, walk cycle, IK)",
 	);
 
-	for (index, (name, pose)) in cells.iter().enumerate() {
+	for (index, (name, state)) in cells.iter().enumerate() {
 		let x = cell * ((index % columns) as f32 + 0.5);
 		let ground = 130.0 + cell * 1.25 * ((index / columns) as f32 + 1.0) - 90.0;
 		c.fill(
@@ -232,9 +209,9 @@ pub fn rig_sheet(out: &Path) -> Result<PathBuf> {
 			Color(0xD9_C6_A6),
 		);
 		c.begin(&format!("translate({x:.1} {ground:.1}) scale(0.95)"));
-		stinky::draw(&mut c, pose);
+		figure::draw(&mut c, stinky::look(), state);
 		c.begin_opacity(0.85);
-		stinky::draw_bones(&mut c, pose);
+		figure::draw_skeleton(&mut c, stinky::look(), state);
 		c.end();
 		c.end();
 		label(&mut c, x, ground + 55.0, 30.0, name);
@@ -244,55 +221,49 @@ pub fn rig_sheet(out: &Path) -> Result<PathBuf> {
 	save(&svg, &out.join("rig-check.png"))
 }
 
-/// The current Stinky (the fables puppet, tv style) beside the experiment, same height.
+/// Stinky as the parametric puppet drew him (tv style, his old paint-box colours) beside his
+/// authored puppet, at the same height.
 pub fn comparison(out: &Path) -> Result<PathBuf> {
-	let cast =
-		Cast::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../world/cast.toml"))?;
-	let Kind::Figure(look) = cast.resolve("stinky")? else {
-		bail!("stinky is a person in the cast file");
-	};
+	let mut before = stinky::look().clone();
+	before.puppet = None;
+	(before.skin, before.hair_color, before.top, before.trim) = (
+		palette::TANGERINE,
+		palette::PLUM,
+		palette::TEAL,
+		palette::CREAM,
+	);
+	(before.bottom, before.shoes) = (palette::MUSTARD, palette::INK);
 	let (cell_w, cell_h) = (900.0, 760.0);
 	let (width, height) = (cell_w * 2.0, 150.0 + cell_h * 2.0);
 	let mut c = Svg::new();
 	c.fill(&Curve::rect(0.0, 0.0, width, height), PAPER);
-	label(&mut c, cell_w * 0.5, 100.0, 54.0, "Now");
-	label(&mut c, cell_w * 1.5, 100.0, 54.0, "Experiment");
+	label(&mut c, cell_w * 0.5, 100.0, 54.0, "Before");
+	label(&mut c, cell_w * 1.5, 100.0, 54.0, "Authored puppet");
 	c.fill(
 		&Curve::rect(cell_w - 2.0, 150.0, 4.0, cell_h * 2.0 - 40.0),
 		Color(0xE4_D4_BC),
 	);
 
-	let rows = [
-		(
-			OldPose::Wave,
-			OldMood::Happy,
-			Mood::Happy,
-			Arms::Wave,
-			"hello",
-		),
-		(
-			OldPose::ArmsCrossed,
-			OldMood::Defiant,
-			Mood::Defiant,
-			Arms::Folded,
-			"NOPE",
-		),
-	];
-
-	for (row, (old_pose, old_mood, mood, arms, caption)) in rows.into_iter().enumerate() {
+	for (row, (mood, pose, caption)) in [
+		(Mood::Happy, Pose::Wave, "hello"),
+		(Mood::Defiant, Pose::ArmsCrossed, "NOPE"),
+	]
+	.into_iter()
+	.enumerate()
+	{
 		let top = 150.0 + cell_h * row as f32;
 		let ground = top + cell_h - 110.0;
 		let figure_height = cell_h - 170.0;
 
-		// The current puppet, drawn by fables itself into its own nested document.
-		let frame = look.frame();
+		// The parametric puppet, front-on as it always was, in its own nested document.
+		let frame = before.frame();
 		let mut state = FigureState::new(&frame);
-		state.mood = old_mood;
-		state.hands = frame.hands(old_pose, 0.0);
-		state.hand_shapes = old_pose.hand_shapes();
+		state.mood = mood;
+		state.hands = frame.hands(pose, 0.0);
+		state.hand_shapes = pose.hand_shapes();
 		let mut old = Svg::styled(Style::named(StyleName::Tv));
-		figure::shadow(&mut old, &look, &state, 0.0);
-		figure::draw(&mut old, &look, &state);
+		figure::shadow(&mut old, &before, &state, 0.0);
+		figure::draw(&mut old, &before, &state);
 		let tall = frame.height() * 1.08;
 		let doc = old.finish(
 			(-tall * 0.6, -tall, tall * 1.2, tall * 1.04),
@@ -309,14 +280,12 @@ pub fn comparison(out: &Path) -> Result<PathBuf> {
 			1,
 		));
 
-		let pose = Pose::new(mood, arms, 1.0);
 		let scale = figure_height / 500.0;
 		c.begin(&format!(
 			"translate({:.1} {ground:.1}) scale({scale:.3})",
 			cell_w * 1.5
 		));
-		stinky::draw_shadow(&mut c, &pose, 0.0);
-		stinky::draw(&mut c, &pose);
+		stinky::draw(&mut c, &stinky::posed(mood, pose, THREE_QUARTER));
 		c.end();
 
 		for x in [cell_w * 0.5, cell_w * 1.5] {
@@ -325,5 +294,5 @@ pub fn comparison(out: &Path) -> Result<PathBuf> {
 	}
 
 	let svg = c.finish((0.0, 0.0, width, height), width as u32, height as u32);
-	save(&svg, &out.join("compare-now-vs-experiment.png"))
+	save(&svg, &out.join("compare-before-after.png"))
 }

@@ -35,7 +35,7 @@ const PATH: Color = Color(0xEE_DD_BA);
 const PATH_EDGE: Color = Color(0xD6_BF_93);
 const ROOF: Color = Color(0xD9_8C_74);
 const WALL: Color = Color(0xF3_E3_C8);
-const INK: Color = crate::stinky::colors::INK;
+const INK: Color = Color(0x2B_1D_2E);
 
 /// Fades a colour into the haze of the sky by `depth` (0 near, 1 at the horizon).
 fn haze(color: Color, depth: f32) -> Color {

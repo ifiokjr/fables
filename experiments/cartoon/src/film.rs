@@ -11,22 +11,21 @@ use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use fables::art::Svg;
+use fables::art::figure::FigureState;
+use fables::art::figure::Mood;
+use fables::art::figure::Pose;
 use fables::art::figure::Viseme;
 use fables::art::lerp;
 use fables::art::pt;
 use fables::art::rig::Gait;
 use fables::art::rig::Legs;
-use fables::art::rig::Stance;
 use fables::raster;
 use fables::video::Clip;
 use fables::video::lipsync;
 
 use crate::park;
 use crate::stinky;
-use crate::stinky::Arms;
-use crate::stinky::LIMBS;
-use crate::stinky::Mood;
-use crate::stinky::Pose;
+use crate::stinky::THREE_QUARTER;
 
 const FPS: u32 = 30;
 const LENGTH: f32 = 7.0;
@@ -47,7 +46,7 @@ fn ease(time: f32, a: f32, b: f32) -> f32 {
 /// Body speed that keeps the planted foot still: the rig moves a foot by
 /// `sin(phase) · stride · leg`, so on average a planted foot travels back at this rate.
 fn walk_speed() -> f32 {
-	Gait::Walk.rate() * 0.45 * LIMBS.leg_length() * 2.0 / PI
+	Gait::Walk.rate() * 0.45 * stinky::look().frame().limbs().leg_length() * 2.0 / PI
 }
 
 /// The mouth shape at `time`, from fables' own letter-to-viseme table.
@@ -72,23 +71,25 @@ fn mouth(time: f32) -> Option<Viseme> {
 }
 
 /// Stinky's pose and where he stands at `time`.
-fn performance(time: f32) -> (Pose, f32) {
-	let stand = stinky::stance(Stance::Stand, 1.0);
-	let phase = time * Gait::Walk.rate();
-	let mut pose = Pose::new(Mood::Happy, Arms::Relaxed, 1.0);
-	pose.head_tilt = 2.0;
-	pose.gaze = pt(0.5, 0.0);
+fn performance(time: f32) -> (FigureState, f32) {
+	let frame = stinky::look().frame();
+	let rate = Gait::Walk.rate();
+	let mut state = stinky::posed(Mood::Happy, Pose::Idle, THREE_QUARTER);
+	state.head_tilt = 2.0;
+	state.gaze = 0.5;
+	state.time = time;
 
 	if time < STOP_AT {
-		pose.gait = Some((Gait::Walk, phase));
+		state.gait = Some((Gait::Walk, time * rate));
 		let x = STOP_X - (STOP_AT - time) * walk_speed() * SCALE;
-		return (pose, x);
+		return (state, x);
 	}
 
 	// Settle: blend the last stride into the standing pose instead of snapping.
-	let (walking, swing) = LIMBS.cycle(Gait::Walk, STOP_AT * Gait::Walk.rate(), 1.0, stand);
+	let stand = state.legs;
+	let (walking, swing) = frame.limbs().cycle(Gait::Walk, STOP_AT * rate, 1.0, stand);
 	let settle = ease(time, STOP_AT, STOP_AT + 0.35);
-	pose.legs = Legs {
+	state.legs = Legs {
 		feet: (
 			walking.feet.0.lerp(stand.feet.0, settle),
 			walking.feet.1.lerp(stand.feet.1, settle),
@@ -96,36 +97,35 @@ fn performance(time: f32) -> (Pose, f32) {
 		crouch: lerp(walking.crouch, stand.crouch, settle) + (settle * PI).sin() * 0.05,
 		bend: lerp(walking.bend, stand.bend, settle),
 	};
-	pose.hands = (
-		pose.hands.0 + swing.0 * (1.0 - settle),
-		pose.hands.1 + swing.1 * (1.0 - settle),
-	);
 
-	// Turn to the camera, then wave.
+	// Turn to the camera, then wave and say hello.
 	let turn = ease(time, 3.25, 3.75);
 	let raise = ease(time, 3.55, 4.05);
-	let front = Pose::new(Mood::Happy, Arms::Relaxed, 0.15);
-	let mut posed = pose.blend(&front, turn);
-	posed.legs = pose.legs;
-	posed.legs.feet.0 = pose
-		.legs
-		.feet
-		.0
-		.lerp(stinky::stance(Stance::Stand, 0.15).feet.0, turn);
-	posed.legs.feet.1 = pose
-		.legs
-		.feet
-		.1
-		.lerp(stinky::stance(Stance::Stand, 0.15).feet.1, turn);
-	let waving = posed.clone().with_arms(Arms::Wave);
-	let mut posed = posed.blend(&waving, raise);
-	posed.wrists.0 += (time * 2.6 * 2.0 * PI).sin() * 22.0 * ease(time, 4.0, 4.2);
-	posed.hands.0 = posed.hands.0 + pt((time * 2.6 * 2.0 * PI).cos() * 6.0, 0.0) * raise;
-	posed.head_tilt = 2.0 + (time * 3.0).sin() * 2.0 * raise;
-	posed.gaze = pt(0.05, 0.0).lerp(pt(0.5, 0.0), 1.0 - turn);
-	posed.viseme = mouth(time);
+	state.facing = lerp(THREE_QUARTER, 0.05, turn);
+	let idle = frame.hands(Pose::Idle, state.facing);
+	let idle = (
+		idle.0 + swing.0 * (1.0 - settle),
+		idle.1 + swing.1 * (1.0 - settle),
+	);
+	let wave = frame.hands(Pose::Wave, state.facing);
+	let wiggle = pt(
+		(time * 2.6 * 2.0 * PI).cos() * 12.0,
+		(time * 5.2 * PI).sin() * 4.0,
+	) * ease(time, 4.0, 4.2);
+	state.hands = (
+		idle.0.lerp(wave.0, raise),
+		idle.1.lerp(wave.1, raise) + wiggle,
+	);
 
-	(posed, STOP_X)
+	if raise > 0.5 {
+		state.hand_shapes = Pose::Wave.hand_shapes();
+	}
+
+	state.head_tilt = 2.0 + (time * 3.0).sin() * 2.0 * raise;
+	state.gaze = lerp(0.5, 0.0, turn);
+	state.viseme = mouth(time);
+
+	(state, STOP_X)
 }
 
 fn blink(time: f32) -> f32 {
@@ -136,14 +136,13 @@ fn blink(time: f32) -> f32 {
 }
 
 fn frame(time: f32, width: u32, height: u32) -> String {
-	let (mut pose, x) = performance(time);
-	pose.blink = blink(time);
+	let (mut state, x) = performance(time);
+	state.blink = blink(time);
 	let mut c = Svg::new();
 	park::draw(&mut c);
 	park::wormsley(&mut c, pt(2010.0, 1730.0), 1.0);
 	c.begin(&format!("translate({x:.1} {GROUND:.1}) scale({SCALE})"));
-	stinky::draw_shadow(&mut c, &pose, 0.0);
-	stinky::draw(&mut c, &pose);
+	stinky::draw(&mut c, &state);
 	c.end();
 	park::draw_front(&mut c);
 	// The 16:9 window onto the square stage, sitting low so the ground plane fills it.

@@ -7,6 +7,8 @@ use anyhow::Result;
 use fables::art::Color;
 use fables::art::Path as Curve;
 use fables::art::Svg;
+use fables::art::figure::Mood;
+use fables::art::figure::Pose;
 use fables::art::pt;
 use fables::art::seed_of;
 use fables::text;
@@ -17,14 +19,13 @@ use fables::text::Ink;
 use crate::park;
 use crate::sheets::save;
 use crate::stinky;
-use crate::stinky::Arms;
-use crate::stinky::Mood;
-use crate::stinky::Pose;
+use crate::stinky::THREE_QUARTER;
 
 /// The book's safe margin and body size, matching `fables::book`.
 const SAFE: f32 = park::SIZE * 0.375 / 8.5;
 const BODY_SIZE: f32 = 116.0;
 const PAPER: Color = Color(0xFF_F4_E2);
+const INK: Color = Color(0x2B_1D_2E);
 
 /// The setting with nobody in it (Wormsley excepted; he is always there).
 pub fn park_plate(out: &Path) -> Result<PathBuf> {
@@ -42,9 +43,8 @@ pub fn book_page(out: &Path) -> Result<PathBuf> {
 	park::draw(&mut c);
 	park::wormsley(&mut c, pt(2010.0, 1730.0), 1.0);
 
-	let pose = Pose::new(Mood::Happy, Arms::Wave, 1.0);
+	let pose = stinky::posed(Mood::Happy, Pose::Wave, THREE_QUARTER);
 	c.begin("translate(1180 2140) scale(2.3)");
-	stinky::draw_shadow(&mut c, &pose, 0.0);
 	stinky::draw(&mut c, &pose);
 	c.end();
 	park::draw_front(&mut c);
@@ -80,9 +80,9 @@ pub fn book_page(out: &Path) -> Result<PathBuf> {
 	);
 	// The card lifts off the page with a soft shadow rather than a heavy outline.
 	c.begin("translate(10 14)");
-	c.fill_alpha(&card, stinky::colors::INK, 0.12);
+	c.fill_alpha(&card, INK, 0.12);
 	c.end();
-	c.brushed(&card, PAPER, stinky::colors::INK, 5.0);
+	c.brushed(&card, PAPER, INK, 5.0);
 	c.raw(&text::svg(&block, Ink::default()));
 
 	let svg = c.finish((0.0, 0.0, park::SIZE, park::SIZE), 1800, 1800);

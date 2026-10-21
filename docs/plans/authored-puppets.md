@@ -79,13 +79,13 @@ In `cast.toml`, a member gains `puppet = "puppets/stinky.svg"`. Members without 
 | --- | --- |
 | `facing` (-1..1, staged at ±0.35 by default) | `turn = (facing / 0.35).clamp(-1, 1)`: the default is a full three-quarter view towards the middle, and `facing=0` is front-on. |
 | `mood` (15) | Face presets for brows, lids, mouth, mouth curl and extras. Four are done. The other eleven: **laugh** (eyes shut in arcs, wide mouth); **sad** (inner brows up, lids half down, a small down-curve); **grumpy** (flat lids, a pout); **cross** (brows down hard, teeth clenched); **shocked** (lids wide, tiny pupils, round mouth); **fainted** (crossed-out eyes, tongue out); **dizzy** (spiral pupils, a wobbly mouth); **sleepy** (lids at 0.8, a small round mouth); **dreamy** (lids half closed, gaze up, a soft smile); **worried** (brows up in the middle, teeth showing); **proud** (eyes shut and smiling, chin up). |
-| `hands`, `hand_shapes` (15 poses) | Five arm sets are done. The poses keep their anchor-based reaches; the anchors (shoulder, chest, hip, nose, mouth) are measured from each character's file instead of `Frame::of(build)`. A **point** hand drawing is needed. |
+| `hands`, `hand_shapes` (15 poses) | Done in layer 4. The poses keep their anchor-based reaches. An authored frame measures reaches in separate across and up units, (50, 80), because its arms are shorter and its body narrower than the parametric puppet's. Two staging rules keep hands readable: a raised hand that would overlap the head moves out past it, and in three-quarter view a far hand waving across the face is handed to the near hand. An open hand hanging at the side is drawn relaxed. The kit has a **point** hand. |
 | `mouth_open`, `viseme` | Visemes are done. `mouth_open` without a viseme (shouting, mouth-open stills) picks `Open` or `Wide` and scales them by the amount. |
 | `gaze`, `blink`, `brow_lift`, `head_tilt`, `tilt` | Done, or a direct carry-over. `brow_lift` adds to both brows' raise. |
 | `legs`, `gait`, `lie`, `squash` | `legs` and `gait` are done. `lie` and `squash` are whole-puppet transforms, as now. |
 | `sway` | Follow-through: hair parts (tuft, pigtails, bun) rotate about their roots by `sway`. |
 | `teeth` | Teeth only show where the shape draws them. **Grotty** recolours the band (`GROT`) and adds a gap and a green edge. **Sparkly** adds a glint and the `fx::sparkle`. |
-| `prop` | Jam jar, toothbrush and parcel are redrawn as parts held in the fist's frame. |
+| `prop` | Layer 4 hangs the parametric puppet's props on the authored hand. Layer 5 redraws the jam jar, toothbrush and parcel as parts held in the fist's frame. |
 | extras (glasses, moustache, apron, post-cap, satchel, bow, muddy hands, bogey, lashes) | Each becomes a part in that character's own file. Face parts (glasses, moustache, bogey, lashes) are wrapped by the face warp; the rest ride on the torso or head. The `extras` list in `cast.toml` goes away for migrated members. |
 
 `Frame::of(build)` is called 17 times: 11 of them in `compose`, `video::frames`, `video::motion` and `press::sheets`, mostly for the head and mouth positions. It becomes `look.frame()`, which reads the measurements from the puppet file. This is mechanical, and it lands early, as its own PR.
@@ -124,7 +124,7 @@ One `gh stack`, so each layer is reviewable on its own. Every PR that changes ho
 | 1 | `refactor(art): shapes and the inked finish` | Moves `Shape` (parse, blend, map, blob, taper) and the thick-and-thin line and multiplied shadow into `src/art/`. No visual change. | ~400 lines |
 | 2 | `refactor: measure figures per look` | `Frame::of(build)` becomes `look.frame()` at all 17 call sites. No visual change. | ~150 lines |
 | 3 | `feat(art): puppet part files` | The part-file loader, the part list and check, and blend-or-swap. Adds `fables puppet check`, `template` and `sheet` (the parts sheet). `world/puppets/kit.svg` and `stinky.svg` are generated once from the experiment's strings, and the experiment then draws from them. | ~1,100 lines |
-| 4 | `feat(art): authored puppet` | `art::puppet` with the shared kit, the `FigureState` mapping, all 15 moods, the point hand, and `puppet =` in `cast.toml`. Stinky switches over; the rest stay on `figure.rs`. | ~1,500 lines; split moods into their own PR if review drags |
+| 4 | `feat(art): authored puppet` | `art::puppet` with the shared kit, the `FigureState` mapping, all 15 moods, the point hand and grotty or sparkly teeth. `figure::draw`, `shadow` and `draw_skeleton` hand authored characters to it, so the books, `fables sheets --moods` and `fables rig` draw Stinky from his part file; the rest stay on `figure.rs`. The experiment poses him through the library. | ~1,500 lines |
 | 5 | `feat(art): props, teeth and extras` | Jam, toothbrush and parcel; grotty and sparkly teeth; hair follow-through; extras as parts. *Stinky McStinkbreath* renders fully in the new look. | ~600 lines |
 | 6 | `feat(world): Bogey and Grubby` | Two kids, each with a signed-off model sheet. | ~1 session each |
 | 7 | `feat(world): Shouty and Fibby` | Two kids. | ~1 session each |
@@ -149,6 +149,9 @@ PRs 6 to 8 depend only on PR 5 and can be designed in parallel, one session per 
 - Keep an eye on video render time per frame. The new puppet draws more shapes (clips and multiplied shadows). The experiment's clip (210 frames at 1280×720, with one puppet and the park) took about 50 ms of CPU per frame, or 2.5 s on this machine with every core busy. Scenes with four or five puppets at 1080p will cost several times that, so measure before and after PR 4.
 
 ## Known rough edges to fix during the rollout
+
+- Until layers 6 to 11 land, Stinky's finish sits beside the flat parametric cast and settings in the book.
+- `mouth_size` and the shape fields (`head`, `body`, `nose`, `hair`) in `cast.toml` are ignored for authored puppets; layer 12 removes them.
 
 - Hands and shoes pop when they swap drawings at the half-way point of a turn. Either add a mid-turn drawing or time the swap to the fastest frame of the turn.
 - Turning to the page left mirrors the whole puppet, so asymmetric hair (Stinky's wave) flips. Any character whose asymmetry matters needs left-facing drawings.
