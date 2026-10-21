@@ -97,6 +97,11 @@ pub const MAW: Color = Color(0x6B_1E_3C);
 /// Teeth that have not met a brush in weeks.
 pub const GROT: Color = Color(0xC9_C2_5A);
 
+/// The shadow tone of the brushed finish, multiplied over local colour. A cool lilac keeps
+/// shadows on every colour in one family, instead of each part getting a muddy darker version
+/// of itself.
+pub const CEL_SHADOW: Color = Color(0xD4_BE_D8);
+
 /// Every palette colour a cast or story file may name.
 pub const NAMED: &[(&str, Color)] = &[
 	("paper", PAPER),

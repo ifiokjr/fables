@@ -12,6 +12,7 @@ pub mod fx;
 pub mod palette;
 pub mod rig;
 pub mod settings;
+pub mod shape;
 pub mod style;
 
 use std::fmt::Write as _;
@@ -20,6 +21,7 @@ use std::ops::Mul;
 use std::ops::Sub;
 
 pub use palette::Color;
+use shape::Shape;
 use style::Shading;
 use style::Style;
 use style::Texture;
@@ -523,6 +525,89 @@ impl Svg {
 		self.sketchy(path, ink, weight, 1.0);
 	}
 
+	/// Opens a `<g>` clipped to `path`; pair with [`Svg::end`].
+	pub fn begin_clip(&mut self, path: &Path) {
+		let id = self.next_id("clip");
+		let _ = write!(
+			self.defs,
+			r#"<clipPath id="{id}"><path d="{}"/></clipPath>"#,
+			path.as_str()
+		);
+		let _ = write!(self.body, r#"<g clip-path="url(#{id})">"#);
+	}
+
+	/// A fill painted with a gradient or pattern from the document's defs, by id.
+	pub fn fill_paint(&mut self, path: &Path, paint: &str) {
+		let _ = write!(
+			self.body,
+			r#"<path d="{}" fill="url(#{paint})"/>"#,
+			path.as_str()
+		);
+	}
+
+	/// The brushed finish, step one: the part's fill over the heavy pass of its line. The heavy
+	/// pass sits a little down and to the right, so once [`Svg::brush_line`] is drawn on top
+	/// the edge swells on the shadow side like a brush line. Unlike [`Svg::inked`], the brushed
+	/// finish ignores the style: it is the authored-puppet look.
+	pub fn brush_fill(&mut self, path: &Path, fill: Color, line: Color, weight: f32) {
+		self.begin(&format!(
+			"translate({:.2} {:.2})",
+			weight * 0.3,
+			weight * 0.45
+		));
+		self.plain_stroke(path, line, weight * 1.3, 1.0);
+		self.end();
+		self.fill(path, fill);
+	}
+
+	/// The brushed finish, last step: the line on top.
+	pub fn brush_line(&mut self, path: &Path, line: Color, weight: f32) {
+		self.plain_stroke(path, line, weight, 1.0);
+	}
+
+	/// One tone of cel shadow, multiplied over whatever is already painted inside `shape`
+	/// (stripes included). The lit area is the shape itself moved towards the light, so the
+	/// shadow hugs the far edge and follows the part's own curvature.
+	pub fn cel_shade(&mut self, shape: &Shape, light: Pt) {
+		let path = shape.path();
+		let lit = Path::new().append(&path).append(&shape.shift(light).path());
+		let id = self.next_id("cel");
+		let _ = write!(
+			self.defs,
+			r#"<clipPath id="{id}"><path d="{}"/></clipPath>"#,
+			path.as_str()
+		);
+		// Clip and blend sit on one group: a clip on a parent group would isolate it, leaving
+		// the multiply nothing underneath to darken.
+		let _ = write!(
+			self.body,
+			r#"<g clip-path="url(#{id})" style="mix-blend-mode:multiply"><path d="{}" fill="{}" fill-rule="evenodd"/></g>"#,
+			lit.as_str(),
+			palette::CEL_SHADOW
+		);
+	}
+
+	/// A part in the brushed finish with no shading.
+	pub fn brushed(&mut self, path: &Path, fill: Color, line: Color, weight: f32) {
+		self.brush_fill(path, fill, line, weight);
+		self.brush_line(path, line, weight);
+	}
+
+	/// A part in the brushed finish with one tone of shadow away from `light`.
+	pub fn brushed_shaded(
+		&mut self,
+		shape: &Shape,
+		fill: Color,
+		light: Pt,
+		line: Color,
+		weight: f32,
+	) {
+		let path = shape.path();
+		self.brush_fill(&path, fill, line, weight);
+		self.cel_shade(shape, light);
+		self.brush_line(&path, line, weight);
+	}
+
 	/// A filled shape with an outline: the basic stroke of every illustration.
 	pub fn inked(&mut self, path: &Path, fill: Color) {
 		let line = self.line;
@@ -788,6 +873,30 @@ mod tests {
 				.as_str()
 				.ends_with('Z')
 		);
+	}
+
+	#[test]
+	fn the_brushed_finish_shades_the_far_side_whatever_the_style() {
+		let square = Shape::parse(
+			"M10 10 C40 10 70 10 90 10 C90 40 90 70 90 90 C70 90 40 90 10 90 C10 70 10 40 10 10 Z",
+		);
+		// The tv style draws no outlines; the brushed finish draws its own line regardless.
+		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
+		svg.fill(&Path::rect(0.0, 0.0, 100.0, 100.0), Color(0xFF_FF_FF));
+		svg.brushed_shaded(
+			&square,
+			Color(0xFF_FF_FF),
+			pt(-20.0, -20.0),
+			palette::INK,
+			4.0,
+		);
+		let pixmap =
+			crate::raster::render(&svg.finish((0.0, 0.0, 100.0, 100.0), 100, 100)).unwrap();
+		let at = |x: u32, y: u32| pixmap.pixel(x, y).unwrap();
+
+		assert_eq!(at(30, 30).red(), 255, "the lit side keeps its colour");
+		assert!(at(80, 80).red() < 240, "the far side is shaded");
+		assert!(at(10, 50).red() < 100, "the line is drawn");
 	}
 
 	#[test]
