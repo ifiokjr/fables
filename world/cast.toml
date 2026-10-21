@@ -1,0 +1,251 @@
+# The folk of Kerfuffle.
+#
+# Every table is one character. The id (the table name) is what scripts use after `@`, e.g.
+# `@stinky wave`. Add `.something` to the id in a script for extra copies of the same
+# character (`@stinky.monday`), which is handy for "before and after" pages.
+#
+# People (kind = "kid" or "grown-up") are built from puppet parts:
+#   skin, hair-colour, top, trim, bottom, shoes   palette names (see world/kerfuffle.md) or "#rrggbb"
+#   hair      bald | tuft | bun | curls | pigtails | bob | spikes | puff | fringe
+#   pattern   plain | stripes | dots | star       (on the top, drawn in the trim colour)
+#   legwear   shorts | trousers | skirt
+#   extras    freckles, glasses, moustache, apron, post-cap, satchel, bow, muddy-hands, bogey, lashes
+#   mouth     mouth width (1.0 is normal)
+#   head      round | egg | wide          (silhouette of the head)
+#   body      bell | bean | pear | round  (silhouette of the body)
+#   nose      button | round | long | none
+#   eyes      iris colour (palette name)
+#
+# Animals and things: kind = "dog" | "bird" | "worm" | "flower" | "tree" | "toothbrush", with
+# `colour`. Scripts can also use generic `@bird.a`, `@flower.b` and so on without a table here.
+#
+# `habit` marks a character as the star of their own tale; they appear on the
+# "Have you met the rest of Kerfuffle?" page at the back of other books.
+#
+# `[id.voice]` is the character's own voice for dialogue (used when a script sets
+# `[video] cast-voices = true`). The drafts below use offline macOS voices. For production, swap
+# in a real voice and keep it for the character's whole life, e.g.
+#
+#   [stinky.voice]
+#   provider = "elevenlabs"        # needs ELEVENLABS_API_KEY; exact lip-sync timings
+#   id = "<voice id from your ElevenLabs voice library>"
+#   model = "eleven_v4"
+#
+#   [stinky.voice]
+#   provider = "openai"            # needs OPENAI_API_KEY
+#   name = "ash"                   # a built-in OpenAI voice
+#   style = "A cheeky, bouncy six-year-old boy with a big voice and a British accent."
+#
+# `style` is acting direction; each line adds the character's mood ("defiantly", "sadly").
+
+[stinky]
+name = "Stinky McStinkbreath"
+born = "Stanley"
+about = "Loves jam, bouncing on beds, and the word NOPE. Has never met a toothbrush he liked."
+habit = "Won't brush his teeth, so his breath knocks out anything that hears him say hello."
+skin = "tangerine"
+hair = "tuft"
+hair-colour = "plum"
+top = "teal"
+pattern = "stripes"
+trim = "cream"
+legwear = "shorts"
+bottom = "mustard"
+shoes = "ink"
+extras = ["freckles"]
+mouth = 1.35
+head = "round"
+body = "bean"
+nose = "button"
+eyes = "cocoa"
+
+[stinky.voice]
+name = "Junior"
+rate = 185
+style = "A cheeky, bouncy six-year-old boy with a big voice and a British accent."
+
+[mum]
+name = "Mum"
+about = "Stanley's mum. Asks nicely three times, then uses his whole name."
+kind = "grown-up"
+skin = "bubblegum"
+hair = "bun"
+hair-colour = "night"
+top = "sunflower"
+pattern = "dots"
+trim = "white"
+legwear = "trousers"
+bottom = "grape"
+shoes = "tomato"
+extras = ["glasses", "lashes"]
+head = "egg"
+body = "pear"
+eyes = "grape"
+
+[mum.voice]
+name = "Flo (English (UK))"
+rate = 172
+style = "A warm, brisk British mum who is running out of patience."
+
+[dad]
+name = "Dad"
+about = "Stanley's dad. Hums while he brushes. Has the shiniest head in Kerfuffle."
+kind = "grown-up"
+skin = "cornflower"
+hair = "bald"
+hair-colour = "cocoa"
+top = "tomato"
+pattern = "stripes"
+trim = "cream"
+legwear = "trousers"
+bottom = "night"
+shoes = "cocoa"
+extras = ["moustache"]
+head = "wide"
+body = "round"
+nose = "round"
+eyes = "night"
+
+[dad.voice]
+name = "Reed (English (UK))"
+rate = 160
+style = "A cheerful, rumbly British dad who hums between sentences."
+
+[parcel]
+name = "Parcel McParcelface"
+about = "Kerfuffle's postie. Delivers everything, even things nobody ordered."
+kind = "grown-up"
+skin = "lilac"
+hair = "curls"
+hair-colour = "cocoa"
+top = "cornflower"
+trim = "tomato"
+legwear = "trousers"
+bottom = "night"
+shoes = "ink"
+extras = ["post-cap", "satchel"]
+head = "egg"
+body = "bean"
+nose = "long"
+eyes = "teal"
+
+[parcel.voice]
+name = "Rocko (English (UK))"
+rate = 170
+style = "A jolly British postie, always slightly out of breath."
+
+[bogey]
+name = "Bogey McBogeyface"
+born = "Bonnie"
+about = "Picks her nose, and wipes what she finds on whatever is nearest."
+habit = "Picks her nose, so a little green drip follows her everywhere."
+skin = "sunflower"
+hair = "pigtails"
+hair-colour = "cocoa"
+top = "bubblegum"
+pattern = "dots"
+trim = "white"
+legwear = "skirt"
+bottom = "teal"
+shoes = "grape"
+extras = ["bogey", "bow", "lashes"]
+head = "round"
+body = "pear"
+eyes = "leaf"
+
+[bogey.voice]
+name = "Sandy (English (UK))"
+rate = 182
+style = "A giggly, gleeful seven-year-old girl."
+
+[grubby]
+name = "Grubby McGrubhands"
+born = "Gus"
+about = "Never washes his hands. Everything he touches goes brown and gloopy."
+habit = "Never washes his hands, so everything he touches turns to mud."
+skin = "teal"
+hair = "curls"
+hair-colour = "sunflower"
+top = "tomato"
+pattern = "star"
+trim = "sunflower"
+legwear = "trousers"
+bottom = "night"
+shoes = "cocoa"
+extras = ["muddy-hands"]
+head = "wide"
+body = "round"
+nose = "round"
+eyes = "cocoa"
+
+[grubby.voice]
+name = "Eddy (English (UK))"
+rate = 178
+style = "A friendly, slightly mumbly six-year-old boy."
+
+[shouty]
+name = "Shouty McShoutface"
+born = "Sasha"
+about = "Has no indoor voice. When she talks, windows rattle and hats blow off."
+habit = "Has no indoor voice, so the whole town rattles when she talks."
+skin = "tomato"
+hair = "spikes"
+hair-colour = "night"
+top = "sunflower"
+pattern = "stripes"
+trim = "tangerine"
+legwear = "shorts"
+bottom = "cornflower"
+shoes = "ink"
+mouth = 1.2
+extras = ["lashes"]
+head = "egg"
+body = "bell"
+eyes = "cornflower"
+
+[shouty.voice]
+name = "Shelley (English (UK))"
+rate = 188
+style = "A seven-year-old girl who only has one volume: LOUD."
+
+[fibby]
+name = "Fibby McFibberpants"
+born = "Felix"
+about = "Tells fibs. Big ones. His trousers get warmer with every one."
+habit = "Tells fibs, so his trousers start to smoulder."
+skin = "grape"
+hair = "bob"
+hair-colour = "tangerine"
+top = "mint"
+pattern = "plain"
+trim = "teal"
+legwear = "trousers"
+bottom = "tomato"
+shoes = "ink"
+extras = ["glasses"]
+head = "egg"
+body = "bean"
+nose = "long"
+eyes = "teal"
+
+[fibby.voice]
+name = "Ralph"
+rate = 176
+style = "A fast-talking, too-innocent eight-year-old boy."
+
+[biscuit]
+name = "Biscuit"
+about = "Kerfuffle's sausage dog. Faints at the slightest thing, very dramatically."
+kind = "dog"
+colour = "toffee"
+
+[wormsley]
+name = "Wormsley"
+about = "A worm in a bowler hat. Hides somewhere on every page of every book. Nobody knows why."
+kind = "worm"
+
+[brushy]
+name = "Stanley's toothbrush"
+about = "Has been waiting in its cup, bristles hopeful, for forty-seven days."
+kind = "toothbrush"
+colour = "teal"

@@ -1,0 +1,381 @@
+//! Reference sheets: every cast member with their name and habit, every mood of one character,
+//! and every setting. They are the model sheets an illustrator would pin above the desk, kept
+//! in sync with the cast file automatically.
+
+use anyhow::Result;
+use resvg::tiny_skia::Pixmap;
+
+use crate::art::Path;
+use crate::art::STAGE;
+use crate::art::Svg;
+use crate::art::critters::CritterState;
+use crate::art::figure;
+use crate::art::figure::FigureState;
+use crate::art::figure::Frame;
+use crate::art::figure::Mood;
+use crate::art::figure::Pose;
+use crate::art::palette;
+use crate::art::pt;
+use crate::art::settings;
+use crate::art::settings::Setting;
+use crate::art::settings::Weather;
+use crate::art::style::Style;
+use crate::cast::Cast;
+use crate::cast::Kind;
+use crate::cast::Member;
+use crate::compose;
+use crate::compose::Body;
+use crate::compose::Puppet;
+use crate::raster;
+use crate::text;
+use crate::text::Anchor;
+use crate::text::Area;
+use crate::text::Ink;
+
+const CARD_W: f32 = 900.0;
+const CARD_H: f32 = 1300.0;
+const COLUMNS: usize = 4;
+
+/// Every cast member on a card with their name, birth name and habit.
+pub fn cast_sheet(cast: &Cast, style: Style) -> Result<Pixmap> {
+	let members: Vec<&Member> = cast.members.values().collect();
+	let rows = members.len().div_ceil(COLUMNS);
+	let width = CARD_W * COLUMNS as f32;
+	let height = CARD_H * rows as f32 + 260.0;
+	let mut svg = Svg::styled(style);
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::INK);
+
+	let heading = text::layout(
+		&["**The folk of Kerfuffle**"],
+		Area {
+			x: 0.0,
+			y: 50.0,
+			w: width,
+			h: 180.0,
+		},
+		110.0,
+		Anchor::Top,
+	);
+	svg.raw(&text::svg(
+		&heading,
+		Ink {
+			body: palette::PAPER,
+			shout: palette::SUNFLOWER,
+		},
+	));
+
+	for (index, member) in members.iter().enumerate() {
+		let x = (index % COLUMNS) as f32 * CARD_W;
+		let y = 260.0 + (index / COLUMNS) as f32 * CARD_H;
+		svg.begin(&format!("translate({x} {y})"));
+		card(&mut svg, member, index);
+		svg.end();
+	}
+
+	let doc = svg.finish(
+		(0.0, 0.0, width, height),
+		(width / 2.0) as u32,
+		(height / 2.0) as u32,
+	);
+	let mut pixmap = raster::render(&doc)?;
+	raster::finish(&mut pixmap, &style, 0.05, 0);
+
+	Ok(pixmap)
+}
+
+/// The colour a character mostly reads as (skin for people).
+fn main_colour(member: &Member) -> crate::art::Color {
+	match &member.kind {
+		Kind::Figure(look) => look.skin,
+		Kind::Bird(color)
+		| Kind::Dog(color)
+		| Kind::Tree(color)
+		| Kind::Toothbrush(color)
+		| Kind::Flower(_, color) => *color,
+		Kind::Worm => palette::FLAMINGO,
+	}
+}
+
+/// The backdrop that stands furthest from `colour`, so nobody disappears into their card.
+fn contrasting(tints: &[crate::art::Color], colour: crate::art::Color) -> crate::art::Color {
+	let distance = |a: crate::art::Color| {
+		let (r1, g1, b1) = a.rgb();
+		let (r2, g2, b2) = colour.rgb();
+		let d = |x: u8, y: u8| (i32::from(x) - i32::from(y)).pow(2);
+		d(r1, r2) + d(g1, g2) + d(b1, b2)
+	};
+
+	tints
+		.iter()
+		.copied()
+		.max_by_key(|tint| distance(*tint))
+		.unwrap_or(palette::MINT)
+}
+
+fn card(svg: &mut Svg, member: &Member, index: usize) {
+	let tints = [
+		palette::MINT,
+		palette::SUNFLOWER,
+		palette::LILAC,
+		palette::SKY,
+		palette::FLAMINGO,
+		palette::MEADOW,
+	];
+	let inner = Path::wobbly_poly(
+		&[
+			pt(30.0, 30.0),
+			pt(CARD_W - 30.0, 30.0),
+			pt(CARD_W - 30.0, CARD_H - 30.0),
+			pt(30.0, CARD_H - 30.0),
+		],
+		40.0,
+		4.0,
+		index as u64,
+	);
+	svg.inked(&inner, palette::PAPER);
+	let blob = Path::wobbly_ellipse(
+		pt(CARD_W / 2.0, 820.0),
+		330.0,
+		300.0,
+		0.06,
+		index as u64 + 50,
+	);
+	svg.fill(&blob, contrasting(&tints, main_colour(member)));
+
+	let ground = 1150.0;
+	let mut puppet = sheet_puppet(member, pt(CARD_W / 2.0, ground));
+
+	if let Body::Figure(state) = &mut puppet.body {
+		state.mood = Mood::Grin;
+	}
+
+	svg.begin_layer();
+	compose::draw_puppet(svg, &puppet);
+	svg.end();
+
+	let mut lines = vec![format!("**{}**", member.name)];
+
+	if let Some(born) = &member.born {
+		lines.push(format!("*Born {born}*"));
+	}
+
+	if let Some(about) = &member.about {
+		lines.push(about.clone());
+	}
+
+	let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+	let block = text::layout(
+		&refs,
+		Area {
+			x: 70.0,
+			y: 70.0,
+			w: CARD_W - 140.0,
+			h: 430.0,
+		},
+		40.0,
+		Anchor::Top,
+	);
+	svg.raw(&text::svg(&block, Ink::default()));
+}
+
+/// A puppet sized to fit a sheet card, standing at `at`.
+fn sheet_puppet(member: &Member, at: crate::art::Pt) -> Puppet {
+	let (body, scale, lift) = match &member.kind {
+		Kind::Figure(look) => {
+			let frame = Frame::of(look.build);
+			let mut state = FigureState::new(look.build);
+			state.hands = frame.hands(Pose::Wave, 0.2);
+			state.facing = 0.2;
+			(Body::Figure(state), 600.0 / frame.height(), 0.0)
+		}
+		Kind::Bird(_) => (Body::Critter(CritterState::default()), 2.4, 140.0),
+		Kind::Dog(_) => {
+			(
+				Body::Critter(CritterState {
+					lively: 1.0,
+					..CritterState::default()
+				}),
+				1.5,
+				0.0,
+			)
+		}
+		Kind::Worm => (Body::Critter(CritterState::default()), 3.0, 0.0),
+		Kind::Toothbrush(_) => (Body::Critter(CritterState::default()), 0.9, 0.0),
+		Kind::Flower(..) | Kind::Tree(_) => (Body::Critter(CritterState::default()), 0.6, 0.0),
+	};
+
+	Puppet {
+		id: member.id.clone(),
+		kind: member.kind.clone(),
+		at: at - pt(0.0, lift),
+		scale,
+		z: 0,
+		opacity: 1.0,
+		body,
+		stink: 0.0,
+		mint: 0.0,
+		heading: 1.0,
+		breath: 0.0,
+		lift: 0.0,
+	}
+}
+
+/// One character in every mood, for checking expressions stay on-model.
+pub fn mood_sheet(member: &Member, style: Style) -> Result<Option<Pixmap>> {
+	let Kind::Figure(look) = &member.kind else {
+		return Ok(None);
+	};
+
+	let frame = Frame::of(look.build);
+	let cell = 700.0;
+	let columns = 5;
+	let rows = Mood::ALL.len().div_ceil(columns);
+	let width = cell * columns as f32;
+	let height = cell * 1.25 * rows as f32;
+	let mut svg = Svg::styled(style);
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::PAPER);
+
+	for (index, (name, mood)) in Mood::ALL.iter().enumerate() {
+		let x = (index % columns) as f32 * cell + cell / 2.0;
+		let y = (index / columns) as f32 * cell * 1.25;
+		let mut state = FigureState::new(look.build);
+		state.mood = *mood;
+		state.hands = frame.hands(Pose::Idle, 0.0);
+
+		let shift = if *mood == Mood::Fainted {
+			state.lie = 1.0;
+			cell * 0.3
+		} else {
+			0.0
+		};
+
+		svg.begin(&format!(
+			"translate({} {}) scale({:.3})",
+			x + shift,
+			y + cell * 1.0,
+			560.0 / frame.height()
+		));
+		figure::draw(&mut svg, look, &state);
+		svg.end();
+
+		let label = text::layout(
+			&[name],
+			Area {
+				x: x - cell / 2.0,
+				y: y + cell * 1.05,
+				w: cell,
+				h: 90.0,
+			},
+			54.0,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(&label, Ink::default()));
+	}
+
+	let doc = svg.finish(
+		(0.0, 0.0, width, height),
+		(width / 2.0) as u32,
+		(height / 2.0) as u32,
+	);
+
+	let mut pixmap = raster::render(&doc)?;
+	raster::finish(&mut pixmap, &style, 0.05, 0);
+
+	Ok(Some(pixmap))
+}
+
+/// Every setting, by day and with wilted plants, labelled with its script name.
+pub fn places_sheet(style: Style) -> Result<Pixmap> {
+	let cell = 600.0;
+	let columns = 4;
+	let mut list: Vec<(&str, Weather)> = Vec::new();
+
+	for (name, _) in Setting::ALL {
+		list.push((name, Weather::default()));
+	}
+
+	list.push((
+		"bedroom night",
+		Weather {
+			night: true,
+			..Weather::default()
+		},
+	));
+	list.push((
+		"garden wilt=1",
+		Weather {
+			wilt: 1.0,
+			..Weather::default()
+		},
+	));
+	list.push((
+		"park stink=1",
+		Weather {
+			stink: 1.0,
+			..Weather::default()
+		},
+	));
+	list.push((
+		"park mint=1",
+		Weather {
+			mint: 1.0,
+			..Weather::default()
+		},
+	));
+
+	let rows = list.len().div_ceil(columns);
+	let width = cell * columns as f32;
+	let height = (cell + 90.0) * rows as f32;
+	let mut svg = Svg::styled(style);
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::INK);
+
+	for (index, (label, weather)) in list.iter().enumerate() {
+		let name = label.split_whitespace().next().unwrap_or_default();
+		let setting = Setting::parse(name).unwrap_or(Setting::Plain);
+		let x = (index % columns) as f32 * cell;
+		let y = (index / columns) as f32 * (cell + 90.0);
+		let clip = svg.next_id("place");
+		svg.define(&format!(
+			r#"<clipPath id="{clip}"><rect x="0" y="0" width="{STAGE}" height="{STAGE}"/></clipPath>"#
+		));
+		svg.begin(&format!(
+			"translate({} {}) scale({:.4})",
+			x + 10.0,
+			y + 10.0,
+			(cell - 20.0) / STAGE
+		));
+		svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+		svg.begin_layer();
+		settings::backdrop(&mut svg, setting, weather);
+		settings::foreground(&mut svg, setting, weather);
+		svg.end();
+		svg.raw("</g>");
+		svg.end();
+
+		let caption = text::layout(
+			&[label],
+			Area {
+				x,
+				y: y + cell,
+				w: cell,
+				h: 80.0,
+			},
+			40.0,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(
+			&caption,
+			Ink {
+				body: palette::PAPER,
+				shout: palette::SUNFLOWER,
+			},
+		));
+	}
+
+	let doc = svg.finish((0.0, 0.0, width, height), width as u32, height as u32);
+
+	let mut pixmap = raster::render(&doc)?;
+	raster::finish(&mut pixmap, &style, 0.05, 0);
+
+	Ok(pixmap)
+}

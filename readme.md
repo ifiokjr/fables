@@ -1,0 +1,286 @@
+# fables
+
+Write a children's picture book as one plain-text script, and get all of these from it:
+
+- **page proofs** to review;
+- a **fixed-layout ePub** for Kindle and Apple Books;
+- a **KDP paperback** (interior and full-wrap cover PDFs);
+- **narrated, voice-acted videos** for YouTube (16:9) and for Shorts, TikTok and Reels (9:16). The characters do what the narrator says and can speak their own lines in their own voices, lip-synced.
+
+```bash
+cargo run --release -- all stories/stinky-mcstinkbreath/story.md
+```
+
+## Why it works this way
+
+Every character is a **puppet drawn in code**, not a generated picture. That one decision is what makes the rest possible:
+
+- **Characters stay on-model.** Stinky looks the same on page 3, page 23, the cover, the back cover and frame 4,812 of the video. AI image tools still struggle with that.
+- **Stage directions are data.** `@stinky faint` is a still on the printed page and a bouncing pratfall in the video, from the same line of script.
+- **It's free, offline and repeatable.** There are no API keys and no per-image costs, and the same script always gives the same book.
+- **The world grows by editing text.** A new character is a new table in [`world/cast.toml`](world/cast.toml). A new book is a new `story.md`.
+- **It's cut-out animation, the TV technique.** Each character is built once from parts (head shapes, eyes with irises, a 9-shape mouth chart for lip-sync, tapered limbs, hands that point and make fists), the same way Toon Boom Harmony and Moho rigs work. Motion follows the classic principles: anticipation, follow-through, squash and stretch, walk cycles, parallax.
+
+The house style, setting and series rules live in the series bible, [`world/kerfuffle.md`](world/kerfuffle.md). Character voices, voice APIs and turning the books into a show are covered in [`docs/tv-show.md`](docs/tv-show.md).
+
+## Commands
+
+| Command | What it makes |
+| --- | --- |
+| `fables new "<Title>" --star <id>` | A new book in `stories/<title>/story.md`, laid out as the 12-beat Kerfuffle recipe with the star already staged. |
+| `fables check <story>` | Validates the script and reports page and word counts. Errors give line numbers and list valid options. |
+| `fables proofs <story>` | `out/<book>/<style>/proofs/`: one PNG per page plus `contact-sheet.png`, in about a second. |
+| `fables ebook <story>` | `out/<book>/<style>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
+| `fables print <story>` | `out/<book>/<style>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
+| `fables video <story> [--format landscape\|portrait\|both] [--preview]` | `out/<book>/<style>/video/`: MP4s, `soundtrack.wav`, `.srt` captions, a YouTube thumbnail and a 9:16 cover image. `--preview` renders at half size and 15 fps. |
+| `fables book <story>` | Proofs, ePub and print. |
+| `fables all <story>` | Everything. |
+| `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<style>/`: the whole cast, every setting, and one character in every mood. |
+| `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every art style, side by side. |
+| `fables rig <id>` | `out/rig/<style>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character) and a motion-test video. |
+
+Every command that takes `<story>` also takes a folder of books: `fables all stories/` builds every `story.md` under it.
+Every command also takes `--style`, so any render can be in any style without editing the script:
+
+- `--style storybook` draws in one style;
+- `--style bold,tv` draws in each listed style;
+- `--style all` draws in all six.
+
+Without `--style`, a book uses the `style` in its front matter (or `riso`), and sheets and rigs use `riso`. Each style renders to its own folder, `out/<book>/<style>/`, so styles sit side by side and never overwrite each other. The voice cache is shared, so re-rendering a video in another style records nothing new.
+
+Install with `cargo install --path .`, or use `cargo run --release --` in place of `fables`.
+
+### Requirements
+
+- **Rust** (edition 2024).
+- **ffmpeg** with libx264, for video.
+- **A narrator.** macOS `say` by default, or any TTS command (see [Voices](#voices)).
+
+> On macOS, if linking fails with "You have not agreed to the Xcode license agreements", run `sudo xcodebuild -license` once. You can also use the Nix shell from [`devenv.nix`](devenv.nix): `devenv shell`.
+
+## Writing a script
+
+A script is TOML front matter between `+++` lines, then pages. Each page starts with `# setting`. Below the heading, narration paragraphs and `@` stage directions interleave in reading order.
+
+```text
++++
+title = "Stinky McStinkbreath"
+author = "Ifiok Jr."
+star = "stinky"                 # who goes on the cover
+moral = "Brush your teeth, morning and night."
+
+[cover]
+tint = "moss"
+pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
+
+[voice]
+name = "Daniel"
+rate = 158
++++
+
+# bathroom night
+@mum x=0.72 point cross talk
+@stinky x=0.3 arms-crossed defiant
+"Brush your teeth, Stanley!" said Mum.
+@stinky talk
+"**NOPE**," said Stanley.
+```
+
+- **In the book**, each page shows the stage *at the end of the page*. The text sits on a paper card, at the top unless the heading says `text=bottom`.
+- **In the video**, each `@` line takes effect *when the narrator reaches it*. Above, Mum points and talks during the first line; Stanley crosses his arms and his mouth moves during the second.
+
+### Text
+
+| Write | Get |
+| --- | --- |
+| A paragraph | Printed in the book and read in the video. Consecutive lines join into one paragraph; a blank line, `@` line or heading ends it. |
+| `~ A paragraph` | **Book only.** Use it to trim the video (Shorts are limited to 3 minutes). |
+| `> A paragraph` | **Video only.** A summary line for the narrator. |
+| `*word*` | Bold. |
+| `**WORD**` | Shouted: big, red, in the display face. |
+| `// note` | A comment, ignored. |
+
+### Page headings
+
+`# setting option option…`
+
+| Option | Meaning |
+| --- | --- |
+| Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom` or `bedroom`. |
+| `night`, `wilt=1`, `stink=0.5`, `mint=1`, `tint=sunflower` | Starting weather (`tint` colours the `plain` blob). |
+| `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
+| `size=0.9` | Scales the page's text. |
+| `zoom=1.5 look=0.5,0.6` | A close-up on the point (x, y), as fractions of the page. |
+| `video=skip`, `book=skip` | Leave the page out of one format. |
+| `no-wormsley` | Don't hide Wormsley on this page. |
+
+### Stage directions
+
+`@actor word word key=value…`
+
+**Actors** are cast ids from `world/cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page, and `@camera zoom=… look=…` the framing.
+
+| Kind | Values |
+| --- | --- |
+| Moods | `happy` `grin` `laugh` `sad` `grumpy` `cross` `defiant` `shocked` `disgusted` `fainted` `dizzy` `sleepy` `dreamy` `worried` `proud` |
+| Poses | `idle` `wave` `point` `arms-crossed` `hips` `cheer` `hold-nose` `cover-mouth` `brush` `shrug` `droop` `hold` `think` `reach-out` `pick` |
+| Stances (legs and spine) | `stand` `crouch` `sit` `kneel` `jump` `bow` `tiptoe` |
+| Gaits | `walk` `run` (cycles on the spot in video) `still` |
+| Actions | `talk` (mouth moves with the next paragraph) `faint` `wake` `fly` `land` `wag` `calm` `hop` `flip` `hide` `show` `quiet` |
+| Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (for flyers), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
+| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=toothbrush`/`parcel`/`jam`/`nothing`, `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers) |
+| Entrances | `enter=left`/`right`, `exit=left`/`right` (slide on and off in video; just appear or vanish in the book) |
+
+Teeth, stink and mint **carry over from page to page** until changed, so grotty teeth stay grotty. Actors without an `x` are spaced out automatically.
+
+**Timing and sound** (video only):
+
+- `@pause 0.4` adds a beat of silence.
+- `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`.
+- Fainting bonks, hops boing and entrances pop automatically.
+
+### New characters
+
+Add a table to [`world/cast.toml`](world/cast.toml), built from puppet parts, then run `fables sheets` to see them:
+
+```toml
+[grubby]
+name = "Grubby McGrubhands"
+born = "Gus"
+habit = "Never washes his hands, so everything he touches turns to mud."
+skin = "teal"
+hair = "curls"            # bald tuft bun curls pigtails bob spikes puff fringe
+hair-colour = "sunflower"
+top = "tomato"
+pattern = "star"          # plain stripes dots star
+trim = "sunflower"
+legwear = "trousers"      # shorts trousers skirt
+bottom = "night"
+extras = ["muddy-hands"]  # freckles glasses moustache apron post-cap satchel bow muddy-hands bogey lashes
+head = "wide"             # round egg wide
+body = "round"            # bell bean pear round
+nose = "round"            # button round long none
+eyes = "cocoa"            # iris colour
+
+[grubby.voice]            # his own voice for dialogue (see Voices)
+name = "Eddy (English (UK))"
+style = "A friendly, slightly mumbly six-year-old boy."
+```
+
+Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book.
+
+## Art styles and the rig
+
+**Styles are skins.** Choose one per book with `style = "..."` in the front matter, or render in any others with `--style` (one, a comma list, or `all`). `fables styles <story>` draws the same pages in every style so you can compare.
+
+| Style | Look |
+| --- | --- |
+| `riso` (default) | Two-colour riso print: flat inks, a wobbly line, fills off register, dot screens |
+| `tv` | Modern preschool TV: no outlines, clean shapes, soft gradient shading |
+| `bold` | Classic cartoon: heavy outlines, hard cel shadows, glossy highlights |
+| `cut-paper` | Collage: paper fibres, torn edges, each shape casting a shadow |
+| `crayon` | Waxy scribbled colour that strays over the lines |
+| `storybook` | Pencil lines over soft watercolour washes on textured paper |
+
+These are code-drawn looks. For illustrator-quality drawn art, the same rig can take drawn parts instead; see "Drawn art" in [`docs/tv-show.md`](docs/tv-show.md).
+
+**Every character has a full animation rig:**
+
+- A skeleton: pelvis, spine, neck, head, shoulder–elbow–wrist and hip–knee–ankle.
+- Elbows and knees solved by two-bone IK from where the hands and feet should be, the same way Spine, Moho and Harmony rigs work.
+- On top of the skeleton:
+  - **poses** for the arms;
+  - **stances** for the legs and spine;
+  - **gaits** that plant and lift the feet;
+  - a face rig: eyes with lids and irises, brows, a nine-shape mouth chart for lip-sync, and head tilt.
+- In video every move winds up, overshoots and settles.
+
+Run `fables rig <id>` for the rig sheet and motion test.
+
+## Voices
+
+**The narrator** is the script's `[voice]` table. **Each character** can have their own `[id.voice]` table in the cast file. With `[video] cast-voices = true`, quoted dialogue is spoken by the character whose `talk` direction introduced it, in their voice, and the narrator reads the rest:
+
+```text
+@mum point cross talk
+"Brush your teeth, Stanley!" said Mum.     ← Mum's voice, then the narrator's
+```
+
+Add `drop-tags = true` to skip short tags like "said Mum.", which makes the video play like a show.
+
+The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, and `**shouted**` words are shouted. Mouths lip-sync to whoever is speaking, and everyone else looks at them.
+
+| `provider` | Needs | Acting | Lip-sync |
+| --- | --- | --- | --- |
+| `say` (default) | macOS | speaking rate | estimated from the audio |
+| `command` | any TTS program; `{text}`, `{out}`, `{mood}`, `{voice}` placeholders, text on stdin if `{text}` is absent | `{mood}` | estimated from the audio |
+| `elevenlabs` | `id`, optional `model` (default `eleven_v4`), `ELEVENLABS_API_KEY` | `[defiant]`-style audio tags | exact, per letter |
+| `openai` | `name` (a built-in voice), optional `style`, `OPENAI_API_KEY` | `style` plus the mood as an acting instruction | estimated from the audio |
+
+```toml
+[voice]                     # in the script: the narrator
+name = "Daniel"             # any voice from `say -v '?'`; Enhanced and Premium voices sound best
+rate = 158
+
+[stinky.voice]              # in world/cast.toml: Stinky, in every book
+provider = "elevenlabs"
+id = "<voice id>"
+```
+
+Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Resolve keys with Monosecret once per batch: `msr --reason "voice the books" fables all stories/`.
+
+Sourcing voices, provider prices and policies, local models, human actors and keeping characters consistent are all in [`docs/tv-show.md`](docs/tv-show.md).
+
+## Publishing checklists
+
+**KDP paperback.** `print/kdp-setup.txt` has the numbers.
+
+- Trim 8.5" × 8.5", bleed on, premium colour (the only colour option under 72 pages). The book is padded to an even page count of at least 24.
+- Upload `*-interior.pdf` and `*-cover.pdf`.
+- Interior pages are 8.625" × 8.75", with bleed only on the outer edge and trim boxes set. Text stays 0.375" inside the trim.
+- The cover's spine is 0.002347" per page and has no text (KDP only allows spine text from 79 pages). KDP's barcode area, at the lower right of the back cover, is kept clear.
+- Art is 300 DPI RGB. **Order a printed proof** before publishing: KDP converts to CMYK, and bright pinks and greens shift.
+
+**KDP ebook.**
+
+- Upload the `.epub` directly; KDP accepts fixed-layout EPUB. Upload `ebook/cover.jpg` as the cover.
+- The ePub declares `book-type: children` and `original-resolution`. Story text is live text and every illustration has alt text.
+- It's about 9 MB. At the 70% royalty rate, KDP charges a delivery fee per megabyte. To shrink it, lower `PAGE_PX` or `QUALITY` in `src/press/epub.rs`.
+
+**Apple Books.** Same ePub. Apple rejects picture books whose text is baked into images, which is why the text is live.
+
+**YouTube.** Upload `*-16x9.mp4`, `*-thumbnail.jpg` and the `.srt` captions, and set the audience to **"Made for kids"** (a legal requirement under COPPA). The soundtrack is mastered to −16 LUFS.
+
+**Shorts, TikTok, Reels.** Upload `*-9x16.mp4` with `*-cover-9x16.jpg`.
+
+- Keep the video under 3 minutes for Shorts; trim with `~` book-only paragraphs.
+- Captions sit high on the screen, clear of the app buttons at the bottom and right.
+
+**AI disclosure.** KDP asks whether text and images are AI-generated. The example book's text draft and the drawing code were written with an AI model. Answer honestly when you publish.
+
+## Layout
+
+```text
+src/
+  story.rs        script parser (front matter, pages, beats, markup)
+  cast.rs         cast file → puppet looks
+  stage.rs        scene model, stage directions, rehearsal across pages
+  compose.rs      scene → positioned puppets (blendable for animation)
+  text.rs         page text layout with real font metrics
+  book.rs         page assembly: title, copyright, story, back matter, covers
+  art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
+  press/          proofs, ePub, KDP print PDFs, model sheets
+  video/          voices (TTS providers), lip-sync, timeline, frame renderer, soundtrack, ffmpeg
+world/            series bible and cast
+docs/             voices and turning the books into a show
+templates/        the 12-beat recipe used by `fables new`
+stories/          one folder per book
+assets/fonts/     Andika and Lilita One (SIL Open Font License)
+```
+
+## Known limits
+
+- **Shapes.** The page is square (8.5" × 8.5") and spreads are single pages. A landscape trim or two-page spreads would need new view boxes in `book.rs` and `press/print.rs`.
+- **Voices.** The ElevenLabs and OpenAI providers follow their current API docs and are unit-tested on request and response shapes, but haven't yet been run against the live services. Recorded human takes and speech-to-speech conversion aren't built yet (see `docs/tv-show.md`).
+- **Read-along ePub.** Not built yet. The narration timings exist, so EPUB media overlays (read-along highlighting in Apple Books) are a natural next step.
+- **New habits need new effects.** Effects live in `src/art/fx.rs`, so a book about a new habit (smouldering trousers, say) means a few dozen lines of drawing code.

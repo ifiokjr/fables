@@ -1,0 +1,800 @@
+//! Drawing primitives shared by every illustration.
+//!
+//! Everything in a Kerfuffle book is drawn from code as SVG. The same drawing functions feed
+//! the print PDF, the ePub page images and every video frame, which is what keeps characters
+//! identical across formats. The house style is a riso-print look: flat spot colours, a
+//! slightly hand-wobbled ink line, and a fill that sits a few units off its outline as if
+//! two print passes did not quite line up.
+
+pub mod critters;
+pub mod figure;
+pub mod fx;
+pub mod palette;
+pub mod rig;
+pub mod settings;
+pub mod style;
+
+use std::fmt::Write as _;
+use std::ops::Add;
+use std::ops::Mul;
+use std::ops::Sub;
+
+pub use palette::Color;
+use style::Shading;
+use style::Style;
+use style::Texture;
+use style::texture_pattern;
+
+/// Width and height of the square stage every scene is composed on.
+///
+/// One stage unit is 1/282 of an inch on an 8.5" page, so the stage maps onto the trim box
+/// of the printed page and video cameras crop windows out of it.
+pub const STAGE: f32 = 2400.0;
+
+/// A point (or vector) in stage units. `y` grows downwards, as in SVG.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Pt {
+	pub x: f32,
+	pub y: f32,
+}
+
+/// Shorthand constructor for [`Pt`].
+pub const fn pt(x: f32, y: f32) -> Pt {
+	Pt { x, y }
+}
+
+impl Pt {
+	#[must_use]
+	pub fn len(self) -> f32 {
+		self.x.hypot(self.y)
+	}
+
+	/// Unit vector in the same direction, or zero for the zero vector.
+	#[must_use]
+	pub fn norm(self) -> Pt {
+		let len = self.len();
+
+		if len < f32::EPSILON {
+			return Pt::default();
+		}
+
+		pt(self.x / len, self.y / len)
+	}
+
+	/// The vector rotated a quarter turn clockwise (in screen space).
+	#[must_use]
+	pub fn perp(self) -> Pt {
+		pt(-self.y, self.x)
+	}
+
+	#[must_use]
+	pub fn lerp(self, other: Pt, t: f32) -> Pt {
+		pt(lerp(self.x, other.x, t), lerp(self.y, other.y, t))
+	}
+
+	/// Rotates the point around the origin by `degrees`.
+	#[must_use]
+	pub fn rotate(self, degrees: f32) -> Pt {
+		let (sin, cos) = degrees.to_radians().sin_cos();
+		pt(self.x * cos - self.y * sin, self.x * sin + self.y * cos)
+	}
+}
+
+impl Add for Pt {
+	type Output = Pt;
+
+	fn add(self, rhs: Pt) -> Pt {
+		pt(self.x + rhs.x, self.y + rhs.y)
+	}
+}
+
+impl Sub for Pt {
+	type Output = Pt;
+
+	fn sub(self, rhs: Pt) -> Pt {
+		pt(self.x - rhs.x, self.y - rhs.y)
+	}
+}
+
+impl Mul<f32> for Pt {
+	type Output = Pt;
+
+	fn mul(self, rhs: f32) -> Pt {
+		pt(self.x * rhs, self.y * rhs)
+	}
+}
+
+pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+	a + (b - a) * t
+}
+
+/// Deterministic hash noise in `-1.0..=1.0`.
+///
+/// Illustrations must render identically every time (print proofs, ePub and video all have to
+/// agree), so all "randomness" comes from hashing a seed and an index.
+pub fn noise(seed: u64, index: u64) -> f32 {
+	let mut z = seed
+		.wrapping_add(index.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+		.wrapping_add(0x6A09_E667_F3BC_C909);
+	z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+	z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+	z ^= z >> 31;
+
+	(z >> 40) as f32 / (1u64 << 23) as f32 - 1.0
+}
+
+/// Hashes a string into a seed so named things get stable wobble.
+pub fn seed_of(name: &str) -> u64 {
+	name.bytes().fold(0xCBF2_9CE4_8422_2325, |hash, byte| {
+		(hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01B3)
+	})
+}
+
+/// SVG path data, built fluently.
+#[derive(Clone, Debug, Default)]
+pub struct Path(String);
+
+impl Path {
+	#[must_use]
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	#[must_use]
+	pub fn move_to(mut self, p: Pt) -> Self {
+		let _ = write!(self.0, "M{:.1} {:.1}", p.x, p.y);
+		self
+	}
+
+	#[must_use]
+	pub fn line_to(mut self, p: Pt) -> Self {
+		let _ = write!(self.0, "L{:.1} {:.1}", p.x, p.y);
+		self
+	}
+
+	#[must_use]
+	pub fn quad_to(mut self, c: Pt, p: Pt) -> Self {
+		let _ = write!(self.0, "Q{:.1} {:.1} {:.1} {:.1}", c.x, c.y, p.x, p.y);
+		self
+	}
+
+	#[must_use]
+	pub fn cubic_to(mut self, c1: Pt, c2: Pt, p: Pt) -> Self {
+		let _ = write!(
+			self.0,
+			"C{:.1} {:.1} {:.1} {:.1} {:.1} {:.1}",
+			c1.x, c1.y, c2.x, c2.y, p.x, p.y
+		);
+		self
+	}
+
+	#[must_use]
+	pub fn close(mut self) -> Self {
+		self.0.push('Z');
+		self
+	}
+
+	/// Appends another path's commands (for compound shapes).
+	#[must_use]
+	pub fn append(mut self, other: &Path) -> Self {
+		self.0.push_str(&other.0);
+		self
+	}
+
+	#[must_use]
+	pub fn ellipse(c: Pt, rx: f32, ry: f32) -> Self {
+		let k = 0.552_284_8;
+		Path::new()
+			.move_to(pt(c.x + rx, c.y))
+			.cubic_to(
+				pt(c.x + rx, c.y + ry * k),
+				pt(c.x + rx * k, c.y + ry),
+				pt(c.x, c.y + ry),
+			)
+			.cubic_to(
+				pt(c.x - rx * k, c.y + ry),
+				pt(c.x - rx, c.y + ry * k),
+				pt(c.x - rx, c.y),
+			)
+			.cubic_to(
+				pt(c.x - rx, c.y - ry * k),
+				pt(c.x - rx * k, c.y - ry),
+				pt(c.x, c.y - ry),
+			)
+			.cubic_to(
+				pt(c.x + rx * k, c.y - ry),
+				pt(c.x + rx, c.y - ry * k),
+				pt(c.x + rx, c.y),
+			)
+			.close()
+	}
+
+	#[must_use]
+	pub fn circle(c: Pt, r: f32) -> Self {
+		Self::ellipse(c, r, r)
+	}
+
+	#[must_use]
+	pub fn rect(x: f32, y: f32, w: f32, h: f32) -> Self {
+		Path::new()
+			.move_to(pt(x, y))
+			.line_to(pt(x + w, y))
+			.line_to(pt(x + w, y + h))
+			.line_to(pt(x, y + h))
+			.close()
+	}
+
+	/// A smooth closed curve through `points` (Catmull-Rom converted to cubic Béziers).
+	#[must_use]
+	pub fn blob(points: &[Pt]) -> Self {
+		let n = points.len();
+
+		if n < 3 {
+			return Path::new();
+		}
+
+		let mut path = Path::new().move_to(points[0]);
+
+		for i in 0..n {
+			let p0 = points[(i + n - 1) % n];
+			let p1 = points[i];
+			let p2 = points[(i + 1) % n];
+			let p3 = points[(i + 2) % n];
+			path = path.cubic_to(
+				p1 + (p2 - p0) * (1.0 / 6.0),
+				p2 - (p3 - p1) * (1.0 / 6.0),
+				p2,
+			);
+		}
+
+		path.close()
+	}
+
+	/// A smooth open curve through `points`.
+	#[must_use]
+	pub fn spline(points: &[Pt]) -> Self {
+		let n = points.len();
+
+		if n < 2 {
+			return Path::new();
+		}
+
+		let mut path = Path::new().move_to(points[0]);
+
+		for i in 0..n - 1 {
+			let p0 = points[i.saturating_sub(1)];
+			let p1 = points[i];
+			let p2 = points[i + 1];
+			let p3 = points[(i + 2).min(n - 1)];
+			path = path.cubic_to(
+				p1 + (p2 - p0) * (1.0 / 6.0),
+				p2 - (p3 - p1) * (1.0 / 6.0),
+				p2,
+			);
+		}
+
+		path
+	}
+
+	/// A closed, smooth outline around a centre line whose width tapers from `start` to `end`,
+	/// with rounded ends: a limb drawn the way an inker would, thick at the root and fine at the
+	/// tip, instead of a uniform tube.
+	#[must_use]
+	pub fn taper(centre: &[Pt], start: f32, end: f32) -> Self {
+		let n = centre.len();
+
+		if n < 2 {
+			return Path::new();
+		}
+
+		let tangent = |i: usize| (centre[(i + 1).min(n - 1)] - centre[i.saturating_sub(1)]).norm();
+		let half = |i: usize| lerp(start, end, i as f32 / (n - 1) as f32) / 2.0;
+		let mut outline = Vec::with_capacity(n * 2 + 2);
+		outline.push(centre[0] - tangent(0) * half(0));
+
+		for (i, point) in centre.iter().enumerate() {
+			outline.push(*point + tangent(i).perp() * half(i));
+		}
+
+		outline.push(centre[n - 1] + tangent(n - 1) * half(n - 1));
+
+		for (i, point) in centre.iter().enumerate().rev() {
+			outline.push(*point - tangent(i).perp() * half(i));
+		}
+
+		Self::blob(&outline)
+	}
+
+	/// An ellipse whose edge is nudged by seeded noise so it reads as hand drawn.
+	#[must_use]
+	pub fn wobbly_ellipse(c: Pt, rx: f32, ry: f32, wobble: f32, seed: u64) -> Self {
+		let steps = 14;
+		let points: Vec<Pt> = (0..steps)
+			.map(|i| {
+				let angle = i as f32 / steps as f32 * std::f32::consts::TAU;
+				let jitter = 1.0 + noise(seed, i) * wobble;
+				pt(
+					c.x + angle.cos() * rx * jitter,
+					c.y + angle.sin() * ry * jitter,
+				)
+			})
+			.collect();
+
+		Self::blob(&points)
+	}
+
+	/// A closed polygon with every corner rounded by roughly `radius`, slightly wobbled.
+	#[must_use]
+	pub fn wobbly_poly(corners: &[Pt], radius: f32, wobble: f32, seed: u64) -> Self {
+		let n = corners.len();
+		let jittered: Vec<Pt> = corners
+			.iter()
+			.enumerate()
+			.map(|(i, p)| {
+				*p + pt(noise(seed, i as u64 * 2), noise(seed, i as u64 * 2 + 1)) * wobble
+			})
+			.collect();
+		let mut path = Path::new();
+
+		for i in 0..n {
+			let prev = jittered[(i + n - 1) % n];
+			let here = jittered[i];
+			let next = jittered[(i + 1) % n];
+			let into = here + (prev - here).norm() * radius.min((prev - here).len() / 2.0);
+			let out = here + (next - here).norm() * radius.min((next - here).len() / 2.0);
+
+			path = if i == 0 {
+				path.move_to(into)
+			} else {
+				path.line_to(into)
+			};
+			path = path.quad_to(here, out);
+		}
+
+		path.close()
+	}
+
+	pub fn as_str(&self) -> &str {
+		&self.0
+	}
+}
+
+/// An SVG document under construction.
+///
+/// `boil` is mixed into every wobble seed. Video frames bump it a few times a second so ink
+/// lines shimmer like hand-drawn animation; print renders keep it at zero. `style` decides how
+/// every inked shape, outline and detail line is rendered (see [`style`]).
+pub struct Svg {
+	body: String,
+	defs: String,
+	ids: u32,
+	textures: Vec<Texture>,
+	pub boil: u64,
+	/// Offset of fills from their ink outlines (the riso misregistration), set from the style.
+	pub registration: Pt,
+	/// Base ink outline width in stage units.
+	pub line: f32,
+	pub style: Style,
+}
+
+impl Default for Svg {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl Svg {
+	#[must_use]
+	pub fn new() -> Self {
+		Self::styled(Style::default())
+	}
+
+	/// A document drawn in `style`.
+	#[must_use]
+	pub fn styled(style: Style) -> Self {
+		Self {
+			body: String::with_capacity(64 * 1024),
+			defs: String::new(),
+			ids: 0,
+			textures: Vec::new(),
+			boil: 0,
+			registration: style.registration,
+			line: 7.0,
+			style,
+		}
+	}
+
+	/// Switches style for everything drawn from now on.
+	pub fn set_style(&mut self, style: Style) {
+		self.style = style;
+		self.registration = style.registration;
+	}
+
+	/// A document-unique id for clip paths and gradients.
+	pub fn next_id(&mut self, prefix: &str) -> String {
+		self.ids += 1;
+		format!("{prefix}{}", self.ids)
+	}
+
+	/// A seed that changes when the line boils.
+	pub fn seed(&self, base: u64) -> u64 {
+		base ^ self.boil.wrapping_mul(0x2545_F491_4F6C_DD1D)
+	}
+
+	/// Opens a `<g>` with an SVG transform; pair with [`Svg::end`].
+	pub fn begin(&mut self, transform: &str) {
+		let _ = write!(self.body, r#"<g transform="{transform}">"#);
+	}
+
+	/// Opens a `<g>` with group opacity; pair with [`Svg::end`].
+	pub fn begin_opacity(&mut self, opacity: f32) {
+		let _ = write!(self.body, r#"<g opacity="{opacity:.3}">"#);
+	}
+
+	/// Opens a layer whose edges the style roughens (torn paper, crayon, paint); pair with
+	/// [`Svg::end`]. Applied once per layer rather than per shape, which keeps it cheap.
+	pub fn begin_layer(&mut self) {
+		if self.style.roughen <= 0.0 {
+			self.body.push_str("<g>");
+			return;
+		}
+
+		let id = self.next_id("rough");
+		let _ = write!(
+			self.defs,
+			r#"<filter id="{id}" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency="{:.4}" numOctaves="1" seed="{}"/><feDisplacementMap in="SourceGraphic" scale="{:.1}" xChannelSelector="R" yChannelSelector="G"/></filter>"#,
+			self.style.roughen_frequency,
+			self.boil % 997,
+			self.style.roughen * 2.0
+		);
+		let _ = write!(self.body, r#"<g filter="url(#{id})">"#);
+	}
+
+	pub fn end(&mut self) {
+		self.body.push_str("</g>");
+	}
+
+	pub fn fill(&mut self, path: &Path, color: Color) {
+		let _ = write!(self.body, r#"<path d="{}" fill="{color}"/>"#, path.as_str());
+	}
+
+	pub fn fill_alpha(&mut self, path: &Path, color: Color, opacity: f32) {
+		let _ = write!(
+			self.body,
+			r#"<path d="{}" fill="{color}" fill-opacity="{opacity:.3}"/>"#,
+			path.as_str()
+		);
+	}
+
+	/// A line. Lines in the ink colour are detail work (faces, folds), so the style decides their
+	/// colour, weight and sketchiness; coloured lines (stems, ribbons) are drawn as given.
+	pub fn stroke(&mut self, path: &Path, color: Color, width: f32) {
+		if color == palette::INK {
+			let ink = self.style.ink;
+			let weight = width * self.style.detail;
+			self.sketchy(path, ink, weight, 1.0);
+			return;
+		}
+
+		self.plain_stroke(path, color, width, 1.0);
+	}
+
+	pub fn stroke_alpha(&mut self, path: &Path, color: Color, width: f32, opacity: f32) {
+		self.plain_stroke(path, color, width, opacity);
+	}
+
+	fn plain_stroke(&mut self, path: &Path, color: Color, width: f32, opacity: f32) {
+		let _ = write!(
+			self.body,
+			r#"<path d="{}" fill="none" stroke="{color}" stroke-opacity="{opacity:.3}" stroke-width="{width:.1}" stroke-linecap="round" stroke-linejoin="round"/>"#,
+			path.as_str()
+		);
+	}
+
+	/// A line drawn once, or several times with a little drift for pencil and crayon.
+	fn sketchy(&mut self, path: &Path, color: Color, width: f32, opacity: f32) {
+		let Some((passes, drift)) = self.style.sketch else {
+			self.plain_stroke(path, color, width, opacity);
+			return;
+		};
+
+		for pass in 0..passes {
+			let seed = self.seed(u64::from(pass) * 7919 + u64::from(self.ids));
+			let dx = noise(seed, 1) * drift;
+			let dy = noise(seed, 2) * drift;
+			let _ = write!(
+				self.body,
+				r#"<path d="{}" transform="translate({dx:.1} {dy:.1})" fill="none" stroke="{color}" stroke-opacity="{:.3}" stroke-width="{:.1}" stroke-linecap="round" stroke-linejoin="round"/>"#,
+				path.as_str(),
+				opacity * if pass == 0 { 0.9 } else { 0.55 },
+				width * if pass == 0 { 1.0 } else { 0.7 }
+			);
+		}
+	}
+
+	/// A silhouette outline, in the style's weight (none at all in outline-free styles).
+	pub fn outline(&mut self, path: &Path, width: f32) {
+		if self.style.outline <= 0.0 {
+			return;
+		}
+
+		let ink = self.style.ink;
+		let weight = width * self.style.outline;
+		self.sketchy(path, ink, weight, 1.0);
+	}
+
+	/// A filled shape with an outline: the basic stroke of every illustration.
+	pub fn inked(&mut self, path: &Path, fill: Color) {
+		let line = self.line;
+		self.inked_weight(path, fill, line);
+	}
+
+	/// Like [`Svg::inked`] with an explicit line weight: silhouettes read best a little heavier
+	/// than interior detail, as in hand-inked cartoons.
+	pub fn inked_weight(&mut self, path: &Path, fill: Color, line: f32) {
+		self.cast_shadow(path);
+		self.paint(path, fill);
+		self.finish_shape(path, fill);
+		self.outline(path, line);
+	}
+
+	/// An inked shape with one tone of shadow: light comes from the top left (`light`, within
+	/// `reach`), so the shadow lands on the far side. Each style paints that tone its own way.
+	pub fn shaded(
+		&mut self,
+		path: &Path,
+		base: Color,
+		shade: Color,
+		light: Pt,
+		reach: f32,
+		line: f32,
+	) {
+		self.cast_shadow(path);
+
+		let clip = self.next_id("shade");
+		self.define(&format!(
+			r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
+			path.as_str()
+		));
+		let offset = self.registration;
+		let opacity = self.style.fill_opacity;
+		self.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
+
+		match self.style.shading {
+			Shading::Gradient => {
+				let gradient = self.next_id("glow");
+				self.define(&format!(
+					r#"<radialGradient id="{gradient}" gradientUnits="userSpaceOnUse" cx="{:.1}" cy="{:.1}" r="{:.1}"><stop offset="0" stop-color="{}"/><stop offset="0.6" stop-color="{base}"/><stop offset="1" stop-color="{shade}"/></radialGradient>"#,
+					light.x,
+					light.y,
+					reach * 1.45,
+					base.lighten(0.12)
+				));
+				let _ = write!(
+					self.body,
+					r#"<path d="{}" fill="url(#{gradient})"/>"#,
+					path.as_str()
+				);
+			}
+			Shading::Crescent | Shading::Cel | Shading::Wash | Shading::Hatch => {
+				let shade = if self.style.shading == Shading::Cel {
+					shade.darken(0.1)
+				} else {
+					shade
+				};
+				self.fill_alpha(path, shade, opacity);
+				self.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+				self.fill_alpha(
+					&Path::circle(light, reach),
+					base,
+					if self.style.shading == Shading::Wash {
+						0.8
+					} else {
+						1.0
+					},
+				);
+
+				if self.style.shading == Shading::Cel {
+					let shine = Path::ellipse(
+						light + pt(-reach * 0.32, -reach * 0.42),
+						reach * 0.2,
+						reach * 0.12,
+					);
+					self.fill_alpha(&shine, palette::WHITE, 0.55);
+				}
+
+				self.raw("</g>");
+			}
+		}
+
+		self.end();
+		self.finish_shape(path, base);
+		self.outline(path, line);
+	}
+
+	/// A thick noodle (arm, leg, stem) drawn as an inked stroke.
+	pub fn inked_noodle(&mut self, path: &Path, fill: Color, width: f32) {
+		if let Some((offset, opacity)) = self.style.shadow {
+			self.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
+			self.plain_stroke(path, palette::INK, width, opacity);
+			self.end();
+		}
+
+		if self.style.outline > 0.0 {
+			let ink = self.style.ink;
+			let edge = width + self.line * 2.0 * self.style.outline;
+			self.sketchy(path, ink, edge, 1.0);
+		}
+
+		let offset = self.registration;
+		self.begin(&format!(
+			"translate({:.1} {:.1})",
+			offset.x * 0.5,
+			offset.y * 0.5
+		));
+		self.plain_stroke(path, fill, width, self.style.fill_opacity);
+
+		if let Some(texture) = self.texture(fill) {
+			let _ = write!(
+				self.body,
+				r#"<path d="{}" fill="none" stroke="url(#{texture})" stroke-width="{width:.1}" stroke-linecap="round" stroke-linejoin="round"/>"#,
+				path.as_str()
+			);
+		}
+
+		self.end();
+	}
+
+	/// Cut paper: every shape lifts off the page and casts a shadow.
+	pub fn cast_shadow(&mut self, path: &Path) {
+		if let Some((offset, opacity)) = self.style.shadow {
+			self.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
+			self.fill_alpha(path, palette::INK, opacity);
+			self.end();
+		}
+	}
+
+	/// The flat fill, offset by the style's registration.
+	fn paint(&mut self, path: &Path, fill: Color) {
+		let offset = self.registration;
+		let opacity = self.style.fill_opacity;
+		let _ = write!(
+			self.body,
+			r#"<path d="{}" fill="{fill}" fill-opacity="{opacity:.3}" transform="translate({:.1} {:.1})"/>"#,
+			path.as_str(),
+			offset.x,
+			offset.y
+		);
+	}
+
+	/// Texture and pigment pooling on top of a shape's paint.
+	pub fn finish_shape(&mut self, path: &Path, fill: Color) {
+		let offset = self.registration;
+
+		if let Some(texture) = self.texture(fill) {
+			let _ = write!(
+				self.body,
+				r#"<path d="{}" fill="url(#{texture})" transform="translate({:.1} {:.1})"/>"#,
+				path.as_str(),
+				offset.x,
+				offset.y
+			);
+		}
+
+		if self.style.pooling > 0.0 {
+			// Watercolour pigment gathers at the edge of a wash: a soft dark rim inside the shape.
+			let clip = self.next_id("pool");
+			self.define(&format!(
+				r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
+				path.as_str()
+			));
+			let width = self.line * 3.0;
+			let pooling = self.style.pooling;
+			self.raw(&format!(
+				r#"<g clip-path="url(#{clip})" transform="translate({:.1} {:.1})">"#,
+				offset.x, offset.y
+			));
+			self.plain_stroke(path, fill.darken(0.35), width, pooling);
+			self.raw("</g>");
+		}
+	}
+
+	/// The id of the style's surface texture, defining it on first use.
+	fn texture(&mut self, _fill: Color) -> Option<String> {
+		let texture = self.style.texture;
+
+		if texture == Texture::None {
+			return None;
+		}
+
+		let id = match texture {
+			Texture::Paper => "tex-paper",
+			Texture::Hatch => "tex-hatch",
+			Texture::Mottle => "tex-mottle",
+			Texture::None => return None,
+		};
+
+		if !self.textures.contains(&texture) {
+			self.textures.push(texture);
+			let markup = texture_pattern(texture, id);
+			self.defs.push_str(&markup);
+		}
+
+		Some(id.to_owned())
+	}
+
+	/// Inserts raw SVG markup (text, images, gradients in use).
+	pub fn raw(&mut self, markup: &str) {
+		self.body.push_str(markup);
+	}
+
+	/// Adds a definition (gradient, pattern, clip path) to `<defs>`.
+	pub fn define(&mut self, markup: &str) {
+		self.defs.push_str(markup);
+	}
+
+	/// Finishes the document with the given view box and output pixel size.
+	pub fn finish(self, view: (f32, f32, f32, f32), width: u32, height: u32) -> String {
+		let (x, y, w, h) = view;
+		format!(
+			r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{width}" height="{height}" viewBox="{x:.2} {y:.2} {w:.2} {h:.2}"><defs>{}</defs>{}</svg>"#,
+			self.defs, self.body
+		)
+	}
+}
+
+/// Escapes text for inclusion in SVG or XHTML.
+pub fn escape(text: &str) -> String {
+	let mut out = String::with_capacity(text.len());
+
+	for ch in text.chars() {
+		match ch {
+			'&' => out.push_str("&amp;"),
+			'<' => out.push_str("&lt;"),
+			'>' => out.push_str("&gt;"),
+			'"' => out.push_str("&quot;"),
+			_ => out.push(ch),
+		}
+	}
+
+	out
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn noise_is_deterministic_and_bounded() {
+		for i in 0..1000 {
+			let value = noise(42, i);
+			assert!((-1.0..=1.0).contains(&value), "{value} out of range");
+			assert!((value - noise(42, i)).abs() < f32::EPSILON);
+		}
+	}
+
+	#[test]
+	fn noise_differs_between_seeds() {
+		let a: Vec<f32> = (0..16).map(|i| noise(1, i)).collect();
+		let b: Vec<f32> = (0..16).map(|i| noise(2, i)).collect();
+		assert_ne!(a, b);
+	}
+
+	#[test]
+	fn blob_needs_three_points() {
+		assert_eq!(Path::blob(&[pt(0.0, 0.0), pt(1.0, 1.0)]).as_str(), "");
+		assert!(
+			Path::blob(&[pt(0.0, 0.0), pt(1.0, 0.0), pt(0.0, 1.0)])
+				.as_str()
+				.ends_with('Z')
+		);
+	}
+
+	#[test]
+	fn escape_handles_markup() {
+		assert_eq!(
+			escape(r#"<"Hi" & bye>"#),
+			"&lt;&quot;Hi&quot; &amp; bye&gt;"
+		);
+	}
+}

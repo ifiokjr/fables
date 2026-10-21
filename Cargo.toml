@@ -1,0 +1,60 @@
+[package]
+name = "fables"
+version = "0.1.0"
+authors = ["Ifiok Jr. <ifiokotung@gmail.com>"]
+description = "Turn a plain-text picture-book script into an ePub, a KDP print book and narrated videos."
+edition = "2024"
+license = "Unlicense"
+publish = false
+rust-version = "1.88.0"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.22"
+clap = { version = "4.6.7", features = ["derive"] }
+hound = "3.5.1"
+jpeg-encoder = "0.7.1"
+pdf-writer = "0.12"
+rayon = "1.12.0"
+# svg2pdf 0.13 is built on resvg/usvg 0.45; pinning resvg to the same release keeps a
+# single SVG engine in the build so print and screen renders can never disagree.
+resvg = "=0.45.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+svg2pdf = "0.13.0"
+toml = "1.1.8"
+ttf-parser = "0.25"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.dev.package."*"]
+# Rasterising hundreds of frames in debug mode is painfully slow; optimise dependencies even
+# in dev builds so `cargo run` stays usable while iterating on art.
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+[lints.rust]
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+# Drawing code reads best with geometric names: c (centre), r (radius), w, h, x, y.
+many_single_char_names = "allow"
+implicit_hasher = "allow"
