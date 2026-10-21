@@ -15,7 +15,6 @@ use crate::art::Svg;
 use crate::art::escape;
 use crate::art::figure;
 use crate::art::figure::FigureState;
-use crate::art::figure::Frame;
 use crate::art::figure::Look;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
@@ -140,9 +139,9 @@ const LENGTH: f32 = 18.5;
 const MOVE: f32 = 0.55;
 
 fn state(look: &Look, beat: &Beat, time: f32) -> FigureState {
-	let frame = Frame::of(look.build);
+	let frame = look.frame();
 	let facing = 0.35;
-	let mut state = FigureState::new(look.build);
+	let mut state = FigureState::new(&frame);
 	state.mood = beat.mood;
 	state.hands = frame.hands(beat.pose, facing);
 	state.hand_shapes = beat.pose.hand_shapes();
@@ -172,7 +171,7 @@ fn at(look: &Look, time: f32) -> (FigureState, &'static str) {
 /// One frame: the character on the left, the same pose with its skeleton on the right.
 fn frame_svg(look: &Look, name: &str, style: Style, time: f32, width: u32, height: u32) -> String {
 	let (state, label) = at(look, time);
-	let frame = Frame::of(look.build);
+	let frame = look.frame();
 	let (w, h) = (width as f32, height as f32);
 	let scale = h * 0.62 / frame.height();
 	let ground = h * 0.86;
@@ -253,7 +252,7 @@ pub fn rig_sheet(look: &Look, style: Style) -> Result<Pixmap> {
 	let columns = 4;
 	let rows = cells.len().div_ceil(columns);
 	let (width, height) = (cell * columns as f32, cell * 1.12 * rows as f32);
-	let frame = Frame::of(look.build);
+	let frame = look.frame();
 	let scale = cell * 0.72 / frame.height();
 
 	if cells.is_empty() {

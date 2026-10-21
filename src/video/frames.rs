@@ -13,7 +13,6 @@ use crate::art::Path;
 use crate::art::Pt;
 use crate::art::STAGE;
 use crate::art::Svg;
-use crate::art::figure::Frame;
 use crate::art::lerp;
 use crate::art::noise;
 use crate::art::palette;
@@ -785,7 +784,7 @@ fn extent(puppet: &Puppet) -> (f32, f32, f32, f32) {
 
 	match &puppet.kind {
 		Kind::Figure(look) => {
-			let frame = Frame::of(look.build);
+			let frame = look.frame();
 			let lying = matches!(&puppet.body, Body::Figure(state) if state.lie > 0.5);
 
 			if lying {
@@ -1045,6 +1044,7 @@ mod tests {
 	#[test]
 	fn framed_bodies_stay_clear_of_the_caption_card() {
 		use crate::art::figure::Build;
+		use crate::art::figure::Frame;
 
 		let ground = 2060.0;
 		let kid = Frame::of(Build::Kid).height() * 2.25;

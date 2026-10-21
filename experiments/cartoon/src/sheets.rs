@@ -11,7 +11,6 @@ use fables::art::Svg;
 use fables::art::escape;
 use fables::art::figure;
 use fables::art::figure::FigureState;
-use fables::art::figure::Frame;
 use fables::art::figure::Mood as OldMood;
 use fables::art::figure::Pose as OldPose;
 use fables::art::figure::Viseme;
@@ -286,8 +285,8 @@ pub fn comparison(out: &Path) -> Result<PathBuf> {
 		let figure_height = cell_h - 170.0;
 
 		// The current puppet, drawn by fables itself into its own nested document.
-		let frame = Frame::of(look.build);
-		let mut state = FigureState::new(look.build);
+		let frame = look.frame();
+		let mut state = FigureState::new(&frame);
 		state.mood = old_mood;
 		state.hands = frame.hands(old_pose, 0.0);
 		state.hand_shapes = old_pose.hand_shapes();

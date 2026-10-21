@@ -11,7 +11,6 @@ use crate::art::Svg;
 use crate::art::critters::CritterState;
 use crate::art::figure;
 use crate::art::figure::FigureState;
-use crate::art::figure::Frame;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::palette;
@@ -182,8 +181,8 @@ fn card(svg: &mut Svg, member: &Member, index: usize) {
 fn sheet_puppet(member: &Member, at: crate::art::Pt) -> Puppet {
 	let (body, scale, lift) = match &member.kind {
 		Kind::Figure(look) => {
-			let frame = Frame::of(look.build);
-			let mut state = FigureState::new(look.build);
+			let frame = look.frame();
+			let mut state = FigureState::new(&frame);
 			state.hands = frame.hands(Pose::Wave, 0.2);
 			state.facing = 0.2;
 			(Body::Figure(state), 600.0 / frame.height(), 0.0)
@@ -226,7 +225,7 @@ pub fn mood_sheet(member: &Member, style: Style) -> Result<Option<Pixmap>> {
 		return Ok(None);
 	};
 
-	let frame = Frame::of(look.build);
+	let frame = look.frame();
 	let cell = 700.0;
 	let columns = 5;
 	let rows = Mood::ALL.len().div_ceil(columns);
@@ -238,7 +237,7 @@ pub fn mood_sheet(member: &Member, style: Style) -> Result<Option<Pixmap>> {
 	for (index, (name, mood)) in Mood::ALL.iter().enumerate() {
 		let x = (index % columns) as f32 * cell + cell / 2.0;
 		let y = (index / columns) as f32 * cell * 1.25;
-		let mut state = FigureState::new(look.build);
+		let mut state = FigureState::new(&frame);
 		state.mood = *mood;
 		state.hands = frame.hands(Pose::Idle, 0.0);
 

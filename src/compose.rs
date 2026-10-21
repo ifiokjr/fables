@@ -12,7 +12,6 @@ use crate::art::critters;
 use crate::art::critters::CritterState;
 use crate::art::figure;
 use crate::art::figure::FigureState;
-use crate::art::figure::Frame;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::fx;
@@ -68,7 +67,7 @@ impl Puppet {
 			return None;
 		}
 
-		let frame = Frame::of(look.build);
+		let frame = look.frame();
 		let local = frame.head + pt(state.facing * frame.head_r * 0.2, frame.head_r * 0.5);
 
 		Some(self.at + local * self.scale)
@@ -78,7 +77,7 @@ impl Puppet {
 	pub fn head(&self) -> (Pt, f32) {
 		match (&self.kind, &self.body) {
 			(Kind::Figure(look), Body::Figure(_)) => {
-				let frame = Frame::of(look.build);
+				let frame = look.frame();
 				(self.at + frame.head * self.scale, frame.head_r * self.scale)
 			}
 			_ => (self.at + pt(0.0, -80.0 * self.scale), 60.0 * self.scale),
@@ -110,8 +109,8 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 	let facing = actor.facing.unwrap_or(heading * 0.5).clamp(-1.0, 1.0) * 0.7;
 	let (body, lift) = match &actor.kind {
 		Kind::Figure(look) => {
-			let frame = Frame::of(look.build);
-			let mut state = FigureState::new(look.build);
+			let frame = look.frame();
+			let mut state = FigureState::new(&frame);
 			state.mood = actor.mood;
 			state.hands = frame.hands(actor.pose, facing);
 			state.hand_shapes = actor.pose.hand_shapes();

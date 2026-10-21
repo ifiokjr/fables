@@ -126,6 +126,14 @@ pub struct Look {
 }
 
 impl Look {
+	/// The body measurements this character is drawn and staged with: where the head, hands
+	/// and mouth sit, and the rig's limb lengths. Everything outside this module asks the look
+	/// rather than the build, so a character can bring its own measurements (as authored
+	/// puppets will) without touching the stage, video or sheets.
+	pub fn frame(&self) -> Frame {
+		Frame::of(self.build)
+	}
+
 	fn has(&self, extra: Extra) -> bool {
 		self.extras.contains(&extra)
 	}
@@ -605,11 +613,11 @@ impl FigureState {
 		state
 	}
 
-	/// A neutral standing figure for `build`.
-	pub fn new(build: Build) -> Self {
+	/// A neutral standing figure with the body measurements in `frame`.
+	pub fn new(frame: &Frame) -> Self {
 		Self {
 			mood: Mood::Happy,
-			hands: Frame::of(build).hands(Pose::Idle, 0.0),
+			hands: frame.hands(Pose::Idle, 0.0),
 			hand_shapes: Pose::Idle.hand_shapes(),
 			mouth_open: 0.0,
 			viseme: None,
@@ -620,7 +628,7 @@ impl FigureState {
 			head_tilt: 0.0,
 			brow_lift: 0.0,
 			sway: 0.0,
-			legs: Frame::of(build).limbs().stance(Stance::Stand, 0.0),
+			legs: frame.limbs().stance(Stance::Stand, 0.0),
 			gait: None,
 			lie: 0.0,
 			squash: 1.0,
@@ -634,7 +642,7 @@ impl FigureState {
 /// The soft contact shadow under a standing figure, drawn at the ground point. `lift` is how far
 /// the figure is off the ground (hops), which shrinks and fades the shadow.
 pub fn shadow(svg: &mut Svg, look: &Look, state: &FigureState, lift: f32) {
-	let frame = Frame::of(look.build);
+	let frame = look.frame();
 	let feet = (state.legs.feet.1.x - state.legs.feet.0.x).abs() / 2.0 + frame.leg_width * 1.4;
 	let spread = feet.max(frame.stance()) * (1.0 + state.lie * 1.8);
 	let away = (1.0 - lift / (frame.head_r * 4.0)).clamp(0.3, 1.0);
@@ -692,7 +700,7 @@ impl Posed {
 
 /// Draws a figure with its feet at the current origin.
 pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
-	let frame = Frame::of(look.build);
+	let frame = look.frame();
 	let posed = Posed::solve(&frame, state);
 	let lie_lift = state.lie * frame.head_r * 0.95;
 	let lie_turn = -state.lie * 90.0 * if state.facing < 0.0 { -1.0 } else { 1.0 };
@@ -740,7 +748,7 @@ pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
 
 /// Draws the rig's bones and joints over a figure, for model sheets and rig checks.
 pub fn draw_skeleton(svg: &mut Svg, look: &Look, state: &FigureState) {
-	let frame = Frame::of(look.build);
+	let frame = look.frame();
 	let posed = Posed::solve(&frame, state);
 	let (shoulders, hips, _) = look.body_widths();
 	let bone = palette::TOMATO;
