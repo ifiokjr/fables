@@ -10,6 +10,7 @@ pub mod critters;
 pub mod figure;
 pub mod fx;
 pub mod palette;
+pub mod parts;
 pub mod rig;
 pub mod settings;
 pub mod shape;

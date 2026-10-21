@@ -64,10 +64,10 @@ torso.front  torso.3q       shorts.front shorts.3q  sleeve      shorts.leg
 ear          extra.glasses  ...
 ```
 
-- **Loading uses `usvg`, which is already a dependency through resvg.** It resolves relative commands, arcs, `S`, `Q`, `L` and transforms into absolute segments. `usvg` 0.45 has `Tree::node_by_id`, `Path::data()` and `Path::abs_transform()`. The loader turns lines and quadratics into cubics, so `Shape` only ever holds cubics, and nobody writes a path parser. One thing to watch: `usvg` drops elements it considers invisible, so every part needs a visible fill and hidden layers won't load. PR 3 starts with a short spike to confirm exactly which parts survive.
+- **Loading reads the SVG with `roxmltree` and `svgtypes`.** Both are already compiled into fables, because `usvg` depends on them. They resolve relative commands, arcs, `S`, `Q`, `L` and the path's own transform; lines and quadratics become cubics, so `Shape` only ever holds cubics. A part is exactly its own path data plus its own `transform`, and the groups around it only lay out the sheet. (`usvg` itself was the first idea, but it bakes group transforms into every path, so tidying the sheet would move the drawings.)
 - **Two drawings of a part blend only when they have the same number of curves.** At load time, `fables puppet check <id>` names any mismatch, such as "`hair.3q` has 18 curves, `hair.front` has 17". A mismatched pair is not an error: it swaps drawings at the half-way point instead of blending, the way hands and shoes already work. The authoring rule is to draw the three-quarter view by duplicating the front and moving its nodes.
 - **`fables puppet template <id>` writes a starter file.** It contains the skeleton, pivots, the head origin and the ground line on a locked guide layer, so parts are drawn in the right coordinate frame.
-- **`fables puppet sheet <id>` renders the review sheets:** the model sheet, turnaround, mouth chart and rig check, as the experiment does now.
+- **`fables puppet sheet <id>` renders the parts sheet:** every part, with each turning part shown front-on, half-turned and three-quarters, plus the check's findings. The posed review sheets (model sheet, turnaround, mouth chart and rig check) join it in PR 4, once the puppet is drawn by the library.
 
 In `cast.toml`, a member gains `puppet = "puppets/stinky.svg"`. Members without one keep drawing with the old `figure.rs` until they are migrated, so every PR in the rollout ships a working book.
 
@@ -123,7 +123,7 @@ One `gh stack`, so each layer is reviewable on its own. Every PR that changes ho
 | --- | --- | --- | --- |
 | 1 | `refactor(art): shapes and the inked finish` | Moves `Shape` (parse, blend, map, blob, taper) and the thick-and-thin line and multiplied shadow into `src/art/`. No visual change. | ~400 lines |
 | 2 | `refactor: measure figures per look` | `Frame::of(build)` becomes `look.frame()` at all 17 call sites. No visual change. | ~150 lines |
-| 3 | `feat(art): puppet part files` | The `usvg` loader, topology check and blend-or-swap. Adds `fables puppet check`, `template` and `sheet`. `world/puppets/stinky.svg` is generated once from the experiment's strings. | ~600 lines |
+| 3 | `feat(art): puppet part files` | The part-file loader, the part list and check, and blend-or-swap. Adds `fables puppet check`, `template` and `sheet` (the parts sheet). `world/puppets/kit.svg` and `stinky.svg` are generated once from the experiment's strings, and the experiment then draws from them. | ~1,100 lines |
 | 4 | `feat(art): authored puppet` | `art::puppet` with the shared kit, the `FigureState` mapping, all 15 moods, the point hand, and `puppet =` in `cast.toml`. Stinky switches over; the rest stay on `figure.rs`. | ~1,500 lines; split moods into their own PR if review drags |
 | 5 | `feat(art): props, teeth and extras` | Jam, toothbrush and parcel; grotty and sparkly teeth; hair follow-through; extras as parts. *Stinky McStinkbreath* renders fully in the new look. | ~600 lines |
 | 6 | `feat(world): Bogey and Grubby` | Two kids, each with a signed-off model sheet. | ~1 session each |

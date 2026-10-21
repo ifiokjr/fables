@@ -11,6 +11,7 @@
 
 use std::f32::consts::PI;
 use std::f32::consts::TAU;
+use std::path::PathBuf;
 
 use super::Color;
 use super::Path;
@@ -123,6 +124,9 @@ pub struct Look {
 	/// Mouth width multiplier; Stinky's mouth is the star of his book.
 	pub mouth_size: f32,
 	pub seed: u64,
+	/// The character's authored part file (see [`parts`](super::parts)), once they have been
+	/// redrawn as an authored puppet.
+	pub puppet: Option<PathBuf>,
 }
 
 impl Look {

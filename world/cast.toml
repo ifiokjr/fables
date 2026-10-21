@@ -15,6 +15,8 @@
 #   body      bell | bean | pear | round  (silhouette of the body)
 #   nose      button | round | long | none
 #   eyes      iris colour (palette name)
+#   puppet    an authored puppet's part file, e.g. "puppets/stinky.svg" (`fables puppet check`,
+#             `template` and `sheet` work with these)
 #
 # Animals and things: kind = "dog" | "bird" | "worm" | "flower" | "tree" | "toothbrush", with
 # `colour`. Scripts can also use generic `@bird.a`, `@flower.b` and so on without a table here.
@@ -58,6 +60,9 @@ head = "round"
 body = "bean"
 nose = "button"
 eyes = "cocoa"
+# Stinky's authored puppet (see `fables puppet check stinky`). The fields above still draw him
+# until the authored puppet is wired into the books.
+puppet = "puppets/stinky.svg"
 
 [stinky.voice]
 name = "Junior"

@@ -19,9 +19,13 @@ rayon = "1.12.0"
 # svg2pdf 0.13 is built on resvg/usvg 0.45; pinning resvg to the same release keeps a
 # single SVG engine in the build so print and screen renders can never disagree.
 resvg = "=0.45.1"
+# Part files are read with the XML and path parsers resvg already builds on; usvg itself bakes
+# group transforms into paths, which would tie a drawing to where it sits on the sheet.
+roxmltree = "0.20"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 svg2pdf = "0.13.0"
+svgtypes = "0.15"
 toml = "1.1.8"
 ttf-parser = "0.25"
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }

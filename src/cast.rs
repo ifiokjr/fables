@@ -112,6 +112,9 @@ struct Entry {
 	flower: Option<String>,
 	#[serde(default)]
 	voice: Option<Voice>,
+	/// An authored puppet's part file, relative to the cast file.
+	#[serde(default)]
+	puppet: Option<PathBuf>,
 }
 
 fn default_kind() -> String {
@@ -119,11 +122,24 @@ fn default_kind() -> String {
 }
 
 impl Cast {
-	/// Loads a cast file.
+	/// Loads a cast file. Puppet part files are found relative to it.
 	pub fn load(path: &Path) -> Result<Cast> {
 		let source = std::fs::read_to_string(path)
 			.with_context(|| format!("could not read cast file {}", path.display()))?;
-		Self::parse(&source).with_context(|| format!("in {}", path.display()))
+		let mut cast = Self::parse(&source).with_context(|| format!("in {}", path.display()))?;
+		let dir = path.parent().unwrap_or(Path::new(""));
+
+		for member in cast.members.values_mut() {
+			if let Kind::Figure(Look {
+				puppet: Some(puppet),
+				..
+			}) = &mut member.kind
+			{
+				*puppet = dir.join(&*puppet);
+			}
+		}
+
+		Ok(cast)
 	}
 
 	pub fn parse(source: &str) -> Result<Cast> {
@@ -356,6 +372,7 @@ fn build_look(id: &str, entry: &Entry) -> Result<Look> {
 		extras,
 		mouth_size: entry.mouth.unwrap_or(1.0),
 		seed: seed_of(id),
+		puppet: entry.puppet.clone(),
 	})
 }
 
@@ -408,5 +425,21 @@ colour = "#c9865a"
 		);
 		assert!(message.contains("chartreuse"), "{message}");
 		assert!(message.contains("tangerine"), "{message}");
+	}
+
+	#[test]
+	fn puppet_files_are_found_beside_the_cast_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("cast.toml");
+		std::fs::write(
+			&path,
+			"[kid]\nname = \"Kid\"\npuppet = \"puppets/kid.svg\"\n",
+		)
+		.unwrap();
+		let cast = Cast::load(&path).unwrap();
+		let Kind::Figure(look) = cast.resolve("kid").unwrap() else {
+			panic!("kid is a person");
+		};
+		assert_eq!(look.puppet, Some(dir.path().join("puppets/kid.svg")));
 	}
 }

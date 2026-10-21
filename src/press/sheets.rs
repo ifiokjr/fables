@@ -5,19 +5,29 @@
 use anyhow::Result;
 use resvg::tiny_skia::Pixmap;
 
+use crate::art::Color;
 use crate::art::Path;
+use crate::art::Pt;
 use crate::art::STAGE;
 use crate::art::Svg;
 use crate::art::critters::CritterState;
+use crate::art::escape;
 use crate::art::figure;
 use crate::art::figure::FigureState;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::palette;
+use crate::art::parts::FIGURE_PARTS;
+use crate::art::parts::Level;
+use crate::art::parts::Need;
+use crate::art::parts::Parts;
+use crate::art::parts::Turn;
+use crate::art::parts::Views;
 use crate::art::pt;
 use crate::art::settings;
 use crate::art::settings::Setting;
 use crate::art::settings::Weather;
+use crate::art::shape::Shape;
 use crate::art::style::Style;
 use crate::cast::Cast;
 use crate::cast::Kind;
@@ -83,7 +93,7 @@ pub fn cast_sheet(cast: &Cast, style: Style) -> Result<Pixmap> {
 }
 
 /// The colour a character mostly reads as (skin for people).
-fn main_colour(member: &Member) -> crate::art::Color {
+fn main_colour(member: &Member) -> Color {
 	match &member.kind {
 		Kind::Figure(look) => look.skin,
 		Kind::Bird(color)
@@ -96,8 +106,8 @@ fn main_colour(member: &Member) -> crate::art::Color {
 }
 
 /// The backdrop that stands furthest from `colour`, so nobody disappears into their card.
-fn contrasting(tints: &[crate::art::Color], colour: crate::art::Color) -> crate::art::Color {
-	let distance = |a: crate::art::Color| {
+fn contrasting(tints: &[Color], colour: Color) -> Color {
+	let distance = |a: Color| {
 		let (r1, g1, b1) = a.rgb();
 		let (r2, g2, b2) = colour.rgb();
 		let d = |x: u8, y: u8| (i32::from(x) - i32::from(y)).pow(2);
@@ -178,7 +188,7 @@ fn card(svg: &mut Svg, member: &Member, index: usize) {
 }
 
 /// A puppet sized to fit a sheet card, standing at `at`.
-fn sheet_puppet(member: &Member, at: crate::art::Pt) -> Puppet {
+fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 	let (body, scale, lift) = match &member.kind {
 		Kind::Figure(look) => {
 			let frame = look.frame();
@@ -377,4 +387,198 @@ pub fn places_sheet(style: Style) -> Result<Pixmap> {
 	raster::finish(&mut pixmap, &style, 0.05, 0);
 
 	Ok(pixmap)
+}
+
+/// One square on a parts sheet.
+struct Tile {
+	label: String,
+	note: String,
+	shape: Option<Shape>,
+	/// The box the drawing is fitted to, shared by a turning part's three tiles so the turn
+	/// reads as movement rather than rescaling.
+	fit: (Pt, Pt),
+}
+
+/// Every part of an authored puppet. A turning part is shown front-on, half-turned and
+/// three-quarters turned, so a pair that won't blend shows itself; missing parts are marked,
+/// and the part check's errors and warnings head the sheet.
+pub fn parts_sheet(title: &str, parts: &Parts) -> Result<Pixmap> {
+	const TILE: f32 = 300.0;
+	const COLUMNS: usize = 6;
+	let ink = Color(0x2B_1D_2E);
+	let mut groups: Vec<Vec<Tile>> = Vec::new();
+
+	for spec in FIGURE_PARTS {
+		let names: Vec<String> = if spec.need == Need::Numbered {
+			(1..=parts.numbered(spec.name).len())
+				.map(|n| format!("{}-{n}", spec.name))
+				.collect()
+		} else {
+			vec![spec.name.to_owned()]
+		};
+
+		for name in names {
+			let turn = parts.turn(&name);
+			let tile = |label: String, note: &str, shape: Option<Shape>, fit| {
+				Tile {
+					label,
+					note: note.to_owned(),
+					shape,
+					fit,
+				}
+			};
+
+			let group = match (turn, spec.views) {
+				(Some(turn @ (Turn::Blend { front, three } | Turn::Swap { front, three })), _) => {
+					let fit = union(front.bounds(), three.bounds());
+					let half = if matches!(turn, Turn::Blend { .. }) {
+						"blended"
+					} else {
+						"swaps here"
+					};
+					vec![
+						tile(format!("{name}.front"), "", Some(front.clone()), fit),
+						tile(
+							format!("{name}, half-turned"),
+							half,
+							Some(turn.at(0.5)),
+							fit,
+						),
+						tile(format!("{name}.3q"), "", Some(three.clone()), fit),
+					]
+				}
+				(Some(Turn::Fixed(shape)), _) => {
+					vec![tile(name.clone(), "", Some(shape.clone()), shape.bounds())]
+				}
+				(None, _) if spec.need == Need::Required => {
+					let missing = if spec.views == Views::Turning {
+						"missing: .front and .3q"
+					} else {
+						"missing"
+					};
+					vec![tile(
+						name.clone(),
+						missing,
+						None,
+						(pt(0.0, 0.0), pt(1.0, 1.0)),
+					)]
+				}
+				(None, _) => Vec::new(),
+			};
+
+			if !group.is_empty() {
+				groups.push(group);
+			}
+		}
+	}
+
+	let findings: Vec<String> = parts
+		.check()
+		.into_iter()
+		.filter(|finding| finding.level != Level::Note)
+		.map(|finding| finding.to_string())
+		.collect();
+	let mut placed: Vec<(f32, f32, Tile)> = Vec::new();
+	let top = 170.0 + findings.len() as f32 * 34.0;
+	let (mut column, mut row) = (0, 0);
+
+	for group in groups {
+		if column + group.len() > COLUMNS {
+			(column, row) = (0, row + 1);
+		}
+
+		for tile in group {
+			placed.push((column as f32 * TILE, top + row as f32 * TILE, tile));
+			column += 1;
+		}
+	}
+
+	let width = TILE * COLUMNS as f32;
+	let height = top + (row + 1) as f32 * TILE + 40.0;
+	let mut svg = Svg::new();
+	svg.fill(&Path::rect(0.0, 0.0, width, height), Color(0xFB_F3_E4));
+	let label = |svg: &mut Svg, x: f32, y: f32, size: f32, color: Color, text: &str| {
+		svg.raw(&format!(
+			r#"<text x="{x:.1}" y="{y:.1}" font-family="{}" font-size="{size}" fill="{color}">{}</text>"#,
+			raster::BODY_FAMILY,
+			escape(text)
+		));
+	};
+	label(&mut svg, 40.0, 80.0, 52.0, ink, title);
+
+	for (index, finding) in findings.iter().enumerate() {
+		let color = if finding.starts_with("error") {
+			palette::TOMATO
+		} else {
+			Color(0x8A_6A_2A)
+		};
+		label(
+			&mut svg,
+			40.0,
+			140.0 + index as f32 * 34.0,
+			26.0,
+			color,
+			finding,
+		);
+	}
+
+	for (x, y, tile) in &placed {
+		let card = Path::rect(x + 12.0, y + 12.0, TILE - 24.0, TILE - 24.0);
+		svg.fill(&card, palette::WHITE.mix(Color(0xFB_F3_E4), 0.4));
+		let (lo, hi) = tile.fit;
+		let size = hi - lo;
+		let scale = ((TILE - 110.0) / size.x.max(size.y).max(1.0)).min(4.0);
+		let centre = lo.lerp(hi, 0.5);
+
+		match &tile.shape {
+			Some(shape) => {
+				svg.begin(&format!(
+					"translate({:.1} {:.1}) scale({scale:.4}) translate({:.1} {:.1})",
+					x + TILE / 2.0,
+					y + TILE / 2.0 - 18.0,
+					-centre.x,
+					-centre.y
+				));
+				let weight = 3.0 / scale;
+
+				if shape.is_closed() {
+					svg.brushed(&shape.path(), Color(0xF3_E7_D3), ink, weight);
+				} else {
+					svg.brush_line(&shape.path(), ink, weight * 1.4);
+				}
+
+				svg.end();
+			}
+			None => {
+				svg.raw(&format!(
+					r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="none" stroke="{}" stroke-width="4" stroke-dasharray="14 10"/>"#,
+					x + 40.0,
+					y + 40.0,
+					TILE - 80.0,
+					TILE - 130.0,
+					palette::TOMATO
+				));
+			}
+		}
+
+		label(&mut svg, x + 28.0, y + TILE - 50.0, 22.0, ink, &tile.label);
+
+		if !tile.note.is_empty() {
+			let color = if tile.shape.is_none() || tile.note == "swaps here" {
+				palette::TOMATO
+			} else {
+				Color(0x7A_6A_80)
+			};
+			label(&mut svg, x + 28.0, y + TILE - 24.0, 20.0, color, &tile.note);
+		}
+	}
+
+	raster::render(&svg.finish((0.0, 0.0, width, height), width as u32, height as u32))
+}
+
+fn union(a: (Pt, Pt), b: (Pt, Pt)) -> (Pt, Pt) {
+	(
+		pt(a.0.x.min(b.0.x), a.0.y.min(b.0.y)),
+		pt(a.1.x.max(b.1.x), a.1.y.max(b.1.y)),
+	)
 }

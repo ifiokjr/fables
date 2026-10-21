@@ -14,13 +14,19 @@
 //! is what real rigs do.
 
 use std::f32::consts::FRAC_PI_2;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
+use anyhow::Result;
+use anyhow::ensure;
 use fables::art::Color;
 use fables::art::Path;
 use fables::art::Pt;
 use fables::art::Svg;
 use fables::art::figure::Viseme;
 use fables::art::lerp;
+use fables::art::parts::Level;
+use fables::art::parts::Parts;
 use fables::art::pt;
 use fables::art::rig;
 use fables::art::rig::Gait;
@@ -99,128 +105,62 @@ const FACE_TURN: f32 = 0.42;
 const FACE_RADIUS: f32 = 114.0;
 const BODY_RADIUS: f32 = 64.0;
 
-// The head, in head units: origin between the eyes, about 196 wide and 208 tall.
+/// Stinky's own part file, read over the shared kit beside it.
+pub fn puppet_file() -> PathBuf {
+	PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../world/puppets/stinky.svg")
+}
 
-const HEAD_FRONT: &str = "M0 -100 C46 -100 84 -80 92 -36 C98 -6 104 30 96 58 C86 92 46 108 0 108 \
-                          C-46 108 -86 92 -96 58 C-104 30 -98 -6 -92 -36 C-84 -80 -46 -100 0 -100 \
-                          Z";
-const HEAD_3Q: &str = "M-4 -102 C44 -104 86 -84 96 -40 C102 -12 112 24 102 54 C94 86 58 106 18 \
-                       108 C-26 110 -70 98 -86 66 C-102 36 -106 -6 -98 -42 C-88 -84 -50 -102 -4 \
-                       -102 Z";
+/// Loads and checks the part files before anything is drawn, so a missing or broken part is
+/// reported once, clearly, instead of as a panic mid-render.
+pub fn check_parts() -> Result<()> {
+	let parts = Parts::load_puppet(&puppet_file())?;
+	let errors: Vec<String> = parts
+		.check()
+		.iter()
+		.filter(|finding| finding.level == Level::Error)
+		.map(ToString::to_string)
+		.collect();
+	ensure!(errors.is_empty(), "Stinky's parts:\n{}", errors.join("\n"));
+	Ok(())
+}
 
-/// The hair: a bumpy crown and a fringe of locks swept towards the page right.
-const HAIR_FRONT: &str =
-	"M-94 -30 C-100 -54 -98 -80 -84 -94 C-78 -102 -70 -106 -60 -108 C-48 -114 -30 -112 -20 -110 \
-	 C-6 -116 14 -116 26 -110 C40 -114 58 -110 70 -102 C86 -92 98 -74 96 -50 C96 -44 94 -36 90 \
-	 -30 C86 -44 80 -52 72 -58 C64 -68 54 -76 46 -78 C46 -70 44 -64 40 -58 C32 -66 24 -74 18 -80 \
-	 C18 -72 16 -66 12 -60 C4 -68 -4 -76 -10 -80 C-10 -72 -12 -66 -16 -62 C-24 -70 -32 -76 -38 \
-	 -78 C-38 -70 -42 -64 -46 -60 C-56 -62 -66 -60 -74 -56 C-84 -50 -90 -42 -94 -30 Z";
-const HAIR_3Q: &str = "M-102 4 C-112 -40 -106 -80 -90 -98 C-84 -106 -76 -110 -64 -112 C-50 -118 \
-                       -30 -116 -18 -114 C-2 -118 18 -118 30 -112 C46 -114 64 -108 76 -98 C92 -86 \
-                       102 -70 100 -50 C100 -42 100 -36 98 -30 C97 -42 98 -50 100 -56 C95 -68 89 \
-                       -76 84 -78 C84 -70 82 -64 79 -58 C73 -66 67 -74 62 -80 C62 -72 60 -66 57 \
-                       -60 C50 -68 43 -76 37 -80 C37 -72 35 -66 31 -62 C23 -70 15 -76 9 -78 C9 \
-                       -70 6 -64 1 -60 C-10 -60 -24 -54 -34 -46 C-48 -34 -66 -18 -102 4 Z";
-/// Strands drawn inside the hair, following its flow from the crown to the fringe.
-const HAIR_STRANDS_FRONT: [&str; 3] = [
-	"M-46 -100 C-38 -94 -32 -88 -28 -80",
-	"M6 -106 C14 -100 18 -94 22 -86",
-	"M54 -98 C60 -92 62 -86 64 -80",
-];
-const HAIR_STRANDS_3Q: [&str; 3] = [
-	"M-32 -104 C-22 -98 -12 -92 -4 -84",
-	"M26 -108 C36 -102 42 -96 46 -88",
-	"M70 -96 C76 -90 80 -86 82 -80",
-];
+fn parts() -> &'static Parts {
+	static PARTS: OnceLock<Parts> = OnceLock::new();
+	PARTS.get_or_init(|| {
+		Parts::load_puppet(&puppet_file()).unwrap_or_else(|error| panic!("{error:#}"))
+	})
+}
 
-/// The signature: one big plum tuft that rises off the crown and curls forward like a wave.
-const TUFT_FRONT: &str = "M-50 -104 C-64 -136 -44 -176 -2 -182 C36 -188 62 -168 58 -144 C56 -132 \
-                          44 -128 40 -138 C36 -148 24 -152 14 -146 C0 -138 6 -118 20 -104 C0 -98 \
-                          -30 -98 -50 -104 Z";
-const TUFT_3Q: &str = "M-64 -104 C-78 -136 -58 -178 -14 -184 C26 -190 54 -170 50 -146 C48 -134 36 \
-                       -130 32 -140 C28 -150 16 -154 6 -148 C-8 -140 -6 -120 8 -104 C-12 -98 -42 \
-                       -98 -64 -104 Z";
-const TUFT_SHINE_FRONT: &str = "M-38 -120 C-40 -150 -22 -170 6 -174";
-const TUFT_SHINE_3Q: &str = "M-52 -120 C-54 -150 -36 -172 -8 -176";
-/// The page-left ear, attached at its right edge.
-const EAR: &str = "M0 -16 C-12 -26 -28 -16 -26 2 C-24 18 -10 22 2 14 Z";
-const EAR_CURL: &str = "M-7 -8 C-16 -10 -19 2 -12 7";
+/// A part at turn `t` (0 front-on, 1 three-quarters). [`check_parts`] has already confirmed
+/// that every part a figure needs is there.
+fn part(name: &str, t: f32) -> Shape {
+	parts()
+		.turn(name)
+		.unwrap_or_else(|| panic!("Stinky has no part `{name}`"))
+		.at(t)
+}
 
-// The torso, in figure units (it hangs off the pelvis at y = -126).
+/// A part that is drawn once.
+fn drawn(name: &str) -> Shape {
+	part(name, 0.0)
+}
 
-const JUMPER_FRONT: &str = "M-24 -232 C-12 -226 12 -226 24 -232 C36 -230 46 -222 48 -208 C52 -188 \
-                            60 -152 60 -132 C60 -120 54 -114 46 -114 C20 -110 -20 -110 -46 -114 \
-                            C-54 -114 -60 -120 -60 -132 C-60 -152 -52 -188 -48 -208 C-46 -222 -36 \
-                            -230 -24 -232 Z";
-const JUMPER_3Q: &str = "M-14 -232 C-2 -228 18 -228 28 -232 C38 -228 46 -218 47 -206 C52 -186 64 \
-                         -152 62 -132 C62 -120 56 -114 48 -114 C22 -110 -16 -110 -38 -114 C-46 \
-                         -115 -52 -122 -52 -134 C-52 -154 -46 -190 -42 -208 C-38 -224 -28 -232 \
-                         -14 -232 Z";
-const COLLAR_FRONT: &str =
-	"M-27 -233 C-14 -224 14 -224 27 -233 C25 -224 16 -217 0 -217 C-16 -217 -25 -224 -27 -233 Z";
-const COLLAR_3Q: &str =
-	"M-17 -233 C-4 -225 20 -225 30 -233 C29 -224 21 -217 7 -217 C-8 -217 -16 -224 -17 -233 Z";
-const SHORTS_FRONT: &str = "M-56 -138 C-20 -142 20 -142 56 -138 C62 -122 64 -104 62 -90 C44 -86 \
-                            24 -88 7 -94 C4 -100 -4 -100 -7 -94 C-24 -88 -44 -86 -62 -90 C-64 \
-                            -104 -62 -122 -56 -138 Z";
-const SHORTS_3Q: &str = "M-48 -138 C-14 -142 24 -142 58 -138 C64 -122 66 -104 64 -90 C48 -86 30 \
-                         -88 15 -94 C12 -100 5 -100 2 -94 C-14 -88 -34 -86 -52 -90 C-54 -104 -52 \
-                         -122 -48 -138 Z";
+/// One of a turning part's two drawings, picked rather than blended.
+fn view(name: &str, three_quarter: bool) -> Shape {
+	drawn(&format!(
+		"{name}.{}",
+		if three_quarter { "3q" } else { "front" }
+	))
+}
 
-// Limbs, in bone units: the bone runs down +y from its joint.
-
-const SLEEVE: &str =
-	"M-14 -4 C-15 14 -14 30 -13 46 C-6 51 6 51 13 46 C14 30 15 14 14 -4 C13 -19 -13 -19 -14 -4 Z";
-const SHORTS_LEG: &str =
-	"M-18 -12 C-19 8 -21 26 -22 44 C-8 49 8 49 22 44 C21 26 19 8 18 -12 C10 -19 -10 -19 -18 -12 Z";
-
-/// A right shoe seen from the front, toes turned out to the page right; the ankle is at the
-/// origin and the sole at y = 24.
-const SHOE_FRONT: &str = "M-12 -6 C-4 -10 8 -10 14 -4 C24 0 32 8 32 16 C32 24 22 26 2 26 C-14 26 \
-                          -21 22 -21 14 C-21 6 -18 0 -12 -6 Z";
-/// A shoe in three-quarter view, toes forward to the page right.
-const SHOE_3Q: &str = "M-12 -8 C-2 -12 8 -8 14 -2 C26 2 38 8 40 16 C42 24 34 26 18 26 C2 26 -12 \
-                       26 -17 22 C-21 18 -19 6 -12 -8 Z";
-
-// Hands, in hand units: the wrist at the origin, fingers pointing down +y, the thumb on the -x
-// side (towards the body for a page-right hand hanging at rest). Four digits, cartoon-style.
-
-const HAND_RELAXED: &str = "M-8 0 C-12 3 -15 6 -17 10 C-19 14 -18 19 -14 19 C-12 19 -11 17 -10 15 \
-                            C-11 21 -10 27 -6 31 C-3 34 0 33 0 30 C1 33 4 35 7 33 C9 31 9 29 9 28 \
-                            C11 29 13 28 13 25 C14 20 12 13 10 6 C9 3 7 0 5 -1 C2 -3 -4 -3 -8 0 Z";
-const HAND_RELAXED_LINES: [&str; 2] = ["M0 30 C0 27 -1 24 -2 22", "M9 28 C9 25 8 23 7 21"];
-const HAND_OPEN: &str = "M-8 0 C-12 5 -19 5 -24 9 C-29 13 -25 19 -17 18 C-19 24 -19 31 -15 36 \
-                         C-11 40 -5 36 -6 30 C-5 36 -2 42 3 41 C8 40 8 34 6 28 C9 34 13 36 16 33 \
-                         C19 30 16 22 11 15 C10 9 9 4 8 0 C3 -3 -3 -3 -8 0 Z";
-const HAND_FIST: &str = "M-9 -1 C-15 4 -17 12 -16 20 C-15 28 -7 32 2 32 C10 32 16 27 16 19 C16 11 \
-                         13 3 8 -1 C3 -3 -4 -3 -9 -1 Z";
-const HAND_FIST_LINES: [&str; 3] = [
-	"M15 15 C10 16 8 19 8 23",
-	"M14 24 C10 24 7 27 6 30",
-	"M-15 12 C-9 9 -3 10 0 15",
-];
-
-// Mouths, in mouth units: the centre of the mouth at the origin.
-
-const SMILE: &str = "M-36 -6 C-18 2 18 2 36 -6 C33 20 17 34 0 34 C-17 34 -33 20 -36 -6 Z";
-const GRIN: &str = "M-48 -4 C-24 4 22 0 50 -16 C48 12 26 30 0 30 C-24 30 -44 18 -48 -4 Z";
-const GRIN_TEETH: &str =
-	"M-52 -8 C-24 0 22 -4 54 -20 C56 -8 54 -2 52 -6 C22 10 -24 16 -50 8 C-54 4 -54 -2 -52 -8 Z";
-const POUT: &str =
-	"M-22 8 C-12 -4 10 -6 26 8 C27 10 25 12 23 11 C10 2 -10 2 -19 11 C-21 12 -23 10 -22 8 Z";
-const POUT_LIP: &str = "M-8 13 C-4 18 6 18 10 13";
-const BLEH: &str =
-	"M-30 2 C-20 -8 -8 4 2 -2 C12 -8 22 -6 30 4 C24 16 12 20 0 18 C-12 16 -24 12 -30 2 Z";
-const BLEH_TONGUE: &str = "M-10 12 C-12 28 -6 40 4 40 C14 40 18 28 16 12 C8 16 -2 16 -10 12 Z";
-const BLEH_GROOVE: &str = "M3 18 C3 26 4 30 4 34";
-
-const REST: &str = "M-22 0 C-10 7 10 7 22 0 C23 2 21 4 19 3 C8 9 -8 9 -19 3 C-21 4 -23 2 -22 0 Z";
-const MBP: &str = "M-18 1 C-6 4 6 4 18 1 C19 3 17 6 15 5 C6 8 -6 8 -15 5 C-17 6 -19 3 -18 1 Z";
-const MBP_LIP: &str = "M-8 11 C-3 14 3 14 8 11";
-const TEETH_OPEN: &str = "M-24 -3 C-8 1 8 1 24 -3 C21 8 10 12 0 12 C-10 12 -21 8 -24 -3 Z";
-const OPEN: &str = "M-26 -5 C-10 0 10 0 26 -5 C23 15 11 24 0 24 C-11 24 -23 15 -26 -5 Z";
-const WIDE: &str = "M-32 -8 C-12 -1 12 -1 32 -8 C30 22 16 38 0 38 C-16 38 -30 22 -32 -8 Z";
-const FV: &str = "M-22 -2 C-8 2 8 2 22 -2 C17 6 8 9 0 9 C-8 9 -17 6 -22 -2 Z";
+/// Every copy of a numbered part at turn `t`.
+fn copies(name: &str, t: f32) -> Vec<Shape> {
+	parts()
+		.numbered(name)
+		.iter()
+		.map(|turn| turn.at(t))
+		.collect()
+}
 
 /// What the face is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -781,7 +721,7 @@ fn draw_leg(c: &mut Svg, pose: &Pose, solved: &Solved, side: f32) {
 	};
 	let three_quarter = t > 0.5;
 	let mirror = side < 0.0 && !three_quarter;
-	let shoe = Shape::parse(if three_quarter { SHOE_3Q } else { SHOE_FRONT });
+	let shoe = view("shoe", three_quarter);
 	c.begin(&format!(
 		"translate({:.2} {:.2}) rotate({toe:.2}) scale({} 1)",
 		ankle.x,
@@ -798,21 +738,20 @@ fn draw_leg(c: &mut Svg, pose: &Pose, solved: &Solved, side: f32) {
 		DETAIL,
 	);
 	c.end();
-	let lace = if three_quarter {
-		"M2 -6 C6 -4 10 -2 14 0"
-	} else {
-		"M-6 -6 C-2 -4 4 -4 8 -6"
-	};
-	c.stroke(&Shape::parse(lace).path(), far(SOLE, is_far), 3.4);
+	c.stroke(
+		&view("shoe-lace", three_quarter).path(),
+		far(SOLE, is_far),
+		3.4,
+	);
 	c.brush_line(&shoe.path(), INK, LINE);
 	c.end();
 
 	// The shorts' leg rides on the thigh.
 	let (_, angle) = begin_bone(c, hip, knee);
-	let leg = Shape::parse(SHORTS_LEG);
+	let leg = drawn("legwear-leg");
 	c.brushed_shaded(&leg, far(SHORTS, is_far), LIGHT.rotate(-angle), INK, LINE);
 	c.stroke(
-		&Shape::parse("M-21 37 C-7 41 7 41 21 37").path(),
+		&drawn("legwear-leg-hem").path(),
 		far(SHORTS, is_far).darken(0.25),
 		DETAIL,
 	);
@@ -826,17 +765,17 @@ fn wrap(p: Pt, t: f32, radius: f32) -> Pt {
 }
 
 fn draw_torso(c: &mut Svg, t: f32) {
-	let shorts = Shape::parse(SHORTS_FRONT).lerp(&Shape::parse(SHORTS_3Q), t);
+	let shorts = part("legwear", t);
 	c.brushed_shaded(&shorts, SHORTS, LIGHT, INK, LINE);
 	c.stroke(
-		&Shape::parse("M-54 -128 C-20 -132 20 -132 54 -128")
+		&drawn("legwear-waist")
 			.map(|p| wrap(p, t, BODY_RADIUS))
 			.path(),
 		SHORTS.darken(0.25),
 		DETAIL,
 	);
 
-	let jumper = Shape::parse(JUMPER_FRONT).lerp(&Shape::parse(JUMPER_3Q), t);
+	let jumper = part("torso", t);
 	let path = jumper.path();
 	c.brush_fill(&path, JUMPER, INK, LINE * 1.1);
 	c.begin_clip(&path);
@@ -865,9 +804,7 @@ fn draw_torso(c: &mut Svg, t: f32) {
 	c.end();
 	c.cel_shade(&jumper, LIGHT);
 	c.stroke(
-		&Shape::parse("M-60 -125 C-20 -121 20 -121 60 -125")
-			.map(|p| wrap(p, t, BODY_RADIUS))
-			.path(),
+		&drawn("torso-hem").map(|p| wrap(p, t, BODY_RADIUS)).path(),
 		INK,
 		DETAIL,
 	);
@@ -876,7 +813,7 @@ fn draw_torso(c: &mut Svg, t: f32) {
 	// The neck, then the collar over it.
 	let neck = capsule(30.0, 30.0, 30.0).shift(pt(lerp(0.0, 6.0, t), -250.0));
 	c.brushed_shaded(&neck, SKIN, LIGHT, INK, LINE);
-	let collar = Shape::parse(COLLAR_FRONT).lerp(&Shape::parse(COLLAR_3Q), t);
+	let collar = part("collar", t);
 	c.brushed_shaded(&collar, STRIPE, LIGHT, INK, LINE);
 }
 
@@ -895,7 +832,7 @@ fn draw_arm(c: &mut Svg, pose: &Pose, solved: &Solved, side: f32, is_far: bool) 
 	c.end();
 
 	let (_, angle) = begin_bone(c, shoulder, elbow);
-	let sleeve = Shape::parse(SLEEVE);
+	let sleeve = drawn("sleeve");
 	let path = sleeve.path();
 	c.brush_fill(&path, far(JUMPER, is_far), INK, LINE);
 	c.begin_clip(&path);
@@ -910,11 +847,7 @@ fn draw_arm(c: &mut Svg, pose: &Pose, solved: &Solved, side: f32, is_far: bool) 
 	);
 	c.end();
 	c.cel_shade(&sleeve, LIGHT.rotate(-angle));
-	c.stroke(
-		&Shape::parse("M-14 38 C-6 41 6 41 14 38").path(),
-		INK,
-		DETAIL,
-	);
+	c.stroke(&drawn("sleeve-cuff").path(), INK, DETAIL);
 	c.brush_line(&path, INK, LINE);
 	c.end();
 
@@ -938,18 +871,18 @@ fn draw_arm(c: &mut Svg, pose: &Pose, solved: &Solved, side: f32, is_far: bool) 
 }
 
 fn draw_hand(c: &mut Svg, hand: Hand, skin: Color, light: Pt) {
-	let (outline, lines): (&str, &[&str]) = match hand {
-		Hand::Relaxed => (HAND_RELAXED, &HAND_RELAXED_LINES),
-		Hand::Open => (HAND_OPEN, &[]),
-		Hand::Fist => (HAND_FIST, &HAND_FIST_LINES),
+	let name = match hand {
+		Hand::Relaxed => "hand-relaxed",
+		Hand::Open => "hand-open",
+		Hand::Fist => "hand-fist",
 	};
-	let shape = Shape::parse(outline);
+	let shape = drawn(name);
 	let path = shape.path();
 	c.brush_fill(&path, skin, INK, LINE * 0.9);
 	c.cel_shade(&shape, light * 0.6);
 
-	for line in lines {
-		c.stroke(&Shape::parse(line).path(), INK, DETAIL * 0.9);
+	for line in copies(&format!("{name}-line"), 0.0) {
+		c.stroke(&line.path(), INK, DETAIL * 0.9);
 	}
 
 	c.brush_line(&path, INK, LINE * 0.9);
@@ -957,14 +890,14 @@ fn draw_hand(c: &mut Svg, hand: Hand, skin: Color, light: Pt) {
 
 fn draw_head(c: &mut Svg, pose: &Pose, t: f32) {
 	let face = pose.mood.face();
-	let head = Shape::parse(HEAD_FRONT).lerp(&Shape::parse(HEAD_3Q), t);
+	let head = part("head", t);
 	let head_path = head.path();
-	let hair = Shape::parse(HAIR_FRONT).lerp(&Shape::parse(HAIR_3Q), t);
+	let hair = part("hair", t);
 	let warp = |p: Pt| wrap(p, t, FACE_RADIUS);
 
 	// The far ear tucks away as the head turns; the near ear slides onto the side of the head.
-	let ear = Shape::parse(EAR);
-	let curl = Shape::parse(EAR_CURL);
+	let ear = drawn("ear");
+	let curl = drawn("ear-curl");
 	let draw_ear = |c: &mut Svg, at: Pt, mirror: bool, squash: f32| {
 		c.begin(&format!(
 			"translate({:.1} {:.1}) scale({:.3} 1)",
@@ -1018,21 +951,14 @@ fn draw_head(c: &mut Svg, pose: &Pose, t: f32) {
 	c.brush_line(&head_path, INK, LINE * 1.15);
 
 	// Hair over everything on the head, brows on top of the hair.
-	let tuft = Shape::parse(TUFT_FRONT).lerp(&Shape::parse(TUFT_3Q), t);
+	let tuft = part("tuft", t);
 	c.brushed_shaded(&tuft, HAIR, LIGHT, INK, LINE);
 	c.begin_clip(&tuft.path());
-	c.stroke(
-		&Shape::parse(TUFT_SHINE_FRONT)
-			.lerp(&Shape::parse(TUFT_SHINE_3Q), t)
-			.path(),
-		HAIR_LIGHT,
-		7.0,
-	);
+	c.stroke(&part("tuft-shine", t).path(), HAIR_LIGHT, 7.0);
 	c.end();
 	c.brushed_shaded(&hair, HAIR, LIGHT, INK, LINE);
 
-	for (front, three) in HAIR_STRANDS_FRONT.iter().zip(HAIR_STRANDS_3Q) {
-		let strand = Shape::parse(front).lerp(&Shape::parse(three), t);
+	for strand in copies("hair-strand", t) {
 		c.stroke(&strand.path(), INK, DETAIL * 0.8);
 	}
 
@@ -1154,11 +1080,9 @@ fn draw_eye(c: &mut Svg, pose: &Pose, lids: &Lids, side: f32, t: f32) {
 fn draw_brow(c: &mut Svg, brow: Brow, side: f32, t: f32) {
 	let warp = |p: Pt| wrap(p, t, FACE_RADIUS);
 	let centre = pt(side * 36.0, -48.0 - brow.raise);
-	let shape = Shape::parse(
-		"M-17 3 C-10 -7 8 -9 18 -1 C19 2 16 5 13 4 C4 0 -6 2 -14 7 C-18 8 -19 5 -17 3 Z",
-	)
-	.map(|p| (pt(p.x * side, p.y)).rotate(-side * brow.tilt) + centre)
-	.map(warp);
+	let shape = drawn("brow")
+		.map(|p| (pt(p.x * side, p.y)).rotate(-side * brow.tilt) + centre)
+		.map(warp);
 	c.brushed(&shape.path(), HAIR, INK, 2.0);
 }
 
@@ -1179,8 +1103,8 @@ fn draw_nose(c: &mut Svg, t: f32, wrinkle: bool) {
 	);
 
 	if wrinkle {
-		for line in ["M-12 6 C-8 3 -4 3 -1 6", "M3 2 C6 0 10 0 13 3"] {
-			c.stroke(&Shape::parse(line).map(warp).path(), INK, DETAIL);
+		for line in copies("nose-wrinkle", 0.0) {
+			c.stroke(&line.map(warp).path(), INK, DETAIL);
 		}
 	}
 }
@@ -1196,7 +1120,7 @@ fn draw_mouth(c: &mut Svg, pose: &Pose, face: &Face, t: f32) {
 	let Some(viseme) = pose.viseme else {
 		match face.mouth {
 			MouthShape::Smile => {
-				let outer = place(&Shape::parse(SMILE), pt(0.0, 0.0));
+				let outer = place(&drawn("mouth-smile"), pt(0.0, 0.0));
 				open_mouth(
 					c,
 					&outer,
@@ -1209,18 +1133,18 @@ fn draw_mouth(c: &mut Svg, pose: &Pose, face: &Face, t: f32) {
 				dimples(c, &place, 36.0, -6.0, -6.0);
 			}
 			MouthShape::Grin => {
-				let outer = place(&Shape::parse(GRIN), pt(0.0, 0.0));
+				let outer = place(&drawn("mouth-grin"), pt(0.0, 0.0));
 				open_mouth(
 					c,
 					&outer,
-					Some(&place(&Shape::parse(GRIN_TEETH), pt(0.0, 0.0))),
+					Some(&place(&drawn("mouth-grin-teeth"), pt(0.0, 0.0))),
 					Some(&place(
 						&Shape::ellipse(pt(6.0, 27.0), 20.0, 9.0),
 						pt(0.0, 0.0),
 					)),
 				);
 				c.stroke(
-					&place(&Shape::parse("M2 0 C2 3 2 6 2 8"), pt(0.0, 0.0)).path(),
+					&place(&drawn("mouth-grin-gap"), pt(0.0, 0.0)).path(),
 					TEETH.darken(0.25),
 					1.8,
 				);
@@ -1228,18 +1152,18 @@ fn draw_mouth(c: &mut Svg, pose: &Pose, face: &Face, t: f32) {
 			}
 			MouthShape::Pout => {
 				let by = pt(8.0, -2.0);
-				c.fill(&place(&Shape::parse(POUT), by).path(), INK);
-				c.stroke(&place(&Shape::parse(POUT_LIP), by).path(), INK, DETAIL);
+				c.fill(&place(&drawn("mouth-pout"), by).path(), INK);
+				c.stroke(&place(&drawn("mouth-pout-lip"), by).path(), INK, DETAIL);
 			}
 			MouthShape::Bleh => {
 				let tilt = |p: Pt| p.rotate(-8.0);
 				let by = pt(-4.0, 0.0);
-				let outer = place(&Shape::parse(BLEH).map(tilt), by);
+				let outer = place(&drawn("mouth-bleh").map(tilt), by);
 				open_mouth(c, &outer, None, None);
-				let tongue = place(&Shape::parse(BLEH_TONGUE).map(tilt), by);
+				let tongue = place(&drawn("mouth-bleh-tongue").map(tilt), by);
 				c.brushed(&tongue.path(), TONGUE, INK, DETAIL * 1.2);
 				c.stroke(
-					&place(&Shape::parse(BLEH_GROOVE).map(tilt), by).path(),
+					&place(&drawn("mouth-bleh-groove").map(tilt), by).path(),
 					TONGUE.darken(0.3),
 					DETAIL * 0.8,
 				);
@@ -1249,36 +1173,36 @@ fn draw_mouth(c: &mut Svg, pose: &Pose, face: &Face, t: f32) {
 		return;
 	};
 
-	let mouth = |data: &str| place(&Shape::parse(data).map(curled), pt(0.0, 0.0));
+	let mouth = |shape: &Shape| place(&shape.map(curled), pt(0.0, 0.0));
 	let ellipse = |c: Pt, rx: f32, ry: f32| place(&Shape::ellipse(c, rx, ry), pt(0.0, 0.0));
 
 	match viseme {
-		Viseme::Rest => c.fill(&mouth(REST).path(), INK),
+		Viseme::Rest => c.fill(&mouth(&drawn("mouth-rest")).path(), INK),
 		Viseme::Mbp => {
-			c.fill(&mouth(MBP).path(), INK);
-			c.stroke(&mouth(MBP_LIP).path(), INK, DETAIL);
+			c.fill(&mouth(&drawn("mouth-mbp")).path(), INK);
+			c.stroke(&mouth(&drawn("mouth-mbp-lip")).path(), INK, DETAIL);
 		}
 		Viseme::Teeth => {
 			open_mouth(
 				c,
-				&mouth(TEETH_OPEN),
-				Some(&teeth_band(&mouth, -6.0, 4.0)),
+				&mouth(&drawn("mouth-teeth")),
+				Some(&mouth(&teeth_band(-6.0, 4.0))),
 				None,
 			);
 		}
 		Viseme::Open => {
 			open_mouth(
 				c,
-				&mouth(OPEN),
-				Some(&teeth_band(&mouth, -8.0, 2.0)),
+				&mouth(&drawn("mouth-open")),
+				Some(&mouth(&teeth_band(-8.0, 2.0))),
 				Some(&ellipse(pt(2.0, 22.0), 15.0, 8.0)),
 			);
 		}
 		Viseme::Wide => {
 			open_mouth(
 				c,
-				&mouth(WIDE),
-				Some(&teeth_band(&mouth, -10.0, 1.0)),
+				&mouth(&drawn("mouth-wide")),
+				Some(&mouth(&teeth_band(-10.0, 1.0))),
 				Some(&ellipse(pt(3.0, 34.0), 19.0, 10.0)),
 			);
 		}
@@ -1294,14 +1218,19 @@ fn draw_mouth(c: &mut Svg, pose: &Pose, face: &Face, t: f32) {
 			open_mouth(c, &ellipse(pt(0.0, 5.0), 8.0, 9.0), None, None);
 		}
 		Viseme::Fv => {
-			open_mouth(c, &mouth(FV), Some(&teeth_band(&mouth, -6.0, 6.0)), None);
-			c.stroke(&mouth("M-14 11 C-6 15 6 15 14 11").path(), INK, DETAIL);
+			open_mouth(
+				c,
+				&mouth(&drawn("mouth-fv")),
+				Some(&mouth(&teeth_band(-6.0, 6.0))),
+				None,
+			);
+			c.stroke(&mouth(&drawn("mouth-fv-lip")).path(), INK, DETAIL);
 		}
 		Viseme::Tongue => {
 			open_mouth(
 				c,
-				&mouth(OPEN),
-				Some(&teeth_band(&mouth, -8.0, 0.0)),
+				&mouth(&drawn("mouth-open")),
+				Some(&mouth(&teeth_band(-8.0, 0.0))),
 				Some(&ellipse(pt(0.0, 6.0), 11.0, 8.0)),
 			);
 		}
@@ -1309,8 +1238,8 @@ fn draw_mouth(c: &mut Svg, pose: &Pose, face: &Face, t: f32) {
 }
 
 /// The upper teeth as one simple band between `top` and `bottom` (mouth units).
-fn teeth_band(mouth: &dyn Fn(&str) -> Shape, top: f32, bottom: f32) -> Shape {
-	mouth(&format!(
+fn teeth_band(top: f32, bottom: f32) -> Shape {
+	Shape::parse(&format!(
 		"M-40 {top} C-14 {} 14 {} 40 {top} C40 {} 40 {} 40 {bottom} C14 {} -14 {} -40 {bottom} \
 		 C-40 {} -40 {} -40 {top} Z",
 		top + 6.0,
@@ -1361,53 +1290,27 @@ fn dimples(c: &mut Svg, place: &dyn Fn(&Shape, Pt) -> Shape, half: f32, left_y: 
 
 #[cfg(test)]
 mod tests {
+	use fables::art::parts::Turn;
+
 	use super::*;
 
 	#[test]
-	fn turnable_parts_have_matching_front_and_three_quarter_drawings() {
-		for (front, three) in [
-			(HEAD_FRONT, HEAD_3Q),
-			(HAIR_FRONT, HAIR_3Q),
-			(TUFT_FRONT, TUFT_3Q),
-			(TUFT_SHINE_FRONT, TUFT_SHINE_3Q),
-			(JUMPER_FRONT, JUMPER_3Q),
-			(COLLAR_FRONT, COLLAR_3Q),
-			(SHORTS_FRONT, SHORTS_3Q),
-		] {
-			// Blending panics if the drawings don't share their commands.
-			let _ = Shape::parse(front).lerp(&Shape::parse(three), 0.5);
-		}
-	}
+	fn the_part_files_are_complete_and_his_turning_parts_blend() {
+		check_parts().unwrap();
 
-	#[test]
-	fn every_part_parses() {
-		for data in [
-			EAR,
-			EAR_CURL,
-			SLEEVE,
-			SHORTS_LEG,
-			SHOE_FRONT,
-			SHOE_3Q,
-			HAND_RELAXED,
-			HAND_OPEN,
-			HAND_FIST,
-			SMILE,
-			GRIN,
-			GRIN_TEETH,
-			POUT,
-			POUT_LIP,
-			BLEH,
-			BLEH_TONGUE,
-			BLEH_GROOVE,
-			REST,
-			MBP,
-			MBP_LIP,
-			TEETH_OPEN,
-			OPEN,
-			WIDE,
-			FV,
+		for name in [
+			"head",
+			"hair",
+			"tuft",
+			"tuft-shine",
+			"torso",
+			"collar",
+			"legwear",
 		] {
-			let _ = Shape::parse(data);
+			assert!(
+				matches!(parts().turn(name), Some(Turn::Blend { .. })),
+				"{name} should blend between its front and three-quarter drawings"
+			);
 		}
 	}
 

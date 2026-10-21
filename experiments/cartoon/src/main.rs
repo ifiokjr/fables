@@ -33,6 +33,8 @@ fn main() -> Result<()> {
 	std::fs::create_dir_all(&out)?;
 	let wanted: Vec<String> = std::env::args().skip(1).collect();
 
+	stinky::check_parts()?;
+
 	for name in &wanted {
 		if !PIECES.contains(&name.as_str()) {
 			bail!("unknown piece {name:?}; choose from {}", PIECES.join(", "));

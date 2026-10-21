@@ -8,6 +8,9 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use fables::art::parts;
+use fables::art::parts::Level;
+use fables::art::parts::Parts;
 use fables::art::style::Style;
 use fables::art::style::StyleName;
 use fables::book;
@@ -102,6 +105,11 @@ enum Command {
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
+	/// Work with authored puppets' part files (`world/puppets/`).
+	Puppet {
+		#[command(subcommand)]
+		action: PuppetAction,
+	},
 	/// Narrate and animate the story as MP4 videos.
 	Video {
 		story: PathBuf,
@@ -117,6 +125,37 @@ enum Command {
 	/// Build the book and both videos.
 	All {
 		story: PathBuf,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+	},
+}
+
+#[derive(Subcommand)]
+enum PuppetAction {
+	/// Check part files against the parts a figure is drawn with: missing parts, views without
+	/// their pair, parts that swap instead of blending, and names no figure uses.
+	Check {
+		/// The cast id to check; leave it out to check every member with a puppet.
+		id: Option<String>,
+		#[arg(long, default_value = "world/cast.toml")]
+		cast: PathBuf,
+	},
+	/// Start a cast member's part file from another puppet's drawings, to redraw part by part.
+	Template {
+		/// The cast id the file is for, e.g. bogey.
+		id: String,
+		/// The puppet whose drawings to start from.
+		#[arg(long, default_value = "stinky")]
+		from: String,
+		#[arg(long, default_value = "world/cast.toml")]
+		cast: PathBuf,
+	},
+	/// Render every part of a puppet: each turning part front-on, half-turned and three-quarters.
+	Sheet {
+		/// The cast id, e.g. stinky.
+		id: String,
+		#[arg(long, default_value = "world/cast.toml")]
+		cast: PathBuf,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -170,6 +209,13 @@ fn run(cli: Cli) -> Result<()> {
 			}
 
 			Ok(())
+		}
+		Command::Puppet { action } => {
+			match action {
+				PuppetAction::Check { id, cast } => puppet_check(id.as_deref(), &cast),
+				PuppetAction::Template { id, from, cast } => puppet_template(&id, &from, &cast),
+				PuppetAction::Sheet { id, cast, out } => puppet_sheet(&id, &cast, &out),
+			}
 		}
 		Command::Rig { id, cast, out } => {
 			for style in sheet_styles(&choices) {
@@ -513,6 +559,122 @@ fn rig(id: &str, cast_path: &Path, out: &Path, style: Style) -> Result<()> {
 	fables::video::motion::motion_test(look, &member.name, style, &video)?;
 	done(&video, started);
 
+	Ok(())
+}
+
+/// A cast member's puppet part file, or an explanation of why they have none.
+fn puppet_file(cast: &Cast, id: &str, cast_path: &Path) -> Result<PathBuf> {
+	let member = cast
+		.member(id)
+		.with_context(|| format!("`{id}` is not in {}", cast_path.display()))?;
+
+	match &member.kind {
+		fables::cast::Kind::Figure(look) => {
+			look.puppet.clone().with_context(|| {
+				let file = cast_path
+					.with_file_name("puppets")
+					.join(format!("{id}.svg"));
+				let start = if file.exists() {
+					format!("{} exists, so", file.display())
+				} else {
+					format!("start one with `fables puppet template {id}`, then")
+				};
+				format!(
+					"`{id}` has no puppet yet: {start} add `puppet = \"puppets/{id}.svg\"` to \
+					 [{id}] in {}",
+					cast_path.display()
+				)
+			})
+		}
+		_ => anyhow::bail!("`{id}` is not a person, so has no puppet"),
+	}
+}
+
+fn puppet_check(id: Option<&str>, cast_path: &Path) -> Result<()> {
+	let cast = Cast::load(cast_path)?;
+	let ids: Vec<&str> = match id {
+		Some(id) => vec![id],
+		None => {
+			cast.members
+				.values()
+				.filter(
+					|member| matches!(&member.kind, fables::cast::Kind::Figure(look) if look.puppet.is_some()),
+				)
+				.map(|member| member.id.as_str())
+				.collect()
+		}
+	};
+	let mut errors = 0;
+
+	for id in ids {
+		let path = puppet_file(&cast, id, cast_path)?;
+		let parts = Parts::load_puppet(&path)?;
+		let findings = parts.check();
+		let count = parts.iter().count();
+		println!("{id}: {count} parts from {} and its kit", path.display());
+
+		for finding in &findings {
+			println!("  {finding}");
+		}
+
+		errors += findings
+			.iter()
+			.filter(|finding| finding.level == Level::Error)
+			.count();
+	}
+
+	anyhow::ensure!(errors == 0, "{errors} part errors");
+	Ok(())
+}
+
+fn puppet_template(id: &str, from: &str, cast_path: &Path) -> Result<()> {
+	let cast = Cast::load(cast_path)?;
+	let member = cast
+		.member(id)
+		.with_context(|| format!("`{id}` is not in {}", cast_path.display()))?;
+	let source = puppet_file(&cast, from, cast_path)?;
+	let target = source.with_file_name(format!("{id}.svg"));
+	anyhow::ensure!(
+		!target.exists(),
+		"{} already exists; edit it, or move it aside to start again",
+		target.display()
+	);
+
+	// Only the character's own parts: the kit is shared, and redrawing a kit part is a choice.
+	let parts = Parts::load(&source)?;
+	let drawings: Vec<(&str, &fables::art::shape::Shape)> = parts.iter().collect();
+	let title = format!(
+		"{}: own parts (started from {from}; redraw each one)",
+		member.name
+	);
+	std::fs::write(&target, parts::write(&title, &drawings))
+		.with_context(|| format!("could not write {}", target.display()))?;
+	println!(
+		"✓ wrote {}\n  Add `puppet = \"puppets/{id}.svg\"` to [{id}] in {}, redraw the parts, and \
+		 run `fables puppet check {id}`.",
+		target.display(),
+		cast_path.display()
+	);
+	Ok(())
+}
+
+fn puppet_sheet(id: &str, cast_path: &Path, out: &Path) -> Result<()> {
+	let started = Instant::now();
+	let cast = Cast::load(cast_path)?;
+	let path = puppet_file(&cast, id, cast_path)?;
+	let parts = Parts::load_puppet(&path)?;
+	let name = cast.member(id).map_or(id, |member| member.name.as_str());
+	let dir = out.join("puppets");
+	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
+	let sheet = dir.join(format!("{id}-parts.png"));
+	std::fs::write(
+		&sheet,
+		raster::png(&press::sheets::parts_sheet(
+			&format!("{name}: parts"),
+			&parts,
+		)?)?,
+	)?;
+	done(&sheet, started);
 	Ok(())
 }
 

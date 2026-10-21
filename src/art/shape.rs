@@ -6,6 +6,8 @@
 //! drawing for every angle, and every point can be pushed through a warp (wrapping a face
 //! round a head) before it is drawn.
 
+use std::fmt::Write as _;
+
 use super::Path;
 use super::Pt;
 use super::lerp;
@@ -87,11 +89,70 @@ impl Shape {
 
 		flush(command, &mut numbers, &mut points);
 		assert!(
-			points.len() >= 4 && (points.len() - 1) % 3 == 0,
+			points.len() >= 4 && (points.len() - 1).is_multiple_of(3),
 			"a shape is a start point plus whole curves: {data:?}"
 		);
 
 		Shape { points, closed }
+	}
+
+	/// A shape from a start point and whole curves (`1 + 3n` points, `n >= 1`), or `None` if
+	/// the count does not make whole curves.
+	pub fn from_points(points: Vec<Pt>, closed: bool) -> Option<Shape> {
+		(points.len() >= 4 && (points.len() - 1).is_multiple_of(3))
+			.then_some(Shape { points, closed })
+	}
+
+	/// The start point followed by each curve's two controls and end point.
+	pub fn points(&self) -> &[Pt] {
+		&self.points
+	}
+
+	pub fn is_closed(&self) -> bool {
+		self.closed
+	}
+
+	/// How many curves the drawing has: two drawings blend only when these match.
+	pub fn curves(&self) -> usize {
+		(self.points.len() - 1) / 3
+	}
+
+	/// Whether `other` has the same commands, so the two can blend point by point.
+	pub fn blends_with(&self, other: &Shape) -> bool {
+		self.points.len() == other.points.len() && self.closed == other.closed
+	}
+
+	/// The smallest box holding every point, controls included: `(min, max)`.
+	pub fn bounds(&self) -> (Pt, Pt) {
+		self.points.iter().fold(
+			(pt(f32::MAX, f32::MAX), pt(f32::MIN, f32::MIN)),
+			|(lo, hi), p| {
+				(
+					pt(lo.x.min(p.x), lo.y.min(p.y)),
+					pt(hi.x.max(p.x), hi.y.max(p.y)),
+				)
+			},
+		)
+	}
+
+	/// SVG path data with every number written exactly, so a drawing saved to a file and read
+	/// back is the same drawing. ([`Shape::path`] rounds to one decimal place for rendering.)
+	pub fn exact_data(&self) -> String {
+		let mut data = format!("M{} {}", self.points[0].x, self.points[0].y);
+
+		for curve in self.points[1..].chunks(3) {
+			let _ = write!(
+				data,
+				" C{} {} {} {} {} {}",
+				curve[0].x, curve[0].y, curve[1].x, curve[1].y, curve[2].x, curve[2].y
+			);
+		}
+
+		if self.closed {
+			data.push_str(" Z");
+		}
+
+		data
 	}
 
 	/// An ellipse as four curves, so it can be warped and blended like authored parts.
@@ -221,6 +282,21 @@ mod tests {
 			shape.path().as_str(),
 			"M0.0 0.0C1.0 2.0 3.0 4.0 5.0 6.0C7.0 8.0 9.0 10.0 0.0 0.0Z"
 		);
+	}
+
+	#[test]
+	fn exact_data_reads_back_as_the_same_drawing() {
+		let shape = Shape::parse("M-0.25 3 C1.5 -2.125 3 4 5.75 6 Z");
+		assert_eq!(Shape::parse(&shape.exact_data()), shape);
+		assert_eq!(shape.curves(), 1);
+		assert_eq!(shape.bounds(), (pt(-0.25, -2.125), pt(5.75, 6.0)));
+	}
+
+	#[test]
+	fn whole_curves_only() {
+		assert!(Shape::from_points(vec![pt(0.0, 0.0); 4], true).is_some());
+		assert!(Shape::from_points(vec![pt(0.0, 0.0); 5], true).is_none());
+		assert!(Shape::from_points(vec![pt(0.0, 0.0)], true).is_none());
 	}
 
 	#[test]
