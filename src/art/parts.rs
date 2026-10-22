@@ -148,6 +148,12 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("head", Space::Head).turning(),
 	part("hair", Space::Head).turning(),
 	part("hair-strand", Space::Head).turning().numbered(),
+	// Sheen on the hair, drawn in a lighter shade inside it.
+	part("hair-shine", Space::Head).turning().numbered(),
+	// Loose hair (pigtails, bunches) behind the head. Each lock's drawing starts at its root,
+	// where it swings from.
+	part("hair-lock", Space::Head).turning().numbered(),
+	part("hair-lock-tie", Space::Head).turning().numbered(),
 	part("tuft", Space::Head).turning().optional(),
 	part("tuft-shine", Space::Head).turning().optional(),
 	part("torso", Space::Body).turning(),
@@ -157,11 +163,18 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("legwear-waist", Space::Body).optional(),
 	part("sleeve", Space::Bone),
 	part("sleeve-cuff", Space::Bone).optional(),
-	part("legwear-leg", Space::Bone),
+	part("legwear-leg", Space::Bone).optional(),
 	part("legwear-leg-hem", Space::Bone).optional(),
+	// Long trousers carry on down the shin, over the socks.
+	part("legwear-shin", Space::Bone).optional(),
+	part("legwear-shin-cuff", Space::Bone).optional(),
+	// Long sleeves carry on down the forearm.
+	part("forearm-sleeve", Space::Bone).optional(),
+	part("forearm-sleeve-cuff", Space::Bone).optional(),
 	part("ear", Space::Head).kit(),
 	part("ear-curl", Space::Head).optional().kit(),
 	part("brow", Space::Feature).kit(),
+	part("nose", Space::Feature).kit(),
 	part("nose-wrinkle", Space::Head).numbered().kit(),
 	part("hand-relaxed", Space::Hand).kit(),
 	part("hand-relaxed-line", Space::Hand).numbered().kit(),
@@ -220,6 +233,9 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("satchel-strap", Space::Body).turning().kit(),
 	part("apron", Space::Body).turning().kit(),
 	part("apron-pocket", Space::Body).optional().kit(),
+	// Motifs a top's pattern repeats.
+	part("pattern-dot", Space::Feature).kit(),
+	part("pattern-star", Space::Feature).kit(),
 ];
 
 /// A part as it is at some turn of the body: one drawing, a blend of two, or a swap.

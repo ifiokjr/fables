@@ -149,6 +149,7 @@ struct Inks {
 	skin: Color,
 	nose: Color,
 	freckle: Color,
+	blush: Color,
 	hair: Color,
 	hair_light: Color,
 	top: Color,
@@ -181,6 +182,18 @@ const SATCHEL: Color = Color(0xA8_5A_3C);
 const APRON: Color = Color(0xF8_F1_E4);
 const MUD: Color = Color(0x6E_4A_30);
 
+/// Cheeks: a warm blush on warm skin. Pink over teal or blue skin turns grey (they are
+/// opposite colours), so cool skin gets a soft plum shading instead.
+fn blush(skin: Color) -> Color {
+	let (r, _, b) = skin.rgb();
+
+	if r >= b {
+		BLUSH
+	} else {
+		skin.mix(Color(0x8E_4A_7A), 0.35)
+	}
+}
+
 impl Inks {
 	fn of(look: &Look, teeth: Teeth) -> Inks {
 		Inks {
@@ -188,6 +201,7 @@ impl Inks {
 			skin: look.skin,
 			nose: look.skin.mix(Color(0xE0_60_50), 0.18),
 			freckle: look.skin.mix(Color(0x8A_3A_20), 0.45),
+			blush: blush(look.skin),
 			hair: look.hair_color,
 			hair_light: look.hair_color.lighten(0.25),
 			top: look.top,
@@ -916,17 +930,22 @@ fn draw_leg(
 	);
 	svg.brushed_shaded(&leg, far(inks.skin, is_far), LIGHT, ink, LINE);
 
-	let angle = begin_bone(svg, knee, ankle);
-	let sock = capsule(18.0, 15.5, 15.0).shift(pt(0.0, shin - 16.0));
-	svg.brushed_shaded(&sock, far(SOCK, is_far), LIGHT.rotate(-angle), ink, LINE);
-	svg.begin_clip(&sock.path());
-	svg.fill(
-		&Path::rect(-12.0, shin - 14.0, 24.0, 4.5),
-		far(inks.top, is_far),
-	);
-	svg.end();
-	svg.brush_line(&sock.path(), ink, LINE);
-	svg.end();
+	// Socks, unless trousers come down over them.
+	let trouser = puppet.part("legwear-shin", t);
+
+	if trouser.is_none() {
+		let angle = begin_bone(svg, knee, ankle);
+		let sock = capsule(18.0, 15.5, 15.0).shift(pt(0.0, shin - 16.0));
+		svg.brushed_shaded(&sock, far(SOCK, is_far), LIGHT.rotate(-angle), ink, LINE);
+		svg.begin_clip(&sock.path());
+		svg.fill(
+			&Path::rect(-12.0, shin - 14.0, 24.0, 4.5),
+			far(inks.top, is_far),
+		);
+		svg.end();
+		svg.brush_line(&sock.path(), ink, LINE);
+		svg.end();
+	}
 
 	// The shoe stays level with the ground and tips its toe as the foot lifts in a stride.
 	let lift = (solved.limbs.ankle_y - ankle.y).max(0.0);
@@ -964,22 +983,41 @@ fn draw_leg(
 		svg.end();
 	}
 
-	// The legwear's leg rides on the thigh.
-	let angle = begin_bone(svg, hip, knee);
-	let cover = puppet.required("legwear-leg", t);
-	svg.brushed_shaded(
-		&cover,
-		far(inks.bottom, is_far),
-		LIGHT.rotate(-angle),
-		ink,
-		LINE,
-	);
+	// Trousers ride on the shin, over the top of the shoe.
+	if let Some(trouser) = trouser {
+		let angle = begin_bone(svg, knee, ankle);
+		svg.brushed_shaded(
+			&trouser,
+			far(inks.bottom, is_far),
+			LIGHT.rotate(-angle),
+			ink,
+			LINE,
+		);
 
-	if let Some(hem) = puppet.part("legwear-leg-hem", t) {
-		svg.brush_line(&hem.path(), far(inks.bottom, is_far).darken(0.25), DETAIL);
+		if let Some(cuff) = puppet.part("legwear-shin-cuff", t) {
+			svg.brush_line(&cuff.path(), far(inks.bottom, is_far).darken(0.25), DETAIL);
+		}
+
+		svg.end();
 	}
 
-	svg.end();
+	// The legwear's leg rides on the thigh (a skirt has none).
+	if let Some(cover) = puppet.part("legwear-leg", t) {
+		let angle = begin_bone(svg, hip, knee);
+		svg.brushed_shaded(
+			&cover,
+			far(inks.bottom, is_far),
+			LIGHT.rotate(-angle),
+			ink,
+			LINE,
+		);
+
+		if let Some(hem) = puppet.part("legwear-leg-hem", t) {
+			svg.brush_line(&hem.path(), far(inks.bottom, is_far).darken(0.25), DETAIL);
+		}
+
+		svg.end();
+	}
 }
 
 fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32) {
@@ -997,8 +1035,26 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32
 	svg.brush_fill(&path, inks.top, ink, LINE * 1.1);
 	svg.begin_clip(&path);
 
-	// Stripes wrap round the body with it. Other patterns arrive with the characters who wear
-	// them, so until then their tops are plain.
+	// Patterns wrap round the body with it: stripes are bands, dots and stars repeat the kit's
+	// motifs.
+	if look.pattern == Pattern::Dots {
+		let dot = puppet.required("pattern-dot", t);
+
+		for row in 0..6 {
+			for column in -4..=4 {
+				let offset = if row % 2 == 0 { 0.0 } else { 11.0 };
+				let at = pt(column as f32 * 22.0 + offset, -222.0 + row as f32 * 20.0);
+				svg.fill(&dot.shift(at).map(body).path(), inks.stripe);
+			}
+		}
+	}
+
+	if look.pattern == Pattern::Star {
+		let star = puppet.required("pattern-star", t).shift(pt(0.0, -176.0));
+		let star = star.map(body);
+		svg.brushed(&star.path(), inks.stripe, ink, DETAIL);
+	}
+
 	if look.pattern == Pattern::Stripes {
 		for y in [-200.0, -176.0, -152.0] {
 			let band = Shape::from_points(
@@ -1112,7 +1168,7 @@ impl Arm<'_> {
 		};
 		// Mud never washed off: the hands are caked and it creeps up the forearms.
 		let (hand_skin, arm_skin) = if self.look.has(Extra::MuddyHands) {
-			(inks.skin.mix(MUD, 0.65), inks.skin.mix(MUD, 0.3))
+			(inks.skin.mix(MUD, 0.92), inks.skin.mix(MUD, 0.4))
 		} else {
 			(inks.skin, inks.skin)
 		};
@@ -1126,6 +1182,22 @@ impl Arm<'_> {
 			ink,
 			LINE,
 		);
+
+		// A long sleeve carries on down the forearm.
+		if let Some(lower) = puppet.part("forearm-sleeve", t) {
+			svg.brushed_shaded(
+				&lower,
+				far(inks.top, is_far),
+				LIGHT.rotate(-angle),
+				ink,
+				LINE,
+			);
+
+			if let Some(cuff) = puppet.part("forearm-sleeve-cuff", t) {
+				svg.brush_line(&cuff.path(), ink, DETAIL);
+			}
+		}
+
 		svg.end();
 
 		let angle = begin_bone(svg, shoulder, elbow);
@@ -1134,8 +1206,20 @@ impl Arm<'_> {
 		svg.brush_fill(&path, far(inks.top, is_far), ink, LINE);
 		svg.begin_clip(&path);
 
-		for y in [6.0, 24.0] {
-			svg.fill(&Path::rect(-20.0, y, 40.0, 10.0), far(inks.stripe, is_far));
+		match self.look.pattern {
+			Pattern::Stripes => {
+				for y in [6.0, 24.0] {
+					svg.fill(&Path::rect(-20.0, y, 40.0, 10.0), far(inks.stripe, is_far));
+				}
+			}
+			Pattern::Dots => {
+				let dot = puppet.required("pattern-dot", t);
+
+				for (x, y) in [(-6.0, 6.0), (7.0, 16.0), (-5.0, 27.0)] {
+					svg.fill(&dot.shift(pt(x, y)).path(), far(inks.stripe, is_far));
+				}
+			}
+			Pattern::Plain | Pattern::Star => {}
 		}
 
 		svg.fill(
@@ -1323,12 +1407,47 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		svg.end();
 	};
 
+	// Ears sit just inside the widest point of the head, so wide heads keep their ears.
+	let half_width = puppet
+		.required("head", 0.0)
+		.points()
+		.iter()
+		.step_by(3)
+		.fold(0.0_f32, |widest, p| widest.max(p.x.abs()));
+	let ear_at = half_width - 6.0;
+	let spread = ear_at / 90.0;
+
 	if t < 0.9 {
-		draw_ear(svg, pt(lerp(90.0, 96.0, t), 6.0), true, 1.0 - t * 0.8);
+		draw_ear(
+			svg,
+			pt(lerp(ear_at, 96.0 * spread, t), 6.0),
+			true,
+			1.0 - t * 0.8,
+		);
 	}
 
 	if t < 0.5 {
-		draw_ear(svg, pt(-90.0, 6.0), false, 1.0);
+		draw_ear(svg, pt(-ear_at, 6.0), false, 1.0);
+	}
+
+	// Pigtails and bunches hang behind the head and swing from their roots.
+	let ties = puppet.copies("hair-lock-tie", t);
+
+	for (index, lock) in puppet.copies("hair-lock", t).iter().enumerate() {
+		let root = lock.points()[0];
+		svg.begin(&format!(
+			"rotate({:.2} {:.1} {:.1})",
+			posed.follow * 0.8,
+			root.x,
+			root.y
+		));
+		svg.brushed_shaded(lock, inks.hair, LIGHT, ink, LINE);
+
+		if let Some(tie) = ties.get(index) {
+			svg.brushed(&tie.path(), inks.stripe, ink, DETAIL);
+		}
+
+		svg.end();
 	}
 
 	svg.brush_fill(&head_path, inks.skin, ink, LINE * 1.15);
@@ -1343,7 +1462,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 	// Cheeks and freckles, wrapped round the face. Anything turned past the edge is hidden.
 	for side in [-1.0_f32, 1.0] {
 		let blush = Shape::ellipse(pt(side * 58.0, 34.0), 17.0, 9.0).map(warp);
-		svg.fill_alpha(&blush.path(), BLUSH, 0.3);
+		svg.fill_alpha(&blush.path(), inks.blush, 0.3);
 
 		if look.has(Extra::Freckles) {
 			for (x, y) in [(52.0, 24.0), (62.0, 18.0), (64.0, 29.0)] {
@@ -1431,13 +1550,25 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 
 	svg.brushed_shaded(&hair, inks.hair, LIGHT, ink, LINE);
 
+	let shines = puppet.copies("hair-shine", t);
+
+	if !shines.is_empty() {
+		svg.begin_clip(&hair.path());
+
+		for shine in &shines {
+			svg.brush_line(&shine.path(), inks.hair.lighten(0.3), 8.0);
+		}
+
+		svg.end();
+	}
+
 	for strand in puppet.copies("hair-strand", t) {
 		svg.brush_line(&strand.path(), ink, DETAIL * 0.8);
 	}
 
 	// In three-quarter view the near ear sits on the side of the head, over the hair behind it.
 	if t >= 0.5 {
-		draw_ear(svg, pt(lerp(-74.0, -58.0, t), 8.0), false, 0.85);
+		draw_ear(svg, pt(lerp(-74.0, -58.0, t) * spread, 8.0), false, 0.85);
 	}
 
 	// A bow in the hair swings a little with it.
@@ -1617,7 +1748,9 @@ fn draw_nose(svg: &mut Svg, puppet: &Authored, inks: &Inks, t: f32, wrinkle: boo
 	let warp = |p: Pt| wrap(p, t, FACE_RADIUS);
 	// The nose stands proud of the face, so it travels a little further than the cylinder.
 	let poke = pt(9.0 * t, 0.0);
-	let nose = Shape::ellipse(pt(0.0, 22.0), 12.5, 10.0)
+	let nose = puppet
+		.required("nose", t)
+		.shift(pt(0.0, 22.0))
 		.map(warp)
 		.shift(poke);
 	svg.brush_fill(&nose.path(), inks.nose, inks.line, DETAIL * 1.1);
@@ -1895,6 +2028,7 @@ mod tests {
 	use crate::art::figure;
 	use crate::art::figure::Frame;
 	use crate::art::figure::Pose;
+	use crate::art::parts::Turn;
 
 	#[test]
 	fn the_front_view_is_unwarped_and_turning_moves_the_face_right() {
@@ -2041,6 +2175,29 @@ mod tests {
 		let solved = Solved::new(&posed, frame.limbs());
 		let (_, _, wrist) = solved.arm(&posed, 1.0);
 		assert!((wrist - mouth_on_body(&solved, &posed)).len() < 70.0);
+	}
+
+	#[test]
+	fn every_puppet_file_draws_a_figure() {
+		let world = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("world/puppets");
+
+		for name in ["stinky", "bogey", "grubby"] {
+			let puppet = Authored::load(&world.join(format!("{name}.svg")))
+				.unwrap_or_else(|error| panic!("{name}: {error:#}"));
+
+			for turning in ["head", "hair", "torso", "legwear"] {
+				assert!(
+					matches!(puppet.parts.turn(turning), Some(Turn::Blend { .. })),
+					"{name}'s {turning} should blend between its two views"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn cool_skin_gets_shading_instead_of_a_pink_blush() {
+		assert_eq!(blush(Color(0xF4_A2_6B)), BLUSH);
+		assert_ne!(blush(Color(0x62_B9_AD)), BLUSH);
 	}
 
 	#[test]

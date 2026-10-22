@@ -2,13 +2,15 @@
 //!
 //! ```text
 //! cargo run --release            # everything
-//! cargo run --release -- sheet   # just the named pieces: sheet, extras, turnaround, mouths, rig,
+//! cargo run --release -- sheet   # just the named pieces: sheet, preview, extras, turnaround,
+//!                                # mouths, rig,
 //!                                # compare, park, page, film
 //! ```
 
 mod film;
 mod page;
 mod park;
+mod preview;
 mod sheets;
 mod stinky;
 
@@ -17,8 +19,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use anyhow::bail;
 
-const PIECES: [&str; 9] = [
+const PIECES: [&str; 10] = [
 	"sheet",
+	"preview",
 	"extras",
 	"turnaround",
 	"mouths",
@@ -49,6 +52,16 @@ fn main() -> Result<()> {
 
 		let path = match piece {
 			"sheet" => sheets::model_sheet(&out)?,
+			"preview" => {
+				let mut sheets = preview::cast_preview(&out)?;
+				let last = sheets.pop().unwrap_or_else(|| out.clone());
+
+				for sheet in sheets {
+					println!("wrote {}", sheet.display());
+				}
+
+				last
+			}
 			"extras" => sheets::extras_sheet(&out)?,
 			"turnaround" => sheets::turnaround(&out)?,
 			"mouths" => sheets::mouth_chart(&out)?,
