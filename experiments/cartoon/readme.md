@@ -13,10 +13,11 @@ Output goes to `out/experiments/cartoon/`:
 | `compare-before-after.png` | The parametric puppet (tv style) beside the authored one |
 | `compare-page.png` | The book's tv proof of "This is Stanley." beside the experiment's page |
 | `model-sheet.png` | Happy, defiant (NOPE), disgusted and grin, front and three-quarter |
+| `props-and-extras.png` | Every prop and extra from the kit, front and three-quarter |
 | `turnaround.png` | The turn from three-quarter left to three-quarter right |
 | `mouth-chart.png` | The nine lip-sync shapes and the mood mouths |
 | `rig-check.png` | Stances and a walk cycle with the skeleton drawn over the parts |
 | `park.png`, `book-page.png` | The setting, and one composed page with the text card |
 | `wave-and-walk.mp4`, `film-strip.png` | Seven seconds of walk, turn, wave and "Hello!" |
 
-Pass piece names to render only some: `sheet`, `turnaround`, `mouths`, `rig`, `compare`, `park`, `page`, `film`. `compare-page.png` needs the book's tv proofs rendered first.
+Pass piece names to render only some: `sheet`, `extras`, `turnaround`, `mouths`, `rig`, `compare`, `park`, `page`, `film`. `compare-page.png` needs the book's tv proofs rendered first.

@@ -9,9 +9,12 @@ use fables::art::Path as Curve;
 use fables::art::Svg;
 use fables::art::escape;
 use fables::art::figure;
+use fables::art::figure::Extra;
 use fables::art::figure::FigureState;
+use fables::art::figure::Look;
 use fables::art::figure::Mood;
 use fables::art::figure::Pose;
+use fables::art::figure::Prop;
 use fables::art::figure::Viseme;
 use fables::art::palette;
 use fables::art::rig::Gait;
@@ -295,4 +298,77 @@ pub fn comparison(out: &Path) -> Result<PathBuf> {
 
 	let svg = c.finish((0.0, 0.0, width, height), width as u32, height as u32);
 	save(&svg, &out.join("compare-before-after.png"))
+}
+
+/// Every prop and extra on Stinky, front-on and turned: the kit's vector parts in use.
+pub fn extras_sheet(out: &Path) -> Result<PathBuf> {
+	let props = [
+		("jam", Prop::Jam, Pose::Hold),
+		("toothbrush", Prop::Toothbrush, Pose::Hold),
+		("brushing", Prop::Toothbrush, Pose::Brush),
+		("parcel", Prop::Parcel, Pose::Hold),
+	];
+	let extras = [
+		("glasses", Extra::Glasses),
+		("lashes", Extra::Lashes),
+		("moustache", Extra::Moustache),
+		("bogey", Extra::Bogey),
+		("bow", Extra::Bow),
+		("post cap", Extra::PostCap),
+		("satchel", Extra::Satchel),
+		("apron", Extra::Apron),
+		("muddy hands", Extra::MuddyHands),
+	];
+	let mut cells: Vec<(String, Look, FigureState)> = Vec::new();
+
+	for (name, prop, pose) in props {
+		for facing in [0.0, THREE_QUARTER] {
+			let mut state = stinky::posed(Mood::Happy, pose, facing);
+			state.prop = Some(prop);
+			cells.push((name.to_owned(), stinky::look().clone(), state));
+		}
+	}
+
+	for (name, extra) in extras {
+		for facing in [0.0, THREE_QUARTER] {
+			let mut look = stinky::look().clone();
+			look.extras.push(extra);
+			let pose = if extra == Extra::MuddyHands {
+				Pose::Shrug
+			} else {
+				Pose::Idle
+			};
+			cells.push((
+				name.to_owned(),
+				look,
+				stinky::posed(Mood::Happy, pose, facing),
+			));
+		}
+	}
+
+	let (cell, columns) = (420.0, 6);
+	let rows = cells.len().div_ceil(columns);
+	let (width, height) = (cell * columns as f32, 130.0 + cell * 1.2 * rows as f32);
+	let mut c = Svg::new();
+	c.fill(&Curve::rect(0.0, 0.0, width, height), PAPER);
+	label(
+		&mut c,
+		width / 2.0,
+		80.0,
+		46.0,
+		"Props and extras: vector parts from the kit",
+	);
+
+	for (index, (name, look, state)) in cells.iter().enumerate() {
+		let x = cell * ((index % columns) as f32 + 0.5);
+		let ground = 130.0 + cell * 1.2 * ((index / columns) as f32 + 1.0) - 80.0;
+		c.begin(&format!("translate({x:.1} {ground:.1}) scale(0.8)"));
+		figure::shadow(&mut c, look, state, 0.0);
+		figure::draw(&mut c, look, state);
+		c.end();
+		label(&mut c, x, ground + 50.0, 28.0, name);
+	}
+
+	let svg = c.finish((0.0, 0.0, width, height), width as u32, height as u32);
+	save(&svg, &out.join("props-and-extras.png"))
 }

@@ -83,10 +83,10 @@ In `cast.toml`, a member gains `puppet = "puppets/stinky.svg"`. Members without 
 | `mouth_open`, `viseme` | Visemes are done. `mouth_open` without a viseme (shouting, mouth-open stills) picks `Open` or `Wide` and scales them by the amount. |
 | `gaze`, `blink`, `brow_lift`, `head_tilt`, `tilt` | Done, or a direct carry-over. `brow_lift` adds to both brows' raise. |
 | `legs`, `gait`, `lie`, `squash` | `legs` and `gait` are done. `lie` and `squash` are whole-puppet transforms, as now. |
-| `sway` | Follow-through: hair parts (tuft, pigtails, bun) rotate about their roots by `sway`. |
+| `sway` | Done in layer 5. Loose hair (the tuft, a bow) swings about its root with `sway`, bounces with a walk and drifts slightly at rest. |
 | `teeth` | Teeth only show where the shape draws them. **Grotty** recolours the band (`GROT`) and adds a gap and a green edge. **Sparkly** adds a glint and the `fx::sparkle`. |
-| `prop` | Layer 4 hangs the parametric puppet's props on the authored hand. Layer 5 redraws the jam jar, toothbrush and parcel as parts held in the fist's frame. |
-| extras (glasses, moustache, apron, post-cap, satchel, bow, muddy hands, bogey, lashes) | Each becomes a part in that character's own file. Face parts (glasses, moustache, bogey, lashes) are wrapped by the face warp; the rest ride on the torso or head. The `extras` list in `cast.toml` goes away for migrated members. |
+| `prop` | Done in layer 5. The jam jar, toothbrush and parcel are vector parts in the kit, held in the fist under the fingers. A toothbrush near the mouth turns into it and scrubs, with foam. A far hand holding something stays in front in three-quarter view. |
+| extras (glasses, moustache, apron, post-cap, satchel, bow, muddy hands, bogey, lashes) | Done in layer 5. The cast's `extras` list stays as the switch, and each extra is a vector part in the kit that a character's own file can redraw. Face extras (glasses, lashes, moustache, bogey) wrap with the face; the bow and cap ride on the head, the satchel and apron on the body; muddy hands tint the hands and forearms. |
 
 `Frame::of(build)` is called 17 times: 11 of them in `compose`, `video::frames`, `video::motion` and `press::sheets`, mostly for the head and mouth positions. It becomes `look.frame()`, which reads the measurements from the puppet file. This is mechanical, and it lands early, as its own PR.
 
@@ -125,7 +125,7 @@ One `gh stack`, so each layer is reviewable on its own. Every PR that changes ho
 | 2 | `refactor: measure figures per look` | `Frame::of(build)` becomes `look.frame()` at all 17 call sites. No visual change. | ~150 lines |
 | 3 | `feat(art): puppet part files` | The part-file loader, the part list and check, and blend-or-swap. Adds `fables puppet check`, `template` and `sheet` (the parts sheet). `world/puppets/kit.svg` and `stinky.svg` are generated once from the experiment's strings, and the experiment then draws from them. | ~1,100 lines |
 | 4 | `feat(art): authored puppet` | `art::puppet` with the shared kit, the `FigureState` mapping, all 15 moods, the point hand and grotty or sparkly teeth. `figure::draw`, `shadow` and `draw_skeleton` hand authored characters to it, so the books, `fables sheets --moods` and `fables rig` draw Stinky from his part file; the rest stay on `figure.rs`. The experiment poses him through the library. | ~1,500 lines |
-| 5 | `feat(art): props, teeth and extras` | Jam, toothbrush and parcel; grotty and sparkly teeth; hair follow-through; extras as parts. *Stinky McStinkbreath* renders fully in the new look. | ~600 lines |
+| 5 | `feat(art): props and extras` | Jam, toothbrush and parcel; hair follow-through; extras as kit parts. (Teeth landed in layer 4.) *Stinky McStinkbreath* renders fully in the new look. | ~600 lines |
 | 6 | `feat(world): Bogey and Grubby` | Two kids, each with a signed-off model sheet. | ~1 session each |
 | 7 | `feat(world): Shouty and Fibby` | Two kids. | ~1 session each |
 | 8 | `feat(world): Mum, Dad and Parcel` | Grown-up limbs and three designs. | ~1.5 sessions each |

@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! cargo run --release            # everything
-//! cargo run --release -- sheet   # just the named pieces: sheet, turnaround, mouths, rig,
+//! cargo run --release -- sheet   # just the named pieces: sheet, extras, turnaround, mouths, rig,
 //!                                # compare, park, page, film
 //! ```
 
@@ -17,8 +17,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use anyhow::bail;
 
-const PIECES: [&str; 8] = [
+const PIECES: [&str; 9] = [
 	"sheet",
+	"extras",
 	"turnaround",
 	"mouths",
 	"rig",
@@ -48,6 +49,7 @@ fn main() -> Result<()> {
 
 		let path = match piece {
 			"sheet" => sheets::model_sheet(&out)?,
+			"extras" => sheets::extras_sheet(&out)?,
 			"turnaround" => sheets::turnaround(&out)?,
 			"mouths" => sheets::mouth_chart(&out)?,
 			"rig" => sheets::rig_sheet(&out)?,

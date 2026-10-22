@@ -2365,7 +2365,7 @@ fn draw_hand(
 	svg.end();
 }
 
-pub(crate) fn draw_prop(
+fn draw_prop(
 	svg: &mut Svg,
 	prop: Prop,
 	hand: Pt,

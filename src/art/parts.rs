@@ -51,8 +51,12 @@ pub enum Space {
 	Hand,
 	/// The ankle at the origin, the sole at y = 24, toes to the page right.
 	Foot,
-	/// A face feature (mouth, brow) centred on its own origin.
+	/// A face feature (mouth, brow, a glasses lens, the lashes of the page-right eye) centred on
+	/// its own origin.
 	Feature,
+	/// Something held: the fist's centre at the origin, upright. A toothbrush lies along +x with
+	/// its bristles at the far end.
+	Prop,
 }
 
 impl Space {
@@ -64,6 +68,7 @@ impl Space {
 			Space::Hand => "wrist at the origin, fingers down +y, thumb on the -x side",
 			Space::Foot => "ankle at the origin, sole at y = 24",
 			Space::Feature => "centred on the origin",
+			Space::Prop => "the fist's centre at the origin, upright",
 		}
 	}
 }
@@ -184,6 +189,37 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("mouth-bleh", Space::Feature).kit(),
 	part("mouth-bleh-tongue", Space::Feature).kit(),
 	part("mouth-bleh-groove", Space::Feature).optional().kit(),
+	// Things to hold.
+	part("prop-jam", Space::Prop).kit(),
+	part("prop-jam-lid", Space::Prop).kit(),
+	part("prop-jam-label", Space::Prop).kit(),
+	part("prop-jam-shine", Space::Prop).optional().kit(),
+	part("prop-toothbrush", Space::Prop).kit(),
+	part("prop-toothbrush-bristles", Space::Prop).kit(),
+	part("prop-toothbrush-bristle-line", Space::Prop)
+		.numbered()
+		.kit(),
+	part("prop-toothpaste", Space::Prop).optional().kit(),
+	part("prop-parcel", Space::Prop).kit(),
+	part("prop-parcel-top", Space::Prop).optional().kit(),
+	part("prop-parcel-side", Space::Prop).optional().kit(),
+	part("prop-parcel-string", Space::Prop).numbered().kit(),
+	// Extras, drawn when the cast file lists them for a character.
+	part("glasses-lens", Space::Feature).kit(),
+	part("glasses-bridge", Space::Head).kit(),
+	part("moustache", Space::Head).kit(),
+	part("bogey", Space::Head).kit(),
+	part("lash", Space::Feature).numbered().kit(),
+	part("bow", Space::Head).kit(),
+	part("bow-knot", Space::Head).optional().kit(),
+	part("cap", Space::Head).turning().kit(),
+	part("cap-brim", Space::Head).turning().kit(),
+	part("cap-badge", Space::Head).optional().kit(),
+	part("satchel", Space::Body).kit(),
+	part("satchel-flap", Space::Body).optional().kit(),
+	part("satchel-strap", Space::Body).turning().kit(),
+	part("apron", Space::Body).turning().kit(),
+	part("apron-pocket", Space::Body).optional().kit(),
 ];
 
 /// A part as it is at some turn of the body: one drawing, a blend of two, or a swap.
@@ -546,7 +582,7 @@ pub fn spec_of(name: &str) -> Option<&'static PartSpec> {
 fn sheet_zoom(name: &str) -> f32 {
 	match spec_of(name).map(|spec| spec.space) {
 		Some(Space::Hand) => 3.0,
-		Some(Space::Feature | Space::Bone | Space::Foot) => 2.0,
+		Some(Space::Feature | Space::Bone | Space::Foot | Space::Prop) => 2.0,
 		Some(Space::Head | Space::Body) | None => 1.0,
 	}
 }
