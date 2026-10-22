@@ -147,19 +147,24 @@ name = "Bogey McBogeyface"
 born = "Bonnie"
 about = "Picks her nose, and wipes what she finds on whatever is nearest."
 habit = "Picks her nose, so a little green drip follows her everywhere."
-skin = "sunflower"
-hair = "pigtails"
-hair-colour = "cocoa"
-top = "bubblegum"
+# Bogey is drawn by her authored puppet (`fables puppet sheet bogey` shows every part). Her
+# colours are her paint-box ones, softened: sunflower, cocoa pigtails, a bubblegum top with
+# white dots, a teal skirt and grape shoes.
+puppet = "puppets/bogey.svg"
+skin = "#f4c766"
+hair-colour = "#7a4a35"
+top = "#ec7aa6"
 pattern = "dots"
-trim = "white"
-legwear = "skirt"
-bottom = "teal"
-shoes = "grape"
+trim = "#fff8ef"
+bottom = "#2e9a90"
+shoes = "#7a5cb8"
+eyes = "#5d9e5a"
 extras = ["bogey", "bow", "lashes"]
+# Only the parametric puppet reads these; the authored one draws its own shapes.
+hair = "pigtails"
+legwear = "skirt"
 head = "round"
 body = "pear"
-eyes = "leaf"
 
 [bogey.voice]
 name = "Sandy (English (UK))"
@@ -171,20 +176,25 @@ name = "Grubby McGrubhands"
 born = "Gus"
 about = "Never washes his hands. Everything he touches goes brown and gloopy."
 habit = "Never washes his hands, so everything he touches turns to mud."
-skin = "teal"
-hair = "curls"
-hair-colour = "sunflower"
-top = "tomato"
+# Grubby is drawn by his authored puppet (`fables puppet sheet grubby` shows every part). His
+# colours are his paint-box ones, softened: teal, sunflower curls, a tomato jumper with a
+# sunflower star, night-blue trousers and cocoa boots.
+puppet = "puppets/grubby.svg"
+skin = "#62b9ad"
+hair-colour = "#f2c14e"
+top = "#d9573f"
 pattern = "star"
-trim = "sunflower"
-legwear = "trousers"
-bottom = "night"
-shoes = "cocoa"
+trim = "#f2c14e"
+bottom = "#34366e"
+shoes = "#7a4f3a"
+eyes = "#5a3a2c"
 extras = ["muddy-hands"]
+# Only the parametric puppet reads these; the authored one draws its own shapes.
+hair = "curls"
+legwear = "trousers"
 head = "wide"
 body = "round"
 nose = "round"
-eyes = "cocoa"
 
 [grubby.voice]
 name = "Eddy (English (UK))"

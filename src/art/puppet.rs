@@ -489,6 +489,9 @@ struct Posed {
 	/// A prop, and whether the far hand (rather than the near one) holds it.
 	prop: Option<(Prop, bool)>,
 	teeth: Teeth,
+	/// Turned three-quarters, the far arm is drawn behind the body and head: hanging down, or
+	/// raised (a cheer) so the hand shows beside the head instead of across the face.
+	far_arm_behind: bool,
 }
 
 impl Posed {
@@ -526,6 +529,8 @@ impl Posed {
 			(near_shape, far_shape) = (far_shape, near_shape);
 		}
 
+		let far_arm_behind =
+			t > 0.5 && far.x > -10.0 && (far.y > SHOULDER_Y || (far.x - face_x).abs() >= 30.0);
 		(near, far) = (
 			clear_of_head(near, -1.0, face_x),
 			clear_of_head(far, 1.0, face_x),
@@ -588,6 +593,7 @@ impl Posed {
 			// it moves with the hands if they swap.
 			prop: state.prop.map(|prop| (prop, mirrored == swapped)),
 			teeth: state.teeth,
+			far_arm_behind,
 		}
 	}
 }
@@ -731,12 +737,9 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 
-	// In a three-quarter view the far arm goes behind the body, unless it folds across it,
-	// reaches up (a wave, a hand to the face) or holds something, when it is seen in front.
-	// A hand holding something keeps it in front, where it can be seen.
+	// A far hand holding something keeps it in front, where it can be seen.
 	let far_holds = posed.prop.is_some_and(|(_, in_far)| in_far);
-	let far_arm_behind =
-		t > 0.5 && posed.hands.1.x > -10.0 && posed.hands.1.y > SHOULDER_Y && !far_holds;
+	let far_arm_behind = posed.far_arm_behind && !far_holds;
 
 	// What each hand holds, and where the mouth is (a toothbrush near it is brushing).
 	let mouth = mouth_on_body(&solved, &posed);
@@ -2198,6 +2201,24 @@ mod tests {
 	fn cool_skin_gets_shading_instead_of_a_pink_blush() {
 		assert_eq!(blush(Color(0xF4_A2_6B)), BLUSH);
 		assert_ne!(blush(Color(0x62_B9_AD)), BLUSH);
+	}
+
+	#[test]
+	fn turned_far_arms_cheer_behind_the_head_but_reach_the_face_in_front() {
+		let frame = Frame::authored_kid();
+		let behind = |pose: Pose| {
+			let mut state = FigureState::new(&frame);
+			state.facing = STAGED_FACING;
+			state.hands = frame.hands(pose, STAGED_FACING);
+			Posed::of(&state).far_arm_behind
+		};
+		assert!(behind(Pose::Idle));
+		assert!(
+			behind(Pose::Cheer),
+			"a raised far fist would cross the face"
+		);
+		assert!(!behind(Pose::HoldNose));
+		assert!(!behind(Pose::ArmsCrossed));
 	}
 
 	#[test]
