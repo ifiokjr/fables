@@ -206,20 +206,25 @@ name = "Shouty McShoutface"
 born = "Sasha"
 about = "Has no indoor voice. When she talks, windows rattle and hats blow off."
 habit = "Has no indoor voice, so the whole town rattles when she talks."
-skin = "tomato"
-hair = "spikes"
-hair-colour = "night"
-top = "sunflower"
+# Shouty is drawn by her authored puppet (`fables puppet sheet shouty` shows every part). Her
+# colours are her paint-box ones, softened: tomato, night-blue spikes, a sunflower top with
+# tangerine stripes, cornflower shorts.
+puppet = "puppets/shouty.svg"
+skin = "#e4664e"
+hair-colour = "#2f3266"
+top = "#f4c24a"
 pattern = "stripes"
-trim = "tangerine"
-legwear = "shorts"
-bottom = "cornflower"
-shoes = "ink"
-mouth = 1.2
+trim = "#ee8a4a"
+bottom = "#5f7fd0"
+shoes = "#403357"
+eyes = "#4f6fc8"
 extras = ["lashes"]
+# Only the parametric puppet reads these; the authored one draws its own shapes.
+hair = "spikes"
+legwear = "shorts"
+mouth = 1.2
 head = "egg"
 body = "bell"
-eyes = "cornflower"
 
 [shouty.voice]
 name = "Shelley (English (UK))"
@@ -231,20 +236,25 @@ name = "Fibby McFibberpants"
 born = "Felix"
 about = "Tells fibs. Big ones. His trousers get warmer with every one."
 habit = "Tells fibs, so his trousers start to smoulder."
-skin = "grape"
-hair = "bob"
-hair-colour = "tangerine"
-top = "mint"
+# Fibby is drawn by his authored puppet (`fables puppet sheet fibby` shows every part). His
+# colours are his paint-box ones, softened: grape, a tangerine bob, a mint polo, tomato-red
+# trousers.
+puppet = "puppets/fibby.svg"
+skin = "#8a6fcf"
+hair-colour = "#ef8a45"
+top = "#9fe0c8"
 pattern = "plain"
-trim = "teal"
-legwear = "trousers"
-bottom = "tomato"
-shoes = "ink"
+trim = "#2e9a90"
+bottom = "#d9573f"
+shoes = "#403357"
+eyes = "#2e8a82"
 extras = ["glasses"]
+# Only the parametric puppet reads these; the authored one draws its own shapes.
+hair = "bob"
+legwear = "trousers"
 head = "egg"
 body = "bean"
 nose = "long"
-eyes = "teal"
 
 [fibby.voice]
 name = "Ralph"

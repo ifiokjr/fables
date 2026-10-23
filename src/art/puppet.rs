@@ -1819,11 +1819,14 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 			dimples(svg, ink, &place, 36.0, -6.0, -6.0);
 		}
 		(None, MouthShape::Grin) => {
+			// A grin opens downwards when it talks or shouts, keeping its teeth on show.
+			let drop = 1.0 + posed.mouth_open * 0.8;
+			let open_up = |p: Pt| pt(p.x, if p.y > 0.0 { p.y * drop } else { p.y });
 			open(
 				svg,
-				&place(&drawn("mouth-grin")),
+				&place(&drawn("mouth-grin").map(open_up)),
 				Some(&place(&drawn("mouth-grin-teeth"))),
-				Some(&ellipse(pt(6.0, 27.0), 20.0, 9.0)),
+				Some(&ellipse(pt(6.0, 27.0 * drop), 20.0, 9.0 * drop)),
 			);
 
 			if let Some(gap) = puppet.part("mouth-grin-gap", t) {
@@ -2216,6 +2219,20 @@ mod tests {
 		for name in ["stinky", "bogey", "grubby", "shouty"] {
 			assert!(!covers_ears(&hair(name)), "{name}'s ears show");
 		}
+	}
+
+	#[test]
+	fn a_grinning_speaker_opens_their_mouth() {
+		let look = stinky();
+		let mut state = FigureState::new(&look.frame());
+		state.mood = Mood::Grin;
+		let teeth_together = drawn(&look, &state);
+		state.mouth_open = 0.55;
+		assert_ne!(
+			drawn(&look, &state),
+			teeth_together,
+			"talking opens the grin"
+		);
 	}
 
 	#[test]

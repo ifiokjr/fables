@@ -78,7 +78,7 @@ const SHEETS: [Sheet; 4] = [
 	},
 	Sheet {
 		id: "shouty",
-		title: "Shouty McShoutface (born Sasha): proposed design",
+		title: "Shouty McShoutface (born Sasha): model sheet",
 		beats: [
 			(
 				Mood::Happy,
@@ -96,13 +96,11 @@ const SHEETS: [Sheet; 4] = [
 			),
 			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
 		],
-		proposed: Some([
-			0xE4_66_4E, 0x2F_32_66, 0xF4_C2_4A, 0xEE_8A_4A, 0x5F_7F_D0, 0x40_33_57, 0x4F_6F_C8,
-		]),
+		proposed: None,
 	},
 	Sheet {
 		id: "fibby",
-		title: "Fibby McFibberpants (born Felix): proposed design",
+		title: "Fibby McFibberpants (born Felix): model sheet",
 		beats: [
 			(Mood::Grin, Pose::Hips, None, "fibbing · grin"),
 			(Mood::Worried, Pose::Shrug, None, "caught out · shrug"),
@@ -110,9 +108,7 @@ const SHEETS: [Sheet; 4] = [
 			(Mood::Proud, Pose::Think, None, "proud · think"),
 			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
 		],
-		proposed: Some([
-			0x8A_6F_CF, 0xEF_8A_45, 0x9F_E0_C8, 0x2E_9A_90, 0xD9_57_3F, 0x40_33_57, 0x2E_8A_82,
-		]),
+		proposed: None,
 	},
 ];
 
