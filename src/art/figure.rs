@@ -136,7 +136,7 @@ impl Look {
 	/// puppets will) without touching the stage, video or sheets.
 	pub fn frame(&self) -> Frame {
 		if self.puppet.is_some() {
-			Frame::authored_kid()
+			Frame::authored(puppet::Proportions::of(self.build))
 		} else {
 			Frame::of(self.build)
 		}
@@ -573,30 +573,30 @@ impl Frame {
 		}
 	}
 
-	/// The measurements every authored kid puppet is drawn to (see [`puppet`](super::puppet)).
-	pub fn authored_kid() -> Frame {
+	/// The measurements an authored puppet is drawn to (see [`puppet`](super::puppet)).
+	pub fn authored(body: &puppet::Proportions) -> Frame {
+		let limbs = body.limbs;
+
 		Frame {
-			head: puppet::NECK + pt(0.0, -puppet::HEAD_ABOVE_NECK),
+			head: body.neck + pt(0.0, -body.head_above_neck),
 			head_r: 100.0,
-			body_top: -232.0,
-			body_bottom: -112.0,
-			shoulder_half: 40.0,
-			hip_half: 40.0,
-			shoulder_y: puppet::SHOULDER_Y,
-			leg_top: -94.0,
-			leg_width: 14.0,
-			arm_width: 12.0,
-			arm_len: puppet::KID_LIMBS.upper_arm + puppet::KID_LIMBS.forearm,
-			hand_r: 14.0,
-			limbs: puppet::KID_LIMBS,
+			body_top: body.neck.y - 6.0,
+			body_bottom: body.hem_y + 13.0,
+			shoulder_half: body.shoulder_half,
+			hip_half: body.shoulder_half,
+			shoulder_y: body.shoulder_y,
+			leg_top: limbs.pelvis_y + 32.0,
+			leg_width: body.leg_width.0 - 1.5,
+			arm_width: body.forearm_width.0,
+			arm_len: limbs.upper_arm + limbs.forearm,
+			hand_r: 13.0 * body.hand_scale,
+			limbs,
 			// Where a hand reaching for the nose puts its wrist: a hand's length below the nose,
 			// so the fingers, not the wrist, are on it.
 			nose: pt(0.0, 50.0),
 			mouth: pt(0.0, 58.0),
 			face_slide: puppet::FACE_SLIDE,
-			// Shorter arms on a narrower body: hands hang close to the sides and still reach
-			// above the head.
-			reach: pt(50.0, 80.0),
+			reach: body.reach,
 		}
 	}
 
@@ -738,7 +738,7 @@ impl FigureState {
 /// the figure is off the ground (hops), which shrinks and fades the shadow.
 pub fn shadow(svg: &mut Svg, look: &Look, state: &FigureState, lift: f32) {
 	if look.puppet.is_some() {
-		puppet::shadow(svg, state, lift);
+		puppet::shadow(svg, look, state, lift);
 		return;
 	}
 

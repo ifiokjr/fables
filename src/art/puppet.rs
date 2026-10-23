@@ -30,6 +30,7 @@ use super::Color;
 use super::Path;
 use super::Pt;
 use super::Svg;
+use super::figure::Build;
 use super::figure::Extra;
 use super::figure::FigureState;
 use super::figure::HandShape;
@@ -52,25 +53,103 @@ use super::rig::Legs;
 use super::rig::Limbs;
 use super::shape::Shape;
 
-/// Bone lengths of an authored kid, in figure units with the soles at y = 0. About 500 units
-/// tall with the hair.
-pub const KID_LIMBS: Limbs = Limbs {
-	pelvis_y: -126.0,
-	ankle_y: -24.0,
-	hip_spread: 21.0,
-	thigh: 52.0,
-	shin: 52.0,
-	upper_arm: 50.0,
-	forearm: 46.0,
+/// The body an authored puppet is drawn on: where its joints sit, how long its bones are and how
+/// thick its limbs. Kids and grown-ups share the head (head units are the same size), so a
+/// grown-up is a kid-sized head on a taller body with longer limbs.
+///
+/// A character's own torso, sleeves, legwear and shoes are drawn to their body; the kit's
+/// hands are scaled to it. The kit's body extras (satchel, apron) are drawn for a kid, so a
+/// grown-up who wears one redraws it in their own file.
+#[derive(Clone, Copy, Debug)]
+pub struct Proportions {
+	/// Bone lengths, in figure units with the soles at y = 0.
+	pub limbs: Limbs,
+	/// Where the head hinges on the torso, and how far above it the head's own origin sits.
+	pub neck: Pt,
+	pub head_above_neck: f32,
+	pub shoulder_y: f32,
+	/// Half the shoulders' width, front-on.
+	pub shoulder_half: f32,
+	/// The near and far shoulder's x, and the near and far hip's x, three-quarters turned.
+	pub shoulders_turned: (f32, f32),
+	pub hips_turned: (f32, f32),
+	/// The top of the ribbed hem at the bottom of the top.
+	pub hem_y: f32,
+	/// The radius of the cylinder the torso wraps round as it turns.
+	pub body_radius: f32,
+	/// Leg widths at the hip and ankle, and the forearm's at the elbow and wrist.
+	pub leg_width: (f32, f32),
+	pub forearm_width: (f32, f32),
+	/// How much bigger than the kit's drawings hands are.
+	pub hand_scale: f32,
+	/// The units pose reaches are measured in, across and up or down (see `figure::Reach`).
+	pub reach: Pt,
+}
+
+/// A kid: about 500 units tall with the hair, the head over 40% of it.
+pub const KID: Proportions = Proportions {
+	limbs: Limbs {
+		pelvis_y: -126.0,
+		ankle_y: -24.0,
+		hip_spread: 21.0,
+		thigh: 52.0,
+		shin: 52.0,
+		upper_arm: 50.0,
+		forearm: 46.0,
+	},
+	neck: pt(0.0, -226.0),
+	head_above_neck: 96.0,
+	shoulder_y: -206.0,
+	shoulder_half: 40.0,
+	shoulders_turned: (-36.0, 27.0),
+	hips_turned: (-14.0, 20.0),
+	hem_y: -125.0,
+	body_radius: 64.0,
+	leg_width: (15.5, 12.5),
+	forearm_width: (12.0, 10.5),
+	hand_scale: 1.08,
+	// Short arms on a narrow body: hands hang close to the sides and still reach above the
+	// head.
+	reach: pt(50.0, 80.0),
 };
-/// Where the head hinges on the torso, and where the head's own origin sits above it.
-pub const NECK: Pt = pt(0.0, -226.0);
-pub const HEAD_ABOVE_NECK: f32 = 96.0;
-pub const SHOULDER_Y: f32 = -206.0;
+
+/// A grown-up: about 800 units tall, the same head on a long body and long legs.
+pub const GROWN_UP: Proportions = Proportions {
+	limbs: Limbs {
+		pelvis_y: -330.0,
+		ankle_y: -24.0,
+		hip_spread: 30.0,
+		thigh: 156.0,
+		shin: 156.0,
+		upper_arm: 118.0,
+		forearm: 108.0,
+	},
+	neck: pt(0.0, -560.0),
+	head_above_neck: 96.0,
+	shoulder_y: -536.0,
+	shoulder_half: 56.0,
+	shoulders_turned: (-50.0, 38.0),
+	hips_turned: (-20.0, 28.0),
+	hem_y: -330.0,
+	body_radius: 82.0,
+	leg_width: (24.0, 17.0),
+	forearm_width: (16.0, 13.0),
+	hand_scale: 1.32,
+	reach: pt(64.0, 175.0),
+};
+
+impl Proportions {
+	pub fn of(build: Build) -> &'static Proportions {
+		match build {
+			Build::Kid => &KID,
+			Build::Grownup => &GROWN_UP,
+		}
+	}
+}
+
 /// How far a three-quarter view turns the face, and the radius of the face cylinder.
 const FACE_TURN: f32 = 0.42;
 const FACE_RADIUS: f32 = 114.0;
-const BODY_RADIUS: f32 = 64.0;
 /// The `facing` the stage gives a figure turned towards the middle of the page. An authored
 /// puppet shows its full three-quarter drawing there.
 const STAGED_FACING: f32 = 0.35;
@@ -495,7 +574,8 @@ struct Posed {
 }
 
 impl Posed {
-	fn of(state: &FigureState) -> Posed {
+	fn of(state: &FigureState, body: &Proportions) -> Posed {
+		let shoulder_y = body.shoulder_y;
 		let turn = (state.facing / STAGED_FACING).clamp(-1.0, 1.0);
 		let mirrored = turn < 0.0;
 		let flip = |p: Pt| if mirrored { pt(-p.x, p.y) } else { p };
@@ -519,10 +599,10 @@ impl Posed {
 		// the face (brushing, holding the nose) is meant to be there and stays.
 		let face_x = t * FACE_SLIDE * STAGED_FACING;
 		let swapped = t > 0.5
-			&& far.y < SHOULDER_Y - 30.0
+			&& far.y < shoulder_y - 30.0
 			&& far.x > 70.0
 			&& (far.x - face_x).abs() >= 30.0
-			&& near.y > SHOULDER_Y;
+			&& near.y > shoulder_y;
 
 		if swapped {
 			(near, far) = (pt(-far.x, far.y), pt(-near.x, near.y));
@@ -530,10 +610,10 @@ impl Posed {
 		}
 
 		let far_arm_behind =
-			t > 0.5 && far.x > -10.0 && (far.y > SHOULDER_Y || (far.x - face_x).abs() >= 30.0);
+			t > 0.5 && far.x > -10.0 && (far.y > shoulder_y || (far.x - face_x).abs() >= 30.0);
 		(near, far) = (
-			clear_of_head(near, -1.0, face_x),
-			clear_of_head(far, 1.0, face_x),
+			clear_of_head(near, -1.0, face_x, shoulder_y, body.hand_scale),
+			clear_of_head(far, 1.0, face_x, shoulder_y, body.hand_scale),
 		);
 		let (near_foot, far_foot) = if mirrored {
 			(state.legs.feet.1, state.legs.feet.0)
@@ -551,7 +631,7 @@ impl Posed {
 		legs.feet.1 = legs.feet.1 + pt(6.0 * t, -9.0 * t);
 		let hand = |shape: HandShape, target: Pt| {
 			match shape {
-				HandShape::Open if target.y > SHOULDER_Y + 50.0 => Hand::Relaxed,
+				HandShape::Open if target.y > shoulder_y + 50.0 => Hand::Relaxed,
 				HandShape::Open => Hand::Open,
 				HandShape::Fist => Hand::Fist,
 				HandShape::Point => Hand::Point,
@@ -567,7 +647,10 @@ impl Posed {
 			mouth_open: state.mouth_open,
 			hands: (near, far),
 			hand_shapes: (hand(near_shape, near), hand(far_shape, far)),
-			wrists: (wrist(near_shape, near, -1.0), wrist(far_shape, far, 1.0)),
+			wrists: (
+				wrist(near_shape, near, -1.0, shoulder_y),
+				wrist(far_shape, far, 1.0, shoulder_y),
+			),
 			legs,
 			gait: state.gait,
 			tilt: state.tilt * sign,
@@ -600,13 +683,14 @@ impl Posed {
 
 /// A hand held up beside the head (a wave, a cheer) moves out past it, so it isn't mistaken for
 /// a hand scratching an ear. Hands meant for the face (nose, mouth), which sit near the face's
-/// middle at `face_x`, stay put.
-fn clear_of_head(target: Pt, side: f32, face_x: f32) -> Pt {
+/// middle at `face_x`, stay put. Bigger hands need more room.
+fn clear_of_head(target: Pt, side: f32, face_x: f32, shoulder_y: f32, hand_scale: f32) -> Pt {
 	let out = target.x * side;
 	let at_face = (target.x - face_x).abs() < 30.0;
+	let clear = 115.0 * hand_scale / KID.hand_scale;
 
-	if target.y < SHOULDER_Y - 30.0 && !at_face && (45.0..115.0).contains(&out) {
-		pt(side * 115.0, target.y + 40.0)
+	if target.y < shoulder_y - 30.0 && !at_face && (45.0..clear).contains(&out) {
+		pt(side * clear, target.y + 40.0)
 	} else {
 		target
 	}
@@ -614,9 +698,9 @@ fn clear_of_head(target: Pt, side: f32, face_x: f32) -> Pt {
 
 /// A little turn of the wrist so hands sit naturally: fists on hips turn their knuckles
 /// forward, and hands hanging at the sides tip in towards the legs.
-fn wrist(shape: HandShape, target: Pt, side: f32) -> f32 {
+fn wrist(shape: HandShape, target: Pt, side: f32, shoulder_y: f32) -> f32 {
 	let outside = target.x * side > 50.0;
-	let low = target.y > SHOULDER_Y + 40.0;
+	let low = target.y > shoulder_y + 40.0;
 
 	match shape {
 		HandShape::Fist if outside && low => -70.0 * side,
@@ -628,6 +712,7 @@ fn wrist(shape: HandShape, target: Pt, side: f32) -> f32 {
 /// The rig solved for one moment.
 struct Solved {
 	t: f32,
+	body: Proportions,
 	limbs: Limbs,
 	legs: Legs,
 	swing: (Pt, Pt),
@@ -636,7 +721,8 @@ struct Solved {
 }
 
 impl Solved {
-	fn new(posed: &Posed, limbs: Limbs) -> Solved {
+	fn new(posed: &Posed, body: &Proportions) -> Solved {
+		let limbs = body.limbs;
 		let (legs, swing) = match posed.gait {
 			Some((gait, phase)) => limbs.cycle(gait, phase, 1.0, posed.legs),
 			None => (posed.legs, (pt(0.0, 0.0), pt(0.0, 0.0))),
@@ -644,6 +730,7 @@ impl Solved {
 
 		Solved {
 			t: posed.t,
+			body: *body,
 			limbs,
 			legs,
 			swing,
@@ -665,17 +752,23 @@ impl Solved {
 
 	/// `side` is -1 for the near (page-left) limb and 1 for the far one.
 	fn hip(&self, side: f32) -> Pt {
+		let (near, far) = self.body.hips_turned;
 		let x = lerp(
 			side * self.limbs.hip_spread,
-			if side < 0.0 { -14.0 } else { 20.0 },
+			if side < 0.0 { near } else { far },
 			self.t,
 		);
 		self.torso(pt(x, self.limbs.pelvis_y))
 	}
 
 	fn shoulder(&self, side: f32) -> Pt {
-		let x = lerp(side * 40.0, if side < 0.0 { -36.0 } else { 27.0 }, self.t);
-		self.torso(pt(x, SHOULDER_Y))
+		let (near, far) = self.body.shoulders_turned;
+		let x = lerp(
+			side * self.body.shoulder_half,
+			if side < 0.0 { near } else { far },
+			self.t,
+		);
+		self.torso(pt(x, self.body.shoulder_y))
 	}
 
 	fn leg(&self, side: f32) -> (Pt, Pt, Pt) {
@@ -730,8 +823,9 @@ fn figure_transform(look: &Look, posed: &Posed, state: &FigureState, head_r: f32
 /// Draws an authored figure with its soles at the current origin.
 pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
 	let frame = look.frame();
-	let posed = Posed::of(state);
-	let solved = Solved::new(&posed, frame.limbs());
+	let body = Proportions::of(look.build);
+	let posed = Posed::of(state, body);
+	let solved = Solved::new(&posed, body);
 	let inks = Inks::of(look, state.teeth);
 	let t = solved.t;
 
@@ -752,6 +846,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 					prop,
 					mouth,
 					time: state.time,
+					scale: body.hand_scale / KID.hand_scale,
 				}
 			})
 	};
@@ -775,7 +870,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	draw_torso(svg, puppet, look, &inks, t);
 	svg.begin(&format!(
 		"translate({:.1} {:.1}) rotate({:.2}) translate(0 {:.1})",
-		NECK.x, NECK.y, posed.head_tilt, -HEAD_ABOVE_NECK
+		body.neck.x, body.neck.y, posed.head_tilt, -body.head_above_neck
 	));
 	draw_head(svg, puppet, look, &inks, &posed, state.time);
 	svg.end();
@@ -803,15 +898,16 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 }
 
 /// A soft contact shadow under the feet, so the figure stands on the ground.
-pub fn shadow(svg: &mut Svg, state: &FigureState, lift: f32) {
+pub fn shadow(svg: &mut Svg, look: &Look, state: &FigureState, lift: f32) {
 	let fade = (1.0 - lift / 120.0).clamp(0.35, 1.0);
+	let size = Proportions::of(look.build).limbs.hip_spread / KID.limbs.hip_spread;
 	let turn = (state.facing / STAGED_FACING).clamp(-1.0, 1.0);
 	let spread = 1.0 + state.lie * 1.8;
 	svg.fill_alpha(
 		&Path::ellipse(
 			pt(turn * 6.0 - state.lie * 120.0, -2.0),
-			70.0 * fade * spread,
-			12.0 * fade,
+			70.0 * size * fade * spread,
+			12.0 * size * fade,
 		),
 		palette::INK,
 		0.18 * fade,
@@ -821,12 +917,13 @@ pub fn shadow(svg: &mut Svg, state: &FigureState, lift: f32) {
 /// Draws the rig's bones over an authored figure, for rig checks.
 pub fn draw_bones(svg: &mut Svg, look: &Look, state: &FigureState) {
 	let frame = look.frame();
-	let posed = Posed::of(state);
-	let solved = Solved::new(&posed, frame.limbs());
+	let body = Proportions::of(look.build);
+	let posed = Posed::of(state, body);
+	let solved = Solved::new(&posed, body);
 	let pelvis = solved.torso(solved.pivot);
-	let chest = solved.torso(pt(0.0, SHOULDER_Y));
-	let neck = solved.torso(NECK);
-	let head = solved.torso(NECK + pt(0.0, -HEAD_ABOVE_NECK).rotate(posed.head_tilt));
+	let chest = solved.torso(pt(0.0, body.shoulder_y));
+	let neck = solved.torso(body.neck);
+	let head = solved.torso(body.neck + pt(0.0, -body.head_above_neck).rotate(posed.head_tilt));
 	let mut bones = vec![(pelvis, chest), (chest, neck), (neck, head)];
 	let mut joints = vec![pelvis, chest, neck, head];
 
@@ -928,8 +1025,8 @@ fn draw_leg(
 	// The leg is one tapered shape bent through the knee, so there's no seam at the joint.
 	let leg = Shape::taper(
 		&[hip, hip.lerp(knee, 0.5), knee, knee.lerp(ankle, 0.5), ankle],
-		15.5,
-		12.5,
+		solved.body.leg_width.0,
+		solved.body.leg_width.1,
 	);
 	svg.brushed_shaded(&leg, far(inks.skin, is_far), LIGHT, ink, LINE);
 
@@ -970,9 +1067,12 @@ fn draw_leg(
 		svg.brush_fill(&shoe.path(), far(inks.shoes, is_far), ink, LINE);
 		svg.cel_shade(&shoe, pt(-6.0, -5.0));
 		svg.begin_clip(&shoe.path());
-		svg.fill(&Path::rect(-30.0, 17.0, 80.0, 12.0), far(SOLE, is_far));
+		// The sole runs under the whole shoe, however big it is drawn.
+		let (lo, hi) = shoe.bounds();
+		let (heel, toe) = ((lo.x - 2.0).min(-30.0), (hi.x + 2.0).max(50.0));
+		svg.fill(&Path::rect(heel, 17.0, toe - heel, 12.0), far(SOLE, is_far));
 		svg.brush_line(
-			&Path::new().move_to(pt(-30.0, 17.0)).line_to(pt(50.0, 17.0)),
+			&Path::new().move_to(pt(heel, 17.0)).line_to(pt(toe, 17.0)),
 			ink,
 			DETAIL,
 		);
@@ -1025,7 +1125,11 @@ fn draw_leg(
 
 fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32) {
 	let ink = inks.line;
-	let body = |p: Pt| wrap(p, t, BODY_RADIUS);
+	let proportions = Proportions::of(look.build);
+	let (neck_y, hem_y) = (proportions.neck.y, proportions.hem_y);
+	// Patterns are laid across a little more than the body, and clipped to it.
+	let half = proportions.body_radius * 1.25;
+	let body = |p: Pt| wrap(p, t, proportions.body_radius);
 	let legwear = puppet.required("legwear", t);
 	svg.brushed_shaded(&legwear, inks.bottom, LIGHT, ink, LINE);
 
@@ -1043,49 +1147,62 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32
 	if look.pattern == Pattern::Dots {
 		let dot = puppet.required("pattern-dot", t);
 
-		for row in 0..6 {
-			for column in -4..=4 {
+		let columns = (proportions.body_radius / 16.0) as i32;
+		let mut row = 0;
+
+		while neck_y + 4.0 + row as f32 * 20.0 <= hem_y + 3.0 {
+			for column in -columns..=columns {
 				let offset = if row % 2 == 0 { 0.0 } else { 11.0 };
-				let at = pt(column as f32 * 22.0 + offset, -222.0 + row as f32 * 20.0);
+				let at = pt(
+					column as f32 * 22.0 + offset,
+					neck_y + 4.0 + row as f32 * 20.0,
+				);
 				svg.fill(&dot.shift(at).map(body).path(), inks.stripe);
 			}
+
+			row += 1;
 		}
 	}
 
 	if look.pattern == Pattern::Star {
-		let star = puppet.required("pattern-star", t).shift(pt(0.0, -176.0));
+		let star = puppet
+			.required("pattern-star", t)
+			.shift(pt(0.0, neck_y + 50.0));
 		let star = star.map(body);
 		svg.brushed(&star.path(), inks.stripe, ink, DETAIL);
 	}
 
 	if look.pattern == Pattern::Stripes {
-		for y in [-200.0, -176.0, -152.0] {
+		let mut y = neck_y + 26.0;
+
+		while y <= hem_y - 27.0 {
 			let band = Shape::from_points(
 				vec![
-					pt(-80.0, y),
-					pt(-30.0, y + 6.0),
-					pt(30.0, y + 6.0),
-					pt(80.0, y),
-					pt(80.0, y + 4.0),
-					pt(80.0, y + 8.0),
-					pt(80.0, y + 11.0),
-					pt(30.0, y + 17.0),
-					pt(-30.0, y + 17.0),
-					pt(-80.0, y + 11.0),
-					pt(-80.0, y + 8.0),
-					pt(-80.0, y + 4.0),
-					pt(-80.0, y),
+					pt(-half, y),
+					pt(-half * 0.375, y + 6.0),
+					pt(half * 0.375, y + 6.0),
+					pt(half, y),
+					pt(half, y + 4.0),
+					pt(half, y + 8.0),
+					pt(half, y + 11.0),
+					pt(half * 0.375, y + 17.0),
+					pt(-half * 0.375, y + 17.0),
+					pt(-half, y + 11.0),
+					pt(-half, y + 8.0),
+					pt(-half, y + 4.0),
+					pt(-half, y),
 				],
 				true,
 			)
 			.unwrap_or_else(|| unreachable!("four whole curves"));
 			svg.fill(&band.map(body).path(), inks.stripe);
+			y += 24.0;
 		}
 	}
 
 	// A ribbed hem.
 	svg.fill(
-		&Path::rect(-80.0, -125.0, 160.0, 14.0),
+		&Path::rect(-half, hem_y, half * 2.0, 14.0),
 		inks.top.darken(0.12),
 	);
 
@@ -1110,7 +1227,7 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32
 	svg.brush_line(&path, ink, LINE * 1.1);
 
 	// The neck, then the collar over it.
-	let neck = capsule(30.0, 30.0, 30.0).shift(pt(lerp(0.0, 6.0, t), -250.0));
+	let neck = capsule(30.0, 30.0, 30.0).shift(pt(lerp(0.0, 6.0, t), neck_y - 24.0));
 	svg.brushed_shaded(&neck, inks.skin, LIGHT, ink, LINE);
 
 	if let Some(collar) = puppet.part("collar", t) {
@@ -1141,12 +1258,14 @@ struct Held {
 	/// Where the mouth is: a toothbrush near it is brushing.
 	mouth: Pt,
 	time: f32,
+	/// Props are drawn for a kid's hand; a grown-up's bigger hand holds them bigger.
+	scale: f32,
 }
 
 /// Where the middle of the mouth is in figure units, after the head and body have moved.
 fn mouth_on_body(solved: &Solved, posed: &Posed) -> Pt {
-	let local = wrap(pt(0.0, 58.0), posed.t, FACE_RADIUS) + pt(0.0, -HEAD_ABOVE_NECK);
-	solved.torso(NECK + local.rotate(posed.head_tilt))
+	let local = wrap(pt(0.0, 58.0), posed.t, FACE_RADIUS) + pt(0.0, -solved.body.head_above_neck);
+	solved.torso(solved.body.neck + local.rotate(posed.head_tilt))
 }
 
 /// Everything an arm is drawn from.
@@ -1177,7 +1296,8 @@ impl Arm<'_> {
 		};
 
 		let angle = begin_bone(svg, elbow, wrist);
-		let forearm = capsule(solved.limbs.forearm, 12.0, 10.5);
+		let (elbow_width, wrist_width) = solved.body.forearm_width;
+		let forearm = capsule(solved.limbs.forearm, elbow_width, wrist_width);
 		svg.brushed_shaded(
 			&forearm,
 			far(arm_skin, is_far),
@@ -1209,24 +1329,37 @@ impl Arm<'_> {
 		svg.brush_fill(&path, far(inks.top, is_far), ink, LINE);
 		svg.begin_clip(&path);
 
+		// The pattern runs down the sleeve to its cuff, a band at the end of the upper arm.
+		let cuff_y = solved.limbs.upper_arm - 12.0;
+
 		match self.look.pattern {
 			Pattern::Stripes => {
-				for y in [6.0, 24.0] {
+				let mut y = 6.0;
+
+				while y <= cuff_y - 4.0 {
 					svg.fill(&Path::rect(-20.0, y, 40.0, 10.0), far(inks.stripe, is_far));
+					y += 18.0;
 				}
 			}
 			Pattern::Dots => {
 				let dot = puppet.required("pattern-dot", t);
+				let mut step = 0.0;
 
-				for (x, y) in [(-6.0, 6.0), (7.0, 16.0), (-5.0, 27.0)] {
-					svg.fill(&dot.shift(pt(x, y)).path(), far(inks.stripe, is_far));
+				while 6.0 + step <= cuff_y - 4.0 {
+					for (x, y) in [(-6.0, 6.0), (7.0, 16.0), (-5.0, 27.0)] {
+						if y + step <= cuff_y {
+							svg.fill(&dot.shift(pt(x, y + step)).path(), far(inks.stripe, is_far));
+						}
+					}
+
+					step += 30.0;
 				}
 			}
 			Pattern::Plain | Pattern::Star => {}
 		}
 
 		svg.fill(
-			&Path::rect(-20.0, 38.0, 40.0, 16.0),
+			&Path::rect(-20.0, cuff_y, 40.0, 16.0),
 			far(inks.top.darken(0.12), is_far),
 		);
 		svg.end();
@@ -1243,18 +1376,20 @@ impl Arm<'_> {
 		let along = (wrist - elbow).norm();
 
 		if let Some(held) = held {
-			draw_prop(svg, puppet, ink, held, wrist + along * 17.0, along, side);
+			let fist = wrist + along * 17.0 * held.scale;
+			draw_prop(svg, puppet, ink, held, fist, along, side);
 		}
 
 		// The thumb faces the body from the front and forwards when turned.
 		let mirror = side < 0.0 || t > 0.5;
 		let angle = (-along.x).atan2(along.y).to_degrees();
 		svg.begin(&format!(
-			"translate({:.2} {:.2}) rotate({:.2}) scale({} 1) scale(1.08)",
+			"translate({:.2} {:.2}) rotate({:.2}) scale({} 1) scale({})",
 			wrist.x,
 			wrist.y,
 			angle + turn * if mirror { -1.0 } else { 1.0 },
-			if mirror { -1 } else { 1 }
+			if mirror { -1 } else { 1 },
+			solved.body.hand_scale
 		));
 		let light = LIGHT.rotate(-angle);
 		let light = if mirror { pt(-light.x, light.y) } else { light };
@@ -1279,7 +1414,10 @@ fn draw_prop(
 
 	match held.prop {
 		Prop::Jam => {
-			svg.begin(&format!("translate({:.2} {:.2})", fist.x, fist.y));
+			svg.begin(&format!(
+				"translate({:.2} {:.2}) scale({:.3})",
+				fist.x, fist.y, held.scale
+			));
 			let jar = puppet.required("prop-jam", 0.0);
 			svg.brushed_shaded(&jar, JAM, light, ink, LINE);
 
@@ -1298,7 +1436,12 @@ fn draw_prop(
 			svg.end();
 		}
 		Prop::Parcel => {
-			svg.begin(&format!("translate({:.2} {:.2})", fist.x, fist.y - 8.0));
+			svg.begin(&format!(
+				"translate({:.2} {:.2}) scale({:.3})",
+				fist.x,
+				fist.y - 8.0 * held.scale,
+				held.scale
+			));
 
 			for (name, color) in [
 				("prop-parcel-side", KRAFT.darken(0.15)),
@@ -1326,11 +1469,13 @@ fn draw_prop(
 				(along.perp() * -side, 0.0)
 			};
 			let angle = dir.y.atan2(dir.x).to_degrees();
-			let flip = if dir.x < 0.0 { -1 } else { 1 };
+			let flip = if dir.x < 0.0 { -1.0 } else { 1.0 };
 			svg.begin(&format!(
-				"translate({:.2} {:.2}) rotate({angle:.2}) scale(1 {flip})",
+				"translate({:.2} {:.2}) rotate({angle:.2}) scale({:.3} {:.3})",
 				fist.x + scrub,
-				fist.y
+				fist.y,
+				held.scale,
+				flip * held.scale
 			));
 			let handle = puppet.required("prop-toothbrush", 0.0);
 			svg.brushed_shaded(&handle, BRUSH, light, ink, LINE);
@@ -1461,6 +1606,19 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 	svg.end();
 	svg.end();
 	svg.cel_shade(&head, LIGHT);
+
+	// A bald head shines.
+	let shines = puppet.copies("head-shine", t);
+
+	if !shines.is_empty() {
+		svg.begin_clip(&head_path);
+
+		for shine in &shines {
+			svg.brush_line(&shine.path(), inks.skin.lighten(0.45), 7.0);
+		}
+
+		svg.end();
+	}
 
 	// Cheeks and freckles, wrapped round the face. Anything turned past the edge is hidden.
 	for side in [-1.0_f32, 1.0] {
@@ -2061,7 +2219,7 @@ mod tests {
 
 	#[test]
 	fn hands_reach_their_targets_through_the_rig() {
-		let frame = Frame::authored_kid();
+		let frame = Frame::authored(&KID);
 
 		// Poses whose hands land on a spot (not stretched to full reach, like a cheer).
 		for pose in [
@@ -2073,8 +2231,8 @@ mod tests {
 		] {
 			let mut state = FigureState::new(&frame);
 			state.hands = frame.hands(pose, 0.0);
-			let posed = Posed::of(&state);
-			let solved = Solved::new(&posed, frame.limbs());
+			let posed = Posed::of(&state, &KID);
+			let solved = Solved::new(&posed, &KID);
 
 			for side in [-1.0, 1.0] {
 				let (shoulder, elbow, wrist) = solved.arm(&posed, side);
@@ -2083,7 +2241,7 @@ mod tests {
 				} else {
 					posed.hands.1
 				};
-				assert!(((elbow - shoulder).len() - KID_LIMBS.upper_arm).abs() < 0.01);
+				assert!(((elbow - shoulder).len() - KID.limbs.upper_arm).abs() < 0.01);
 				assert!(
 					(wrist - solved.torso(target)).len() < 0.5,
 					"{pose:?}, side {side}"
@@ -2094,12 +2252,12 @@ mod tests {
 
 	#[test]
 	fn facing_left_mirrors_the_figure_and_swaps_the_near_hand() {
-		let frame = Frame::authored_kid();
+		let frame = Frame::authored(&KID);
 		let mut state = FigureState::new(&frame);
 		state.hands = frame.hands(Pose::Point, -STAGED_FACING);
 		state.hand_shapes = Pose::Point.hand_shapes();
 		state.facing = -STAGED_FACING;
-		let posed = Posed::of(&state);
+		let posed = Posed::of(&state, &KID);
 		assert!(posed.mirrored);
 		assert!((posed.t - 1.0).abs() < 1e-6);
 		// The pointing hand is the page-right one, which is the far hand when facing left.
@@ -2112,18 +2270,18 @@ mod tests {
 
 	#[test]
 	fn raised_hands_clear_the_head_but_hands_on_the_face_stay() {
-		let frame = Frame::authored_kid();
+		let frame = Frame::authored(&KID);
 
 		for facing in [0.0, STAGED_FACING] {
 			let mut state = FigureState::new(&frame);
 			state.facing = facing;
 			state.hands = frame.hands(Pose::HoldNose, facing);
-			let nose = Posed::of(&state).hands.1;
+			let nose = Posed::of(&state, &KID).hands.1;
 			let face_x = facing / STAGED_FACING * FACE_SLIDE * STAGED_FACING;
 			assert!((nose.x - face_x).abs() < 30.0, "facing {facing}: {nose:?}");
 
 			state.hands = frame.hands(Pose::Wave, facing);
-			let posed = Posed::of(&state);
+			let posed = Posed::of(&state, &KID);
 			let waving = if posed.hands.0.y < posed.hands.1.y {
 				posed.hands.0
 			} else {
@@ -2169,7 +2327,7 @@ mod tests {
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Hold, STAGED_FACING);
 		state.prop = Some(Prop::Jam);
-		let posed = Posed::of(&state);
+		let posed = Posed::of(&state, &KID);
 		// The jam is in the page-right hand, which is the far hand when facing right.
 		assert_eq!(posed.prop, Some((Prop::Jam, true)));
 		assert!(drawn(&look, &state).contains(&format!("fill=\"{JAM}\"")));
@@ -2177,14 +2335,14 @@ mod tests {
 
 	#[test]
 	fn brushing_keeps_the_toothbrush_hand_at_the_mouth_when_turned() {
-		let frame = Frame::authored_kid();
+		let frame = Frame::authored(&KID);
 		let mut state = FigureState::new(&frame);
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Brush, STAGED_FACING);
 		state.prop = Some(Prop::Toothbrush);
-		let posed = Posed::of(&state);
+		let posed = Posed::of(&state, &KID);
 		assert_eq!(posed.prop, Some((Prop::Toothbrush, true)), "no wave swap");
-		let solved = Solved::new(&posed, frame.limbs());
+		let solved = Solved::new(&posed, &KID);
 		let (_, _, wrist) = solved.arm(&posed, 1.0);
 		assert!((wrist - mouth_on_body(&solved, &posed)).len() < 70.0);
 	}
@@ -2243,12 +2401,12 @@ mod tests {
 
 	#[test]
 	fn turned_far_arms_cheer_behind_the_head_but_reach_the_face_in_front() {
-		let frame = Frame::authored_kid();
+		let frame = Frame::authored(&KID);
 		let behind = |pose: Pose| {
 			let mut state = FigureState::new(&frame);
 			state.facing = STAGED_FACING;
 			state.hands = frame.hands(pose, STAGED_FACING);
-			Posed::of(&state).far_arm_behind
+			Posed::of(&state, &KID).far_arm_behind
 		};
 		assert!(behind(Pose::Idle));
 		assert!(
@@ -2261,12 +2419,12 @@ mod tests {
 
 	#[test]
 	fn every_mood_has_a_face_and_hanging_open_hands_relax() {
-		let frame = Frame::authored_kid();
+		let frame = Frame::authored(&KID);
 
 		for (_, mood) in Mood::ALL {
 			let mut state = FigureState::new(&frame);
 			state.mood = mood;
-			let posed = Posed::of(&state);
+			let posed = Posed::of(&state, &KID);
 			assert_eq!(
 				posed.hand_shapes,
 				(Hand::Relaxed, Hand::Relaxed),

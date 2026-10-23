@@ -12,10 +12,12 @@ use fables::art::Color;
 use fables::art::Path as Curve;
 use fables::art::Svg;
 use fables::art::figure;
+use fables::art::figure::Build;
 use fables::art::figure::FigureState;
 use fables::art::figure::Look;
 use fables::art::figure::Mood;
 use fables::art::figure::Pose;
+use fables::art::figure::Prop;
 use fables::art::figure::Viseme;
 use fables::art::puppet::Authored;
 use fables::art::rig::Stance;
@@ -28,8 +30,9 @@ use crate::sheets::save;
 use crate::stinky;
 use crate::stinky::THREE_QUARTER;
 
-/// A moment on a model sheet: a mood, a pose, and a lip-sync mouth if they are talking.
-type Beat = (Mood, Pose, Option<Viseme>, &'static str);
+/// A moment on a model sheet: a mood, a pose, a lip-sync mouth if they are talking, and what
+/// they hold.
+type Beat = (Mood, Pose, Option<Viseme>, Option<Prop>, &'static str);
 
 /// A cast member's model sheet: who, and the moods and poses the books give them.
 struct Sheet {
@@ -41,21 +44,22 @@ struct Sheet {
 	proposed: Option<[u32; 7]>,
 }
 
-const SHEETS: [Sheet; 4] = [
+const SHEETS: [Sheet; 7] = [
 	Sheet {
 		id: "bogey",
 		title: "Bogey McBogeyface (born Bonnie): model sheet",
 		beats: [
-			(Mood::Happy, Pose::Wave, None, "happy · wave"),
-			(Mood::Grin, Pose::Pick, None, "grin · pick"),
-			(Mood::Laugh, Pose::Cheer, None, "laugh · cheer"),
+			(Mood::Happy, Pose::Wave, None, None, "happy · wave"),
+			(Mood::Grin, Pose::Pick, None, None, "grin · pick"),
+			(Mood::Laugh, Pose::Cheer, None, None, "laugh · cheer"),
 			(
 				Mood::Disgusted,
 				Pose::HoldNose,
 				None,
+				None,
 				"disgusted · hold nose",
 			),
-			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
+			(Mood::Shocked, Pose::CoverMouth, None, None, "shocked"),
 		],
 		proposed: None,
 	},
@@ -63,16 +67,17 @@ const SHEETS: [Sheet; 4] = [
 		id: "grubby",
 		title: "Grubby McGrubhands (born Gus): model sheet",
 		beats: [
-			(Mood::Happy, Pose::Cheer, None, "happy · cheer"),
-			(Mood::Proud, Pose::Hips, None, "proud · hips"),
-			(Mood::Grin, Pose::ReachOut, None, "grin · reach out"),
+			(Mood::Happy, Pose::Cheer, None, None, "happy · cheer"),
+			(Mood::Proud, Pose::Hips, None, None, "proud · hips"),
+			(Mood::Grin, Pose::ReachOut, None, None, "grin · reach out"),
 			(
 				Mood::Disgusted,
 				Pose::HoldNose,
 				None,
+				None,
 				"disgusted · hold nose",
 			),
-			(Mood::Shocked, Pose::Idle, None, "shocked"),
+			(Mood::Shocked, Pose::Idle, None, None, "shocked"),
 		],
 		proposed: None,
 	},
@@ -84,17 +89,19 @@ const SHEETS: [Sheet; 4] = [
 				Mood::Happy,
 				Pose::Cheer,
 				Some(Viseme::Wide),
+				None,
 				"SHOUTING · cheer",
 			),
-			(Mood::Laugh, Pose::Hips, None, "laugh · hips"),
-			(Mood::Grin, Pose::Point, None, "grin · point"),
+			(Mood::Laugh, Pose::Hips, None, None, "laugh · hips"),
+			(Mood::Grin, Pose::Point, None, None, "grin · point"),
 			(
 				Mood::Disgusted,
 				Pose::HoldNose,
 				None,
+				None,
 				"disgusted · hold nose",
 			),
-			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
+			(Mood::Shocked, Pose::CoverMouth, None, None, "shocked"),
 		],
 		proposed: None,
 	},
@@ -102,15 +109,97 @@ const SHEETS: [Sheet; 4] = [
 		id: "fibby",
 		title: "Fibby McFibberpants (born Felix): model sheet",
 		beats: [
-			(Mood::Grin, Pose::Hips, None, "fibbing · grin"),
-			(Mood::Worried, Pose::Shrug, None, "caught out · shrug"),
-			(Mood::Happy, Pose::Wave, None, "happy · wave"),
-			(Mood::Proud, Pose::Think, None, "proud · think"),
-			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
+			(Mood::Grin, Pose::Hips, None, None, "fibbing · grin"),
+			(Mood::Worried, Pose::Shrug, None, None, "caught out · shrug"),
+			(Mood::Happy, Pose::Wave, None, None, "happy · wave"),
+			(Mood::Proud, Pose::Think, None, None, "proud · think"),
+			(Mood::Shocked, Pose::CoverMouth, None, None, "shocked"),
 		],
 		proposed: None,
 	},
+	Sheet {
+		id: "mum",
+		title: "Mum: proposed design",
+		beats: [
+			(
+				Mood::Cross,
+				Pose::Point,
+				Some(Viseme::Open),
+				None,
+				"cross · point",
+			),
+			(Mood::Happy, Pose::Cheer, None, None, "happy · cheer"),
+			(Mood::Grin, Pose::Hips, None, None, "grin · hips"),
+			(
+				Mood::Disgusted,
+				Pose::HoldNose,
+				None,
+				None,
+				"disgusted · hold nose",
+			),
+			(Mood::Worried, Pose::CoverMouth, None, None, "worried"),
+		],
+		proposed: Some([
+			0xEE_8F_B4, 0x34_35_6E, 0xF4_C2_4A, 0xFF_F8_EF, 0x7A_5C_B8, 0xD9_57_3F, 0x6A_4F_A8,
+		]),
+	},
+	Sheet {
+		id: "dad",
+		title: "Dad: proposed design",
+		beats: [
+			(
+				Mood::Happy,
+				Pose::Hold,
+				None,
+				Some(Prop::Toothbrush),
+				"happy · toothbrush",
+			),
+			(Mood::Grin, Pose::Wave, None, None, "grin · wave"),
+			(Mood::Proud, Pose::Hips, None, None, "proud · hips"),
+			(Mood::Laugh, Pose::Cheer, None, None, "laugh · cheer"),
+			(Mood::Shocked, Pose::CoverMouth, None, None, "shocked"),
+		],
+		proposed: Some([
+			0x6F_8F_D8, 0x6B_4A_3A, 0xD9_57_3F, 0xF6_EA_CF, 0x34_36_6E, 0x7A_4F_3A, 0x2F_32_66,
+		]),
+	},
+	Sheet {
+		id: "parcel",
+		title: "Parcel McParcelface: proposed design",
+		beats: [
+			(
+				Mood::Happy,
+				Pose::Hold,
+				None,
+				Some(Prop::Parcel),
+				"happy · parcel",
+			),
+			(Mood::Grin, Pose::Wave, None, None, "grin · wave"),
+			(Mood::Proud, Pose::Point, None, None, "proud · point"),
+			(
+				Mood::Disgusted,
+				Pose::HoldNose,
+				None,
+				None,
+				"disgusted · hold nose",
+			),
+			(Mood::Fainted, Pose::Droop, None, None, "fainted"),
+		],
+		proposed: Some([
+			0xC4_A6_E6, 0x6B_4A_3A, 0x5F_7F_D0, 0xD9_57_3F, 0x34_36_6E, 0x40_33_57, 0x2E_8A_82,
+		]),
+	},
 ];
+
+/// How big to draw someone so the stage's sizes hold: grown-ups stand on the page at 1.85
+/// stage units to a kid's 2.25.
+fn stage_scale(look: &Look) -> f32 {
+	if look.build == Build::Grownup {
+		1.85 / 2.25
+	} else {
+		1.0
+	}
+}
 
 /// A cast member's look as an authored puppet: from the cast if they are wired in, otherwise
 /// from their part file with the proposed colours.
@@ -167,13 +256,17 @@ pub fn cast_preview(out: &Path) -> Result<Vec<PathBuf>> {
 		c.fill(&Curve::rect(0.0, 0.0, width, height), PAPER);
 		label(&mut c, width / 2.0, 80.0, 46.0, sheet.title);
 
-		for (column, (mood, pose, viseme, name)) in sheet.beats.into_iter().enumerate() {
+		// Everyone fills their own sheet: a grown-up is drawn smaller to fit.
+		let fit = (cell * 0.82 / look.frame().height()).min(0.88);
+
+		for (column, (mood, pose, viseme, prop, name)) in sheet.beats.into_iter().enumerate() {
 			for (row, facing) in [0.0_f32, THREE_QUARTER].into_iter().enumerate() {
 				let x = cell * (column as f32 + 0.5);
 				let ground = 140.0 + cell * (row as f32 + 1.0) - 60.0;
-				c.begin(&format!("translate({x:.1} {ground:.1}) scale(0.88)"));
+				c.begin(&format!("translate({x:.1} {ground:.1}) scale({fit:.3})"));
 				let mut state = posed(&look, mood, pose, facing);
 				state.viseme = viseme;
+				state.prop = prop;
 				draw(&mut c, &look, &state);
 				c.end();
 				let view = if row == 0 { "front" } else { "three-quarter" };
@@ -186,11 +279,14 @@ pub fn cast_preview(out: &Path) -> Result<Vec<PathBuf>> {
 			&svg,
 			&out.join(format!("{}-model-sheet.png", sheet.id)),
 		)?);
-		lineup.push((sheet.title.split(' ').next().unwrap_or(sheet.id), look));
+		lineup.push((
+			sheet.title.split([' ', ':']).next().unwrap_or(sheet.id),
+			look,
+		));
 	}
 
 	// The kids side by side, turned towards each other, to check scale and silhouettes.
-	let cell = 440.0;
+	let cell = 340.0;
 	let (width, height) = (cell * lineup.len() as f32, 760.0);
 	let mut c = Svg::new();
 	c.fill(&Curve::rect(0.0, 0.0, width, height), PAPER);
@@ -207,7 +303,10 @@ pub fn cast_preview(out: &Path) -> Result<Vec<PathBuf>> {
 		let ground = height - 110.0;
 		let middle = (lineup.len() as f32 - 1.0) / 2.0;
 		let facing = (middle - index as f32).signum() * THREE_QUARTER;
-		c.begin(&format!("translate({x:.1} {ground:.1})"));
+		c.begin(&format!(
+			"translate({x:.1} {ground:.1}) scale({:.3})",
+			0.72 * stage_scale(look)
+		));
 		draw(&mut c, look, &posed(look, Mood::Happy, Pose::Idle, facing));
 		c.end();
 		label(&mut c, x, ground + 60.0, 30.0, name);

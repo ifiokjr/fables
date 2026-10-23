@@ -150,6 +150,8 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("hair-strand", Space::Head).turning().numbered(),
 	// Sheen on the hair, drawn in a lighter shade inside it.
 	part("hair-shine", Space::Head).turning().numbered(),
+	// Shine on a bald head, drawn in a lighter shade of the skin inside it.
+	part("head-shine", Space::Head).turning().numbered(),
 	// Loose hair (pigtails, bunches) behind the head. Each lock's drawing starts at its root,
 	// where it swings from.
 	part("hair-lock", Space::Head).turning().numbered(),

@@ -351,9 +351,6 @@ fn build_look(id: &str, entry: &Entry, dir: &Path) -> Result<Look> {
 		.collect::<Result<Vec<_>>>()?;
 
 	let puppet = match &entry.puppet {
-		Some(_) if build == Build::Grownup => {
-			bail!("authored puppets are drawn for kids so far; grown-ups come in a later layer")
-		}
 		Some(file) => Some(Authored::load(&dir.join(file))?),
 		None => None,
 	};
@@ -432,12 +429,20 @@ colour = "#c9865a"
 	}
 
 	#[test]
-	fn grown_ups_cannot_have_authored_puppets_yet() {
-		let error = Cast::parse(
-			"[mum]\nname = \"Mum\"\nkind = \"grown-up\"\npuppet = \"world/puppets/stinky.svg\"\n",
+	fn authored_grown_ups_stand_taller_than_kids() {
+		let cast = Cast::parse(
+			"[mum]\nname = \"Mum\"\nkind = \"grown-up\"\npuppet = \
+			 \"world/puppets/stinky.svg\"\n[kid]\nname = \"Kid\"\npuppet = \
+			 \"world/puppets/stinky.svg\"\n",
 		)
-		.unwrap_err();
-		assert!(format!("{error:#}").contains("drawn for kids"));
+		.unwrap();
+		let height = |id: &str| {
+			let Ok(Kind::Figure(look)) = cast.resolve(id) else {
+				panic!("{id} is a person");
+			};
+			look.frame().height()
+		};
+		assert!(height("mum") > height("kid") * 1.4);
 	}
 
 	#[test]
