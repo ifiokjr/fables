@@ -1569,8 +1569,9 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		svg.brush_line(&strand.path(), ink, DETAIL * 0.8);
 	}
 
-	// In three-quarter view the near ear sits on the side of the head, over the hair behind it.
-	if t >= 0.5 {
+	// In three-quarter view the near ear sits on the side of the head, over the hair behind it,
+	// unless the hair comes down over the ears (a bob).
+	if t >= 0.5 && !covers_ears(&hair) {
 		draw_ear(svg, pt(lerp(-74.0, -58.0, t) * spread, 8.0), false, 0.85);
 	}
 
@@ -1618,6 +1619,11 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			.map(warp);
 		svg.brushed(&shape.path(), inks.hair, ink, 2.0);
 	}
+}
+
+/// Whether hair hangs down past the ears (they sit about y = 8 in head units).
+fn covers_ears(hair: &Shape) -> bool {
+	hair.bounds().1.y > 28.0
 }
 
 fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time: f32) {
@@ -2184,7 +2190,7 @@ mod tests {
 	fn every_puppet_file_draws_a_figure() {
 		let world = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("world/puppets");
 
-		for name in ["stinky", "bogey", "grubby"] {
+		for name in ["stinky", "bogey", "grubby", "shouty", "fibby"] {
 			let puppet = Authored::load(&world.join(format!("{name}.svg")))
 				.unwrap_or_else(|error| panic!("{name}: {error:#}"));
 
@@ -2194,6 +2200,21 @@ mod tests {
 					"{name}'s {turning} should blend between its two views"
 				);
 			}
+		}
+	}
+
+	#[test]
+	fn only_hair_that_hangs_past_the_ears_covers_them() {
+		let world = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("world/puppets");
+		let hair = |name: &str| {
+			Authored::load(&world.join(format!("{name}.svg")))
+				.unwrap()
+				.required("hair", 1.0)
+		};
+		assert!(covers_ears(&hair("fibby")), "a bob covers the ears");
+
+		for name in ["stinky", "bogey", "grubby", "shouty"] {
+			assert!(!covers_ears(&hair(name)), "{name}'s ears show");
 		}
 	}
 

@@ -1,12 +1,14 @@
-//! Model sheets for the kids redrawn after Stinky, drawn from their cast entries and part files
-//! exactly as the books draw them, plus a lineup to check their silhouettes and sizes together.
+//! Model sheets for the kids redrawn after Stinky, plus a lineup to check their silhouettes and
+//! sizes together. Characters already wired in are drawn from their cast entries exactly as the
+//! books draw them; proposed ones are drawn from their part file with proposed colours, so they
+//! can be signed off before `world/cast.toml` changes.
 
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use fables::art::Color;
 use fables::art::Path as Curve;
 use fables::art::Svg;
 use fables::art::figure;
@@ -14,6 +16,8 @@ use fables::art::figure::FigureState;
 use fables::art::figure::Look;
 use fables::art::figure::Mood;
 use fables::art::figure::Pose;
+use fables::art::figure::Viseme;
+use fables::art::puppet::Authored;
 use fables::art::rig::Stance;
 use fables::cast::Cast;
 use fables::cast::Kind;
@@ -24,46 +28,116 @@ use crate::sheets::save;
 use crate::stinky;
 use crate::stinky::THREE_QUARTER;
 
+/// A moment on a model sheet: a mood, a pose, and a lip-sync mouth if they are talking.
+type Beat = (Mood, Pose, Option<Viseme>, &'static str);
+
 /// A cast member's model sheet: who, and the moods and poses the books give them.
 struct Sheet {
 	id: &'static str,
 	title: &'static str,
-	beats: [(Mood, Pose, &'static str); 5],
+	beats: [Beat; 5],
+	/// Proposed colours for a character not yet wired in, as
+	/// `(skin, hair, top, trim, bottom, shoes, eyes)`.
+	proposed: Option<[u32; 7]>,
 }
 
-const SHEETS: [Sheet; 2] = [
+const SHEETS: [Sheet; 4] = [
 	Sheet {
 		id: "bogey",
 		title: "Bogey McBogeyface (born Bonnie): model sheet",
 		beats: [
-			(Mood::Happy, Pose::Wave, "happy · wave"),
-			(Mood::Grin, Pose::Pick, "grin · pick"),
-			(Mood::Laugh, Pose::Cheer, "laugh · cheer"),
-			(Mood::Disgusted, Pose::HoldNose, "disgusted · hold nose"),
-			(Mood::Shocked, Pose::CoverMouth, "shocked"),
+			(Mood::Happy, Pose::Wave, None, "happy · wave"),
+			(Mood::Grin, Pose::Pick, None, "grin · pick"),
+			(Mood::Laugh, Pose::Cheer, None, "laugh · cheer"),
+			(
+				Mood::Disgusted,
+				Pose::HoldNose,
+				None,
+				"disgusted · hold nose",
+			),
+			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
 		],
+		proposed: None,
 	},
 	Sheet {
 		id: "grubby",
 		title: "Grubby McGrubhands (born Gus): model sheet",
 		beats: [
-			(Mood::Happy, Pose::Cheer, "happy · cheer"),
-			(Mood::Proud, Pose::Hips, "proud · hips"),
-			(Mood::Grin, Pose::ReachOut, "grin · reach out"),
-			(Mood::Disgusted, Pose::HoldNose, "disgusted · hold nose"),
-			(Mood::Shocked, Pose::Idle, "shocked"),
+			(Mood::Happy, Pose::Cheer, None, "happy · cheer"),
+			(Mood::Proud, Pose::Hips, None, "proud · hips"),
+			(Mood::Grin, Pose::ReachOut, None, "grin · reach out"),
+			(
+				Mood::Disgusted,
+				Pose::HoldNose,
+				None,
+				"disgusted · hold nose",
+			),
+			(Mood::Shocked, Pose::Idle, None, "shocked"),
 		],
+		proposed: None,
+	},
+	Sheet {
+		id: "shouty",
+		title: "Shouty McShoutface (born Sasha): proposed design",
+		beats: [
+			(
+				Mood::Happy,
+				Pose::Cheer,
+				Some(Viseme::Wide),
+				"SHOUTING · cheer",
+			),
+			(Mood::Laugh, Pose::Hips, None, "laugh · hips"),
+			(Mood::Grin, Pose::Point, None, "grin · point"),
+			(
+				Mood::Disgusted,
+				Pose::HoldNose,
+				None,
+				"disgusted · hold nose",
+			),
+			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
+		],
+		proposed: Some([
+			0xE4_66_4E, 0x2F_32_66, 0xF4_C2_4A, 0xEE_8A_4A, 0x5F_7F_D0, 0x40_33_57, 0x4F_6F_C8,
+		]),
+	},
+	Sheet {
+		id: "fibby",
+		title: "Fibby McFibberpants (born Felix): proposed design",
+		beats: [
+			(Mood::Grin, Pose::Hips, None, "fibbing · grin"),
+			(Mood::Worried, Pose::Shrug, None, "caught out · shrug"),
+			(Mood::Happy, Pose::Wave, None, "happy · wave"),
+			(Mood::Proud, Pose::Think, None, "proud · think"),
+			(Mood::Shocked, Pose::CoverMouth, None, "shocked"),
+		],
+		proposed: Some([
+			0x8A_6F_CF, 0xEF_8A_45, 0x9F_E0_C8, 0x2E_9A_90, 0xD9_57_3F, 0x40_33_57, 0x2E_8A_82,
+		]),
 	},
 ];
 
-/// A cast member's look, which must be drawn by an authored puppet.
-fn authored(cast: &Cast, id: &str) -> Result<Look> {
-	let Kind::Figure(look) = cast.resolve(id)? else {
+/// A cast member's look as an authored puppet: from the cast if they are wired in, otherwise
+/// from their part file with the proposed colours.
+fn authored(cast: &Cast, sheet: &Sheet) -> Result<Look> {
+	let id = sheet.id;
+	let Kind::Figure(mut look) = cast.resolve(id)? else {
 		bail!("{id} is a person in the cast file");
 	};
-	look.puppet
-		.as_ref()
-		.with_context(|| format!("{id} has no `puppet` in the cast file"))?;
+
+	match (&look.puppet, sheet.proposed) {
+		(Some(_), _) => {}
+		(None, Some(colours)) => {
+			let file = stinky::cast_file()
+				.with_file_name("puppets")
+				.join(format!("{id}.svg"));
+			look.puppet = Some(Authored::load(&file)?);
+			let [skin, hair, top, trim, bottom, shoes, eyes] = colours.map(Color);
+			(look.skin, look.hair_color, look.top, look.trim) = (skin, hair, top, trim);
+			(look.bottom, look.shoes, look.eyes) = (bottom, shoes, eyes);
+		}
+		(None, None) => bail!("{id} has no `puppet` in the cast file and no proposed colours"),
+	}
+
 	Ok(look)
 }
 
@@ -90,19 +164,21 @@ pub fn cast_preview(out: &Path) -> Result<Vec<PathBuf>> {
 	let mut lineup = vec![("Stinky", stinky::look().clone())];
 
 	for sheet in &SHEETS {
-		let look = authored(&cast, sheet.id)?;
+		let look = authored(&cast, sheet)?;
 		let cell = 520.0;
 		let (width, height) = (cell * 5.0, 140.0 + cell * 2.0 + 40.0);
 		let mut c = Svg::new();
 		c.fill(&Curve::rect(0.0, 0.0, width, height), PAPER);
 		label(&mut c, width / 2.0, 80.0, 46.0, sheet.title);
 
-		for (column, (mood, pose, name)) in sheet.beats.into_iter().enumerate() {
+		for (column, (mood, pose, viseme, name)) in sheet.beats.into_iter().enumerate() {
 			for (row, facing) in [0.0_f32, THREE_QUARTER].into_iter().enumerate() {
 				let x = cell * (column as f32 + 0.5);
 				let ground = 140.0 + cell * (row as f32 + 1.0) - 60.0;
 				c.begin(&format!("translate({x:.1} {ground:.1}) scale(0.88)"));
-				draw(&mut c, &look, &posed(&look, mood, pose, facing));
+				let mut state = posed(&look, mood, pose, facing);
+				state.viseme = viseme;
+				draw(&mut c, &look, &state);
 				c.end();
 				let view = if row == 0 { "front" } else { "three-quarter" };
 				label(&mut c, x, ground + 46.0, 26.0, &format!("{name} · {view}"));
@@ -110,21 +186,31 @@ pub fn cast_preview(out: &Path) -> Result<Vec<PathBuf>> {
 		}
 
 		let svg = c.finish((0.0, 0.0, width, height), width as u32, height as u32);
-		written.push(save(&svg, &out.join(format!("{}-model-sheet.png", sheet.id)))?);
+		written.push(save(
+			&svg,
+			&out.join(format!("{}-model-sheet.png", sheet.id)),
+		)?);
 		lineup.push((sheet.title.split(' ').next().unwrap_or(sheet.id), look));
 	}
 
 	// The kids side by side, turned towards each other, to check scale and silhouettes.
-	let cell = 520.0;
+	let cell = 440.0;
 	let (width, height) = (cell * lineup.len() as f32, 760.0);
 	let mut c = Svg::new();
 	c.fill(&Curve::rect(0.0, 0.0, width, height), PAPER);
-	label(&mut c, width / 2.0, 70.0, 42.0, "Lineup: silhouettes and sizes");
+	label(
+		&mut c,
+		width / 2.0,
+		70.0,
+		42.0,
+		"Lineup: silhouettes and sizes",
+	);
 
 	for (index, (name, look)) in lineup.iter().enumerate() {
 		let x = cell * (index as f32 + 0.5);
 		let ground = height - 110.0;
-		let facing = (1.0 - index as f32) * THREE_QUARTER;
+		let middle = (lineup.len() as f32 - 1.0) / 2.0;
+		let facing = (middle - index as f32).signum() * THREE_QUARTER;
 		c.begin(&format!("translate({x:.1} {ground:.1})"));
 		draw(&mut c, look, &posed(look, Mood::Happy, Pose::Idle, facing));
 		c.end();
