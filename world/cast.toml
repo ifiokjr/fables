@@ -76,19 +76,24 @@ style = "A cheeky, bouncy six-year-old boy with a big voice and a British accent
 name = "Mum"
 about = "Stanley's mum. Asks nicely three times, then uses his whole name."
 kind = "grown-up"
-skin = "bubblegum"
-hair = "bun"
-hair-colour = "night"
-top = "sunflower"
+# Mum is drawn by her authored puppet (`fables puppet sheet mum` shows every part). Her
+# colours are her paint-box ones, softened: bubblegum, a night-blue bun, a sunflower tunic
+# with white dots, grape trousers and tomato flats.
+puppet = "puppets/mum.svg"
+skin = "#ee8fb4"
+hair-colour = "#34356e"
+top = "#f4c24a"
+trim = "#fff8ef"
+bottom = "#7a5cb8"
+shoes = "#d9573f"
+eyes = "#6a4fa8"
 pattern = "dots"
-trim = "white"
-legwear = "trousers"
-bottom = "grape"
-shoes = "tomato"
 extras = ["glasses", "lashes"]
+# Only the parametric puppet reads these; the authored one draws its own shapes.
+hair = "bun"
+legwear = "trousers"
 head = "egg"
 body = "pear"
-eyes = "grape"
 
 [mum.voice]
 name = "Flo (English (UK))"
@@ -99,20 +104,25 @@ style = "A warm, brisk British mum who is running out of patience."
 name = "Dad"
 about = "Stanley's dad. Hums while he brushes. Has the shiniest head in Kerfuffle."
 kind = "grown-up"
-skin = "cornflower"
-hair = "bald"
-hair-colour = "cocoa"
-top = "tomato"
+# Dad is drawn by his authored puppet (`fables puppet sheet dad` shows every part). His
+# colours are his paint-box ones, softened: cornflower, cocoa tufts, a tomato top with cream
+# stripes, night-blue trousers and cocoa shoes.
+puppet = "puppets/dad.svg"
+skin = "#6f8fd8"
+hair-colour = "#6b4a3a"
+top = "#d9573f"
+trim = "#f6eacf"
+bottom = "#34366e"
+shoes = "#7a4f3a"
+eyes = "#2f3266"
 pattern = "stripes"
-trim = "cream"
-legwear = "trousers"
-bottom = "night"
-shoes = "cocoa"
 extras = ["moustache"]
+# Only the parametric puppet reads these; the authored one draws its own shapes.
+hair = "bald"
+legwear = "trousers"
 head = "wide"
 body = "round"
 nose = "round"
-eyes = "night"
 
 [dad.voice]
 name = "Reed (English (UK))"
@@ -123,19 +133,24 @@ style = "A cheerful, rumbly British dad who hums between sentences."
 name = "Parcel McParcelface"
 about = "Kerfuffle's postie. Delivers everything, even things nobody ordered."
 kind = "grown-up"
-skin = "lilac"
-hair = "curls"
-hair-colour = "cocoa"
-top = "cornflower"
-trim = "tomato"
-legwear = "trousers"
-bottom = "night"
-shoes = "ink"
+# Parcel is drawn by his authored puppet (`fables puppet sheet parcel` shows every part).
+# His colours are his paint-box ones, softened: lilac, cocoa curls, a cornflower shirt with a
+# tomato collar, night-blue trousers and ink shoes.
+puppet = "puppets/parcel.svg"
+skin = "#c4a6e6"
+hair-colour = "#6b4a3a"
+top = "#5f7fd0"
+trim = "#d9573f"
+bottom = "#34366e"
+shoes = "#403357"
+eyes = "#2e8a82"
 extras = ["post-cap", "satchel"]
+# Only the parametric puppet reads these; the authored one draws its own shapes.
+hair = "curls"
+legwear = "trousers"
 head = "egg"
 body = "bean"
 nose = "long"
-eyes = "teal"
 
 [parcel.voice]
 name = "Rocko (English (UK))"

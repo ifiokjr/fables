@@ -12,7 +12,6 @@ use fables::art::Color;
 use fables::art::Path as Curve;
 use fables::art::Svg;
 use fables::art::figure;
-use fables::art::figure::Build;
 use fables::art::figure::FigureState;
 use fables::art::figure::Look;
 use fables::art::figure::Mood;
@@ -119,7 +118,7 @@ const SHEETS: [Sheet; 7] = [
 	},
 	Sheet {
 		id: "mum",
-		title: "Mum: proposed design",
+		title: "Mum: model sheet",
 		beats: [
 			(
 				Mood::Cross,
@@ -139,13 +138,11 @@ const SHEETS: [Sheet; 7] = [
 			),
 			(Mood::Worried, Pose::CoverMouth, None, None, "worried"),
 		],
-		proposed: Some([
-			0xEE_8F_B4, 0x34_35_6E, 0xF4_C2_4A, 0xFF_F8_EF, 0x7A_5C_B8, 0xD9_57_3F, 0x6A_4F_A8,
-		]),
+		proposed: None,
 	},
 	Sheet {
 		id: "dad",
-		title: "Dad: proposed design",
+		title: "Dad: model sheet",
 		beats: [
 			(
 				Mood::Happy,
@@ -159,13 +156,11 @@ const SHEETS: [Sheet; 7] = [
 			(Mood::Laugh, Pose::Cheer, None, None, "laugh · cheer"),
 			(Mood::Shocked, Pose::CoverMouth, None, None, "shocked"),
 		],
-		proposed: Some([
-			0x6F_8F_D8, 0x6B_4A_3A, 0xD9_57_3F, 0xF6_EA_CF, 0x34_36_6E, 0x7A_4F_3A, 0x2F_32_66,
-		]),
+		proposed: None,
 	},
 	Sheet {
 		id: "parcel",
-		title: "Parcel McParcelface: proposed design",
+		title: "Parcel McParcelface: model sheet",
 		beats: [
 			(
 				Mood::Happy,
@@ -185,20 +180,13 @@ const SHEETS: [Sheet; 7] = [
 			),
 			(Mood::Fainted, Pose::Droop, None, None, "fainted"),
 		],
-		proposed: Some([
-			0xC4_A6_E6, 0x6B_4A_3A, 0x5F_7F_D0, 0xD9_57_3F, 0x34_36_6E, 0x40_33_57, 0x2E_8A_82,
-		]),
+		proposed: None,
 	},
 ];
 
-/// How big to draw someone so the stage's sizes hold: grown-ups stand on the page at 1.85
-/// stage units to a kid's 2.25.
+/// How big to draw someone, relative to a kid, so the lineup matches the book's pages.
 fn stage_scale(look: &Look) -> f32 {
-	if look.build == Build::Grownup {
-		1.85 / 2.25
-	} else {
-		1.0
-	}
+	fables::stage::figure_size(look) / fables::stage::figure_size(stinky::look())
 }
 
 /// A cast member's look as an authored puppet: from the cast if they are wired in, otherwise

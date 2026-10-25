@@ -10,6 +10,9 @@ use anyhow::Result;
 use anyhow::bail;
 
 use crate::art::Color;
+use crate::art::figure::Build;
+use crate::art::figure::Frame;
+use crate::art::figure::Look;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::figure::Prop;
@@ -73,11 +76,23 @@ pub struct Actor {
 	pub gait: Option<Gait>,
 }
 
+/// How big a person is drawn on the page. The pages are composed around each build's height
+/// (text cards sit above the tallest grown-up's head), so an authored grown-up, whose body is
+/// taller than the parametric one's, is drawn smaller to stand exactly as tall.
+pub fn figure_size(look: &Look) -> f32 {
+	match look.build {
+		Build::Kid => 2.25,
+		Build::Grownup if look.puppet.is_some() => {
+			1.85 * Frame::of(Build::Grownup).height() / look.frame().height()
+		}
+		Build::Grownup => 1.85,
+	}
+}
+
 impl Actor {
 	fn new(id: &str, kind: Kind) -> Actor {
 		let size = match kind {
-			Kind::Figure(ref look) if look.build == crate::art::figure::Build::Grownup => 1.85,
-			Kind::Figure(_) => 2.25,
+			Kind::Figure(ref look) => figure_size(look),
 			Kind::Bird(_) => 2.0,
 			Kind::Dog(_) => 1.8,
 			Kind::Worm => 1.4,
