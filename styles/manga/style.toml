@@ -3,20 +3,33 @@
 # are high-contrast, and in video the characters move on twos. Its kit and template are the
 # anime style's (styles/anime/kit.svg and template.svg), so a character can move between them.
 name = "manga"
-description = "Black-and-white manga: anime anatomy in heavy ink with screentone dots for every colour, high-contrast eyes, speed lines and impact bursts, animated on twos."
+description = "Black-and-white manga: anime anatomy in heavy ink with screentone dots for every colour, high-contrast eyes, speed lines and impact bursts, animated on threes with long holds."
 
 [finish]
-line = 3.6              # heavier outer lines, as a manga inker's pen
-detail = 1.9
+line = 4.4              # a heavy, tapered outer line, as a manga inker's pen
+detail = 1.7
 light = [-15.0, -12.0]
 cel-shadow = "#b4b4b4"  # a neutral grey: shadows print as a darker screentone
 far = "#5a5a5a"
 
-[shade]
-fill = "screentone"
+[line]
+stroke = "brush"        # thick-and-thin: the outer line swells on the shadow side
 
+[shade]
+tones = 1
+fill = "screentone"     # every colour prints as paper, dots or ink
+tone = "dots"
+
+# Limited animation: drawings held for three frames, moves dropping to ones so they stay
+# crisp, long holds, speed lines behind fast moves, and mouths that flap rather than sync.
 [motion]
-timing = "twos"
+timing = "threes"
+modulate = true
+anticipation = 0.6
+overshoot = 0.5
+smears = 0.9
+blink-every = 4.5
+mouth-rate = 8.0
 
 [face]
 turn = 0.42
