@@ -44,7 +44,9 @@ use super::figure::Viseme;
 use super::fx;
 use super::lerp;
 use super::noise;
+use super::pack::Eyes;
 use super::pack::Face as FaceRules;
+use super::pack::Features;
 use super::pack::Finish;
 use super::pack::KitInks;
 use super::pack::StylePack;
@@ -108,7 +110,12 @@ pub struct Authored {
 impl Authored {
 	/// Reads a part file over its style's kit, refusing parts that can't draw a figure.
 	pub fn load(file: &FilePath, style: &Arc<StylePack>) -> Result<Authored> {
-		let parts = Parts::load_puppet(file, &style.kit)?;
+		Self::from_parts(file, Parts::load_puppet(file, &style.kit)?, style)
+	}
+
+	/// A puppet from parts already read (over the kit), refusing parts that can't draw a
+	/// figure. `file` names where they came from.
+	pub fn from_parts(file: &FilePath, parts: Parts, style: &Arc<StylePack>) -> Result<Authored> {
 		let errors: Vec<String> = parts
 			.check()
 			.iter()
@@ -162,6 +169,8 @@ impl Authored {
 struct Inks {
 	finish: Finish,
 	face: FaceRules,
+	features: Features,
+	eyes: Eyes,
 	kit: KitInks,
 	line: Color,
 	skin: Color,
@@ -195,6 +204,8 @@ impl Inks {
 		Inks {
 			finish: style.finish,
 			face: style.face,
+			features: style.features,
+			eyes: style.eyes,
 			kit: style.inks,
 			line: Color(0x2B_1D_2E),
 			skin: look.skin,
@@ -207,7 +218,7 @@ impl Inks {
 			stripe: look.trim,
 			bottom: look.bottom,
 			shoes: look.shoes,
-			pupil: look.eyes.mix(Color(0x1E_12_18), 0.8),
+			pupil: look.eyes.mix(Color(0x1E_12_18), style.eyes.iris_dark),
 			teeth: match teeth {
 				Teeth::Clean | Teeth::Sparkly => style.inks.clean_teeth,
 				Teeth::Grotty => palette::GROT,
@@ -759,7 +770,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	let far_arm_behind = posed.far_arm_behind && !far_holds;
 
 	// What each hand holds, and where the mouth is (a toothbrush near it is brushing).
-	let mouth = mouth_on_body(&solved, &posed, inks.face);
+	let mouth = mouth_on_body(&solved, &posed, inks.face, inks.features.mouth);
 	let held = |side: f32| {
 		posed
 			.prop
@@ -1263,9 +1274,9 @@ struct Held {
 }
 
 /// Where the middle of the mouth is in figure units, after the head and body have moved.
-fn mouth_on_body(solved: &Solved, posed: &Posed, face: FaceRules) -> Pt {
-	let local = wrap(pt(0.0, 58.0), posed.t, face.radius, face.turn)
-		+ pt(0.0, -solved.body.head_above_neck);
+fn mouth_on_body(solved: &Solved, posed: &Posed, face: FaceRules, mouth: Pt) -> Pt {
+	let local =
+		wrap(mouth, posed.t, face.radius, face.turn) + pt(0.0, -solved.body.head_above_neck);
 	solved.torso(solved.body.neck + local.rotate(posed.head_tilt))
 }
 
@@ -1673,7 +1684,8 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 
 	// Cheeks and freckles, wrapped round the face. Anything turned past the edge is hidden.
 	for side in [-1.0_f32, 1.0] {
-		let blush = Shape::ellipse(pt(side * 58.0, 34.0), 17.0, 9.0).map(warp);
+		let (at, size) = (inks.features.blush, inks.features.blush_size);
+		let blush = Shape::ellipse(pt(side * at.x, at.y), size.x, size.y).map(warp);
 		svg.fill_alpha(&blush.path(), inks.blush, 0.3);
 
 		if look.has(Extra::Freckles) {
@@ -1711,10 +1723,10 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		svg.brush_line(&moustache.path(), ink, inks.finish.detail * 1.2);
 	}
 
-	if look.has(Extra::Lashes) {
+	if inks.eyes.lashes || look.has(Extra::Lashes) {
 		for (index, side) in [-1.0_f32, 1.0].into_iter().enumerate() {
 			if matches!(face.eyes[index], Eye::Open { .. }) {
-				let centre = pt(side * 34.0, -6.0);
+				let centre = pt(side * inks.features.eye.x, inks.features.eye.y);
 
 				for lash in puppet.copies("lash", t) {
 					let lash = lash.map(|p| pt(p.x * side, p.y) + centre).map(warp);
@@ -1727,7 +1739,8 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 	if look.has(Extra::Glasses) {
 		if let Some(lens) = puppet.part("glasses-lens", t) {
 			for side in [-1.0_f32, 1.0] {
-				let ring = lens.shift(pt(side * 34.0, -6.0)).map(warp);
+				let eye = inks.features.eye;
+				let ring = lens.shift(pt(side * eye.x, eye.y)).map(warp);
 				svg.fill_alpha(&ring.path(), inks.kit.lens, 0.3);
 				svg.brush_line(&ring.path(), ink, 4.5);
 			}
@@ -1866,12 +1879,13 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 
 	for (index, side) in [-1.0_f32, 1.0].into_iter().enumerate() {
 		let brow = face.brows[index];
-		let centre = pt(side * 36.0, -48.0 - brow.raise - posed.brow_lift * 100.0);
+		let rest = inks.features.brow;
+		let centre = pt(side * rest.x, rest.y - brow.raise - posed.brow_lift * 100.0);
 		let shape = puppet
 			.required("brow", t)
 			.map(|p| pt(p.x * side, p.y).rotate(-side * brow.tilt) + centre)
 			.map(warp);
-		svg.brushed(&shape.path(), inks.hair, ink, 2.0);
+		svg.brushed(&shape.path(), inks.hair, ink, inks.features.brow_weight);
 	}
 }
 
@@ -1883,20 +1897,23 @@ fn covers_ears(hair: &Shape) -> bool {
 fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time: f32) {
 	let t = posed.t;
 	let ink = inks.line;
+	let build = inks.eyes;
 	let warp = |p: Pt| wrap(p, t, inks.face.radius, inks.face.turn);
-	let centre = pt(side * 34.0, -6.0);
-	let (rx, ry) = (20.0, 27.0);
-	let line = |points: &[Pt]| Shape::taper(points, 5.5, 5.5);
+	let centre = pt(side * inks.features.eye.x, inks.features.eye.y);
+	let (rx, ry) = (build.size.x, build.size.y);
+	// Shut and dizzy eyes were drawn for the cartoon eye; they grow with the style's.
+	let k = rx / 20.0;
+	let line = |points: &[Pt]| Shape::taper(points, 5.5 * k, 5.5 * k);
 
 	let (upper, lower, tilt) = match eye {
 		Eye::Open { upper, lower, tilt } => (upper, lower, tilt),
 		Eye::Smiling => {
 			// A shut eye curved up like a happy arch.
 			let arch = [
-				centre + pt(-17.0, 6.0),
-				centre + pt(-8.0, -6.0),
-				centre + pt(8.0, -6.0),
-				centre + pt(17.0, 6.0),
+				centre + pt(-17.0, 6.0) * k,
+				centre + pt(-8.0, -6.0) * k,
+				centre + pt(8.0, -6.0) * k,
+				centre + pt(17.0, 6.0) * k,
 			];
 			svg.fill(&line(&arch).map(warp).path(), ink);
 			return;
@@ -1906,7 +1923,10 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 				(pt(-13.0, -13.0), pt(13.0, 13.0)),
 				(pt(13.0, -13.0), pt(-13.0, 13.0)),
 			] {
-				svg.fill(&line(&[centre + a, centre + b]).map(warp).path(), ink);
+				svg.fill(
+					&line(&[centre + a * k, centre + b * k]).map(warp).path(),
+					ink,
+				);
 			}
 			return;
 		}
@@ -1917,7 +1937,7 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 			let turns: Vec<Pt> = (0..28)
 				.map(|i| {
 					let a = i as f32 * 0.5 + spin;
-					warp(centre + pt(a.cos(), a.sin()) * (2.0 + i as f32 * 0.6))
+					warp(centre + pt(a.cos(), a.sin()) * ((2.0 + i as f32 * 0.6) * k))
 				})
 				.collect();
 			svg.brush_line(&Path::spline(&turns), ink, 3.0);
@@ -1932,22 +1952,50 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 
 	svg.fill(&white_path, inks.kit.eye);
 	svg.begin_clip(&white_path);
-	let look = centre + pt(posed.gaze.x * 8.0, posed.gaze.y * 7.0 + 2.0);
+	let look = centre
+		+ pt(
+			posed.gaze.x * build.gaze.x,
+			posed.gaze.y * build.gaze.y + 2.0,
+		);
 	let size = posed.face.pupil;
-	svg.fill(
-		&Shape::ellipse(look, 11.5 * size, 14.5 * size)
-			.map(warp)
-			.path(),
-		inks.pupil,
-	);
-	svg.fill(
-		&Path::circle(warp(look + pt(-3.5, -5.5) * size), 3.8 * size),
-		inks.kit.eye,
-	);
-	svg.fill(
-		&Path::circle(warp(look + pt(3.5, 5.0) * size), 1.6 * size),
-		inks.kit.eye,
-	);
+	let iris = Shape::ellipse(look, build.iris.x * size, build.iris.y * size).map(warp);
+	svg.fill(&iris.path(), inks.pupil);
+
+	// Layered irises: a darker band across the top, a pupil, and a rim.
+	if build.iris_band > 0.0 {
+		let drop = build.iris.y * size * 2.0 * (1.0 - build.iris_band);
+		let band = Shape::ellipse(
+			look - pt(0.0, drop),
+			build.iris.x * size,
+			build.iris.y * size,
+		)
+		.map(warp);
+		svg.begin_clip(&iris.path());
+		svg.fill(&band.path(), inks.pupil.darken(0.5));
+		svg.end();
+	}
+
+	if build.pupil.x > 0.0 {
+		let pupil = Shape::ellipse(
+			look + pt(0.0, build.iris.y * size * 0.1),
+			build.pupil.x * size,
+			build.pupil.y * size,
+		)
+		.map(warp);
+		svg.fill(&pupil.path(), Color(0x1E_12_18));
+	}
+
+	if build.rim > 0.0 {
+		svg.brush_line(&iris.path(), inks.pupil.darken(0.6), build.rim);
+	}
+
+	for [x, y, r] in build.shines {
+		svg.fill(
+			&Path::circle(warp(look + pt(x, y) * size), r * size),
+			inks.kit.eye,
+		);
+	}
+
 	svg.end();
 	svg.brush_line(&white_path, ink, inks.finish.detail);
 
@@ -1959,31 +2007,49 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 	let upper = upper.max(posed.blink);
 	let edge_y = centre.y - ry + 2.0 * ry * upper;
 	// The lash line arches with the eye when open and flattens as the lid comes down.
-	let sag = -9.0 * (1.0 - upper);
+	let sag = -9.0 * k * (1.0 - upper);
 	let rotate = |p: Pt| (p - pt(centre.x, edge_y)).rotate(tilt) + pt(centre.x, edge_y);
 	let edge = |y: f32, bend: f32| {
 		[
-			pt(centre.x - 34.0, y),
-			pt(centre.x - 14.0, y + bend),
-			pt(centre.x + 14.0, y + bend),
-			pt(centre.x + 34.0, y),
+			pt(centre.x - 34.0 * k, y),
+			pt(centre.x - 14.0 * k, y + bend),
+			pt(centre.x + 14.0 * k, y + bend),
+			pt(centre.x + 34.0 * k, y),
 		]
 	};
 	let lid_edge = edge(edge_y, sag);
-	let lid = closed_over(&lid_edge, -70.0).map(rotate).map(warp);
+	let lid = closed_over(&lid_edge, -70.0 * k).map(rotate).map(warp);
 	svg.fill(&lid.path(), inks.skin);
 	let lash = open_curve(&lid_edge).map(rotate).map(warp);
-	svg.brush_line(&lash.path(), ink, 8.0);
+	svg.brush_line(&lash.path(), ink, build.lash);
 
 	// Lower lid: the cheek pushing up, curved upwards in a smile or a squint.
 	if lower > 0.01 && upper < 0.95 {
 		let low_y = centre.y + ry - 2.0 * ry * lower;
-		let cheek_edge = edge(low_y, -10.0 * lower);
-		svg.fill(&closed_over(&cheek_edge, 50.0).map(warp).path(), inks.skin);
-		svg.brush_line(&open_curve(&cheek_edge).map(warp).path(), ink, 4.4);
+		let cheek_edge = edge(low_y, -10.0 * k * lower);
+		svg.fill(
+			&closed_over(&cheek_edge, 50.0 * k).map(warp).path(),
+			inks.skin,
+		);
+		svg.brush_line(
+			&open_curve(&cheek_edge).map(warp).path(),
+			ink,
+			build.lower_lid,
+		);
 	}
 
 	svg.end();
+
+	// A short lower lash under the outer half of the eye.
+	if build.lower_lash > 0.0 && upper < 0.95 {
+		let under: Vec<Pt> = (0..7)
+			.map(|i| {
+				let a = 0.12 + i as f32 * 0.07;
+				warp(centre + pt(side * rx * a.cos() * 1.02, ry * a.sin() * 1.02))
+			})
+			.collect();
+		svg.brush_line(&Path::spline(&under), ink, build.lower_lash);
+	}
 }
 
 /// One curve through four points (start, two controls, end).
@@ -2011,19 +2077,24 @@ fn draw_nose(svg: &mut Svg, puppet: &Authored, inks: &Inks, t: f32, wrinkle: boo
 	let warp = |p: Pt| wrap(p, t, inks.face.radius, inks.face.turn);
 	// The nose stands proud of the face, so it travels a little further than the cylinder.
 	let poke = pt(9.0 * t, 0.0);
+	let (at, scale) = (inks.features.nose, inks.features.nose_scale);
 	let nose = puppet
 		.required("nose", t)
-		.shift(pt(0.0, 22.0))
+		.map(|p| p * scale)
+		.shift(at)
 		.map(warp)
 		.shift(poke);
 	svg.brush_fill(&nose.path(), inks.nose, inks.line, inks.finish.detail * 1.1);
 	svg.cel_shade(&nose, pt(-4.0, -4.0), inks.finish.cel_shadow);
 	svg.brush_line(&nose.path(), inks.line, inks.finish.detail * 1.1);
-	svg.fill_alpha(
-		&Path::circle(warp(pt(-4.0, 18.0)) + poke, 2.6),
-		Color(0xFF_FF_FF),
-		0.7,
-	);
+
+	if inks.features.nose_shine {
+		svg.fill_alpha(
+			&Path::circle(warp(at + pt(-4.0, -4.0) * scale) + poke, 2.6 * scale),
+			Color(0xFF_FF_FF),
+			0.7,
+		);
+	}
 
 	if wrinkle {
 		for line in puppet.copies("nose-wrinkle", t) {
@@ -2038,12 +2109,13 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 	let t = posed.t;
 	let ink = inks.line;
 	let face = &posed.face;
-	let centre = pt(0.0, 58.0);
+	let (centre, scale) = (inks.features.mouth, inks.features.mouth_scale);
 	let curl = face.curl;
 	// Mouths keep the mood: corners curl up or down a little.
 	let curled = |p: Pt| pt(p.x, p.y - curl * 6.0 * (p.x / 30.0).powi(2));
-	let place =
-		|shape: &Shape| shape.map(|p| wrap(p + centre, t, inks.face.radius, inks.face.turn));
+	let place = |shape: &Shape| {
+		shape.map(|p| wrap(p * scale + centre, t, inks.face.radius, inks.face.turn))
+	};
 	let mouth = |shape: &Shape| place(&shape.map(curled));
 	let drawn = |name: &str| puppet.required(name, t);
 	let ellipse = |c: Pt, rx: f32, ry: f32| place(&Shape::ellipse(c, rx, ry));
@@ -2478,7 +2550,10 @@ mod tests {
 		assert_eq!(posed.prop, Some((Prop::Toothbrush, true)), "no wave swap");
 		let solved = Solved::new(&posed, &kid());
 		let (_, _, wrist) = solved.arm(&posed, 1.0);
-		assert!((wrist - mouth_on_body(&solved, &posed, cartoon().face)).len() < 70.0);
+		assert!(
+			(wrist - mouth_on_body(&solved, &posed, cartoon().face, cartoon().features.mouth))
+				.len() < 70.0
+		);
 	}
 
 	#[test]

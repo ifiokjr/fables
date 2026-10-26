@@ -199,13 +199,16 @@ impl StudioServer {
 		json(Studio::describe_style(&params.style))
 	}
 
-	#[tool(description = "Show a style's kit and template parts as an image.")]
+	#[tool(
+		description = "Show a style as images: its template character on a model sheet, and its \
+		               kit and template parts."
+	)]
 	#[expect(
 		clippy::unused_self,
 		reason = "every tool is a method, so the router can call it"
 	)]
 	fn style_sheet(&self, Parameters(params): Parameters<StyleParams>) -> CallToolResult {
-		images(Studio::style_sheet(&params.style).map(|image| vec![image]))
+		images(Studio::style_sheets(&params.style, crate::studio::SHEET_PX))
 	}
 
 	#[tool(

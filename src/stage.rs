@@ -17,6 +17,7 @@ use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::figure::Prop;
 use crate::art::figure::Teeth;
+use crate::art::pack::StylePack;
 use crate::art::rig::Gait;
 use crate::art::rig::Stance;
 use crate::art::settings::Setting;
@@ -77,15 +78,20 @@ pub struct Actor {
 }
 
 /// How big a person is drawn on the page. The pages are composed around each build's height
-/// (text cards sit above the tallest grown-up's head), so an authored grown-up, whose body is
-/// taller than the parametric one's, is drawn smaller to stand exactly as tall.
+/// (text cards sit above the tallest grown-up's head), so every kid stands as tall as a cartoon
+/// kid and every grown-up as tall as the parametric one, whatever their style's body: an
+/// authored grown-up, or a slender anime teen, is drawn smaller to fit.
 pub fn figure_size(look: &Look) -> f32 {
-	match look.build {
-		Build::Kid => 2.25,
-		Build::Grownup if look.puppet.is_some() => {
+	match (look.build, &look.puppet) {
+		(Build::Kid, None) => 2.25,
+		(Build::Kid, Some(_)) => {
+			let cartoon = Frame::authored(&StylePack::default_pack(), Build::Kid).height();
+			2.25 * (cartoon / look.frame().height())
+		}
+		(Build::Grownup, Some(_)) => {
 			1.85 * Frame::of(Build::Grownup).height() / look.frame().height()
 		}
-		Build::Grownup => 1.85,
+		(Build::Grownup, None) => 1.85,
 	}
 }
 
@@ -637,6 +643,23 @@ mod tests {
 	fn cast() -> Cast {
 		Cast::parse("[stinky]\nname = \"Stinky\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n")
 			.unwrap()
+	}
+
+	#[test]
+	fn a_kid_stands_as_tall_in_every_style() {
+		let staged = |style: &str, build: Build| {
+			let look =
+				crate::cast::template_look(&StylePack::named(style).unwrap(), build).unwrap();
+			figure_size(&look) * look.frame().height()
+		};
+
+		for build in [Build::Kid, Build::Grownup] {
+			let (cartoon, anime) = (staged("cartoon", build), staged("anime", build));
+			assert!(
+				(cartoon - anime).abs() < 0.01,
+				"{build:?}: {cartoon} vs {anime}"
+			);
+		}
 	}
 
 	fn run(script: &str) -> Result<Scene> {

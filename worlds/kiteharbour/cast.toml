@@ -1,0 +1,16 @@
+# The folk of Kiteharbour. Every table is one character.
+
+[hana]
+name = "Hana Kazemura"
+about = "The best kite-flyer on the harbour wall, who can read the wind like a book."
+habit = "Never lets go of a kite string, even when she should."
+kind = "kid"
+puppet = "puppets/hana.svg"
+skin = "#f8dcc8"
+hair-colour = "#2b2f5e"
+top = "#ffffff"
+trim = "#2f6fb8"
+bottom = "#2f4f8a"
+shoes = "#7a3b2e"
+eyes = "#3f8fd0"
+pattern = "plain"

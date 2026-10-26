@@ -60,7 +60,7 @@ A drawing style is a folder in `styles/` that authored puppets are drawn with, s
 
 ```text
 styles/cartoon/
-  style.toml      the finish (line weights, light, cel shadow), the face cylinder, the kit's inks, and the bodies (kid, grown-up)
+  style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, and the bodies (kid, grown-up)
   kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
   template.svg    a plain character's own parts, which `fables puppet template` starts new characters from
 ```
@@ -69,7 +69,14 @@ styles/cartoon/
 | --- | --- |
 | `fables style list` | The drawing styles, with a sentence on each look. |
 | `fables style check <name>` | Checks the template over the kit draws a whole figure, and every body stands up. |
-| `fables style sheet <name>` | `out/styles/<name>-parts.png`: every kit and template part. |
+| `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet) and `<name>-parts.png` (every kit and template part). |
+
+| Style | Look |
+| --- | --- |
+| `cartoon` | Kerfuffle's look: round kids with big heads, brushed outlines that swell on the shadow side, one tone of cel shadow. |
+| `anime` | Slender kids and grown-ups with the head about a quarter of their height; big eyes with a shaded iris, a pupil, a rim and two highlights; a tiny nose and mouth; thin even lines; hard two-tone cel shading. |
+
+Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world; its star, Hana, was designed entirely through the MCP tools below.
 
 The built-in styles are compiled into fables, so a world anywhere on disk can name one. They are separate from the `--style` skins (riso, tv, bold…), which restyle the older parametric puppet and the settings.
 

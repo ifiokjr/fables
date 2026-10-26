@@ -595,8 +595,8 @@ impl Frame {
 			limbs,
 			// Where a hand reaching for the nose puts its wrist: a hand's length below the nose,
 			// so the fingers, not the wrist, are on it.
-			nose: pt(0.0, 50.0),
-			mouth: pt(0.0, 58.0),
+			nose: style.features.nose + pt(0.0, 28.0),
+			mouth: style.features.mouth,
 			face_slide: style.face.slide,
 			reach: body.reach,
 		}

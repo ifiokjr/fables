@@ -178,7 +178,7 @@ enum StyleAction {
 	/// Check a style: its template over its kit must draw a whole figure, and its bodies must
 	/// stand up.
 	Check { name: String },
-	/// Render a style's parts: the kit and the template character.
+	/// Render a style: its template character on a model sheet, and its kit and template parts.
 	Sheet {
 		name: String,
 		#[arg(long, default_value = "out")]
@@ -815,18 +815,19 @@ fn style_check(name: &str) -> Result<()> {
 
 fn style_sheet(name: &str, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	let pack = StylePack::named(name)?;
 	let dir = out.join("styles");
 	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
-	let sheet = dir.join(format!("{name}-parts.png"));
-	std::fs::write(
-		&sheet,
-		raster::png(&press::sheets::parts_sheet(
-			&format!("The {name} style: kit and template"),
-			&pack.template_figure(),
-		)?)?,
-	)?;
-	done(&sheet, started);
+
+	for (kind, image) in ["model", "parts"]
+		.iter()
+		.zip(fables::studio::Studio::style_sheets(name, 2600)?)
+	{
+		let sheet = dir.join(format!("{name}-{kind}.png"));
+		std::fs::write(&sheet, image.png)
+			.with_context(|| format!("could not write {}", sheet.display()))?;
+		done(&sheet, started);
+	}
+
 	Ok(())
 }
 

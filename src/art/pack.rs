@@ -42,12 +42,20 @@ use super::puppet::Proportions;
 pub const DEFAULT: &str = "cartoon";
 
 /// The packs compiled into fables: name, `style.toml`, `kit.svg` and `template.svg`.
-const BUILT_IN: [(&str, &str, &str, &str); 1] = [(
-	"cartoon",
-	include_str!("../../styles/cartoon/style.toml"),
-	include_str!("../../styles/cartoon/kit.svg"),
-	include_str!("../../styles/cartoon/template.svg"),
-)];
+const BUILT_IN: [(&str, &str, &str, &str); 2] = [
+	(
+		"cartoon",
+		include_str!("../../styles/cartoon/style.toml"),
+		include_str!("../../styles/cartoon/kit.svg"),
+		include_str!("../../styles/cartoon/template.svg"),
+	),
+	(
+		"anime",
+		include_str!("../../styles/anime/style.toml"),
+		include_str!("../../styles/anime/kit.svg"),
+		include_str!("../../styles/anime/template.svg"),
+	),
+];
 
 /// A loaded style pack.
 #[derive(Debug)]
@@ -57,6 +65,8 @@ pub struct StylePack {
 	pub description: String,
 	pub finish: Finish,
 	pub face: Face,
+	pub features: Features,
+	pub eyes: Eyes,
 	pub inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
 	/// Parts every character in the style starts with.
@@ -91,6 +101,59 @@ pub struct Face {
 	pub radius: f32,
 	/// How far the face slides sideways per unit of facing, so reaching hands find the nose.
 	pub slide: f32,
+}
+
+/// Where the face's features sit, in head units (the origin between the eyes, y down).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Features {
+	/// The page-right eye's centre; the other eye mirrors it.
+	pub eye: Pt,
+	/// The page-right brow's centre, at rest.
+	pub brow: Pt,
+	pub brow_weight: f32,
+	/// The page-right cheek's blush: centre and half size.
+	pub blush: Pt,
+	pub blush_size: Pt,
+	/// Where the kit's nose is drawn, and how big.
+	pub nose: Pt,
+	pub nose_scale: f32,
+	/// A glint on the nose.
+	pub nose_shine: bool,
+	/// The middle of the mouth, and how big the kit's mouth chart is drawn.
+	pub mouth: Pt,
+	pub mouth_scale: f32,
+}
+
+/// How an eye is built: a white, an iris (with an optional darker band, pupil and rim),
+/// highlights, and lids whose lash line is the eye's heaviest stroke.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Eyes {
+	/// The white's half width and height.
+	pub size: Pt,
+	/// The iris's half width and height.
+	pub iris: Pt,
+	/// How far the iris colour is darkened: 0 is the cast's eye colour, 1 near black.
+	pub iris_dark: f32,
+	/// How much of the iris, from the top, is shaded darker (0 for none).
+	pub iris_band: f32,
+	/// A dark pupil inside the iris: half width and height (0 for none).
+	pub pupil: Pt,
+	/// A dark rim round the iris: its line weight (0 for none).
+	pub rim: f32,
+	/// Two highlights: offset from the iris centre and radius, `[x, y, r]`.
+	pub shines: [[f32; 3]; 2],
+	/// How far the iris moves when the eyes look across and up or down.
+	pub gaze: Pt,
+	/// The upper lash line's weight, and the lower lid's line in a smile or squint.
+	pub lash: f32,
+	pub lower_lid: f32,
+	/// A short lower lash line under the outer half of each eye (0 for none).
+	pub lower_lash: f32,
+	/// Whether every character wears the kit's lash parts, not only those with the `lashes`
+	/// extra.
+	pub lashes: bool,
 }
 
 /// Inks the kit's parts share; a character's own colours come from the cast.
@@ -129,6 +192,8 @@ struct Entry {
 	description: String,
 	finish: Finish,
 	face: Face,
+	features: Features,
+	eyes: Eyes,
 	inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
 }
@@ -197,6 +262,8 @@ impl StylePack {
 			description: entry.description,
 			finish: entry.finish,
 			face: entry.face,
+			features: entry.features,
+			eyes: entry.eyes,
 			inks: entry.inks,
 			bodies: entry.bodies,
 			kit: Parts::parse(kit).context("in kit.svg")?,

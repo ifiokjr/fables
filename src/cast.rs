@@ -67,6 +67,23 @@ impl Kind {
 	}
 }
 
+/// A plain character drawn by a style's template, for showing the style itself.
+pub fn template_look(style: &Arc<StylePack>, build: Build) -> Result<Look> {
+	let kind = match build {
+		Build::Kid => "kid",
+		Build::Grownup => "grown-up",
+	};
+	let entry: Entry = toml::from_str(&format!(
+		"name = \"Template\"\nkind = \"{kind}\"\nskin = \"#f6d7c3\"\nhair-colour = \
+		 \"#3d3a5c\"\ntop = \"#eef1f8\"\ntrim = \"#d6455d\"\nbottom = \"#3a4a7a\"\nshoes = \
+		 \"#2c2c3a\"\neyes = \"#4a7ad0\"\n"
+	))?;
+	let mut look = build_look("template", &entry, Path::new(""), style)?;
+	let file = PathBuf::from(format!("styles/{}/template.svg", style.name));
+	look.puppet = Some(Authored::from_parts(&file, style.template_figure(), style)?);
+	Ok(look)
+}
+
 /// A character from the cast file.
 #[derive(Clone, Debug)]
 pub struct Member {

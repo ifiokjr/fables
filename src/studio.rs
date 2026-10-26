@@ -558,18 +558,26 @@ impl Studio {
 		})
 	}
 
-	/// A style's kit and template, as a parts sheet.
-	pub fn style_sheet(name: &str) -> Result<Image> {
+	/// A style's template kid on a model sheet, and its kit and template parts.
+	pub fn style_sheets(name: &str, px: u32) -> Result<Vec<Image>> {
 		let pack = StylePack::named(name)?;
-		let pixmap = sheets::parts_sheet(
+		let look = crate::cast::template_look(&pack, crate::art::figure::Build::Kid)?;
+		let model = sheets::model_sheet(&format!("The {name} style"), &look, px)?;
+		let parts = sheets::parts_sheet(
 			&format!("The {name} style: kit and template"),
 			&pack.template_figure(),
 		)?;
 
-		Ok(Image {
-			label: format!("{name}: kit and template"),
-			png: raster::png(&fit_width(&pixmap, SHEET_PX))?,
-		})
+		Ok(vec![
+			Image {
+				label: format!("{name}: the template on a model sheet"),
+				png: raster::png(&model)?,
+			},
+			Image {
+				label: format!("{name}: kit and template parts"),
+				png: raster::png(&fit_width(&parts, px))?,
+			},
+		])
 	}
 }
 
