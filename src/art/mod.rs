@@ -51,6 +51,12 @@ impl<'de> serde::Deserialize<'de> for Pt {
 	}
 }
 
+impl serde::Serialize for Pt {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		[self.x, self.y].serialize(serializer)
+	}
+}
+
 /// Shorthand constructor for [`Pt`].
 pub const fn pt(x: f32, y: f32) -> Pt {
 	Pt { x, y }

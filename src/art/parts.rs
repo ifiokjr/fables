@@ -62,7 +62,8 @@ pub enum Space {
 }
 
 impl Space {
-	fn describe(self) -> &'static str {
+	/// Where the space's origin is and which way it runs, in a few words.
+	pub fn describe(self) -> &'static str {
 		match self {
 			Space::Head => "head units: origin between the eyes",
 			Space::Body => "figure units: soles at y = 0",
@@ -382,6 +383,15 @@ impl Parts {
 		self.shapes.get(name)
 	}
 
+	/// Adds a drawing, or replaces the one with the same name.
+	pub fn insert(&mut self, name: &str, shape: Shape) {
+		self.shapes.insert(name.to_owned(), shape);
+	}
+
+	pub fn remove(&mut self, name: &str) -> Option<Shape> {
+		self.shapes.remove(name)
+	}
+
 	/// Every drawing, by name.
 	pub fn iter(&self) -> impl Iterator<Item = (&str, &Shape)> {
 		self.shapes
@@ -524,6 +534,16 @@ fn is_part_name(id: &str) -> bool {
 		&& base
 			.chars()
 			.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+}
+
+/// Reads one part from its name and SVG path data, by the same rules as a part file.
+pub fn read_part(name: &str, data: &str) -> Result<Shape> {
+	anyhow::ensure!(
+		is_part_name(name),
+		"`{name}` is not a part name: use lowercase words joined by hyphens, with `.front` or \
+		 `.3q` for a turning part's views"
+	);
+	read_outline(data).with_context(|| format!("`{name}`"))
 }
 
 /// One outline from path data, with lines and quadratic curves raised to cubics so drawings

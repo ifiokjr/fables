@@ -1,5 +1,5 @@
-//! Reference sheets: every cast member with their name and habit, every mood of one character,
-//! and every setting. They are the model sheets an illustrator would pin above the desk, kept
+//! Reference sheets: every cast member with their name and habit, a character's model sheet and
+//! every mood, and every setting. They are the model sheets an illustrator would pin above the desk, kept
 //! in sync with the cast file automatically.
 
 use anyhow::Result;
@@ -14,8 +14,10 @@ use crate::art::critters::CritterState;
 use crate::art::escape;
 use crate::art::figure;
 use crate::art::figure::FigureState;
+use crate::art::figure::Look;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
+use crate::art::figure::Viseme;
 use crate::art::palette;
 use crate::art::parts::FIGURE_PARTS;
 use crate::art::parts::Level;
@@ -24,6 +26,7 @@ use crate::art::parts::Parts;
 use crate::art::parts::Turn;
 use crate::art::parts::Views;
 use crate::art::pt;
+use crate::art::rig::Stance;
 use crate::art::settings;
 use crate::art::settings::Setting;
 use crate::art::settings::Weather;
@@ -292,6 +295,82 @@ pub fn mood_sheet(member: &Member, style: Style) -> Result<Option<Pixmap>> {
 	raster::finish(&mut pixmap, &style, 0.05, 0);
 
 	Ok(Some(pixmap))
+}
+
+/// The `facing` the stage gives a figure turned towards the middle of the page.
+const THREE_QUARTER: f32 = 0.35;
+
+/// The beats a model sheet shows: a mood, a pose, a mouth and a label.
+const MODEL_BEATS: [(Mood, Pose, Option<Viseme>, &str); 5] = [
+	(Mood::Happy, Pose::Idle, None, "happy"),
+	(Mood::Laugh, Pose::Wave, None, "laughing, waving"),
+	(
+		Mood::Cross,
+		Pose::ArmsCrossed,
+		Some(Viseme::Open),
+		"cross, talking",
+	),
+	(Mood::Sad, Pose::Droop, None, "sad"),
+	(Mood::Shocked, Pose::Cheer, Some(Viseme::Round), "shocked"),
+];
+
+/// A character's model sheet, the one every design is signed off on: five beats (moods, poses
+/// and a talking mouth), each front-on and three-quarters, `px` pixels wide.
+pub fn model_sheet(title: &str, look: &Look, px: u32) -> Result<Pixmap> {
+	let cell = 520.0;
+	let (width, height) = (cell * 5.0, 140.0 + cell * 2.0 + 40.0);
+	let mut svg = Svg::new();
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::PAPER);
+	let label = |svg: &mut Svg, x: f32, y: f32, size: f32, words: &str| {
+		let block = text::layout(
+			&[words],
+			Area {
+				x: x - cell,
+				y,
+				w: cell * 2.0,
+				h: size * 1.6,
+			},
+			size,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(&block, Ink::default()));
+	};
+	label(&mut svg, width / 2.0, 40.0, 46.0, &format!("**{title}**"));
+
+	// Everyone fills their own sheet: a grown-up is drawn smaller to fit.
+	let frame = look.frame();
+	let fit = (cell * 0.82 / frame.height()).min(0.88);
+
+	for (column, (mood, pose, viseme, name)) in MODEL_BEATS.into_iter().enumerate() {
+		for (row, facing) in [0.0, THREE_QUARTER].into_iter().enumerate() {
+			let x = cell * (column as f32 + 0.5);
+			let ground = 140.0 + cell * (row as f32 + 1.0) - 60.0;
+			let mut state = FigureState::new(&frame);
+			state.mood = mood;
+			state.facing = facing;
+			state.hands = frame.hands(pose, facing);
+			state.hand_shapes = pose.hand_shapes();
+			state.legs = frame.limbs().stance(Stance::Stand, facing);
+			state.viseme = viseme;
+
+			svg.begin(&format!("translate({x:.1} {ground:.1}) scale({fit:.3})"));
+			figure::shadow(&mut svg, look, &state, 0.0);
+			figure::draw(&mut svg, look, &state);
+			svg.end();
+
+			let view = if row == 0 { "front" } else { "three-quarter" };
+			label(
+				&mut svg,
+				x,
+				ground + 30.0,
+				26.0,
+				&format!("{name} · {view}"),
+			);
+		}
+	}
+
+	let px_height = (px as f32 * height / width).round() as u32;
+	raster::render(&svg.finish((0.0, 0.0, width, height), px, px_height))
 }
 
 /// Every setting, by day and with wilted plants, labelled with its script name.

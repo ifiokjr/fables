@@ -73,6 +73,25 @@ styles/cartoon/
 
 The built-in styles are compiled into fables, so a world anywhere on disk can name one. They are separate from the `--style` skins (riso, tv, bold…), which restyle the older parametric puppet and the settings.
 
+## Designing characters with an agent (MCP)
+
+`fables mcp` serves the studio over the Model Context Protocol on stdio, so an agent can design characters the way every Kerfuffle character was drawn: start from the style's template, redraw parts as SVG path data, look at the model sheet, fix, repeat. Sheets come back as images, so the model sees what it drew. Register it with any MCP client, for example:
+
+```bash
+claude mcp add fables -- fables mcp --root /path/to/your/studio
+```
+
+| Tool | What it does |
+| --- | --- |
+| `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences and a style, or read one back with its cast and books. |
+| `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space and the drawing rules; the kit as an image. |
+| `character_create` | A new cast member from who they are and their colours, drawn from the style's template. |
+| `character_parts` | A character's parts as path data, their own or the kit's. |
+| `character_set_parts` | Writes or replaces parts and checks the figure. Changes that would break it are refused with the findings, so the world always loads. |
+| `character_sheet` | The model sheet (five beats, front and three-quarters), the parts sheet, or all fifteen moods, as images. |
+
+Worlds and characters are named by slugs, never paths, so the server only reads and writes under its root. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
+
 ## Commands
 
 | Command | What it makes |
@@ -316,6 +335,8 @@ src/
   book.rs         page assembly: title, copyright, story, back matter, covers
   world.rs        worlds: discovery, world.toml, the narrator and book matter
   art/pack.rs     drawing styles: style.toml, kit and template
+  studio.rs       worlds and characters as operations: what the CLI and MCP server share
+  mcp.rs          `fables mcp`: the studio's tools over the Model Context Protocol
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, frame renderer, soundtrack, ffmpeg

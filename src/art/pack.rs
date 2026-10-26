@@ -28,6 +28,7 @@ use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
 use serde::Deserialize;
+use serde::Serialize;
 
 use super::Color;
 use super::Pt;
@@ -65,7 +66,7 @@ pub struct StylePack {
 }
 
 /// How ink goes on paper.
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Finish {
 	/// The silhouette's line weight, in figure units.
@@ -81,7 +82,7 @@ pub struct Finish {
 }
 
 /// The cylinder face features are wrapped round as the head turns.
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Face {
 	/// How far the three-quarter view turns the face, in radians.

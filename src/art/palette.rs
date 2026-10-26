@@ -68,6 +68,12 @@ impl<'de> serde::Deserialize<'de> for Color {
 	}
 }
 
+impl serde::Serialize for Color {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.collect_str(self)
+	}
+}
+
 impl fmt::Display for Color {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "#{:06x}", self.0)

@@ -40,6 +40,8 @@ pub struct World {
 	pub name: String,
 	/// The style pack its puppets are drawn in (see [`StylePack`]).
 	pub style: String,
+	/// A few sentences on the world: where it is, its rule, its tone.
+	pub about: Option<String>,
 	/// Who reads the books aloud, unless a script names its own `[voice]`.
 	pub narrator: Option<Voice>,
 	pub matter: Matter,
@@ -73,6 +75,8 @@ struct Entry {
 	name: String,
 	#[serde(default = "default_style")]
 	style: String,
+	#[serde(default)]
+	about: Option<String>,
 	#[serde(default)]
 	narrator: Option<Voice>,
 	#[serde(default)]
@@ -110,6 +114,7 @@ impl World {
 			dir: dir.to_path_buf(),
 			name: entry.name,
 			style: entry.style,
+			about: entry.about,
 			narrator: entry.narrator,
 			matter: entry.book,
 		})

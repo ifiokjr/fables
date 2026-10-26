@@ -22,6 +22,7 @@ use fables::press::print::Spec;
 use fables::raster;
 use fables::stage;
 use fables::story::Story;
+use fables::studio::SheetKind;
 use fables::video::frames::Format;
 use fables::world::World;
 
@@ -110,6 +111,13 @@ enum Command {
 	Puppet {
 		#[command(subcommand)]
 		action: PuppetAction,
+	},
+	/// Serve the studio to an agent over MCP (stdio): worlds, styles and characters, with
+	/// model sheets returned as images.
+	Mcp {
+		/// The folder whose `worlds/` the studio works in.
+		#[arg(long, default_value = ".")]
+		root: PathBuf,
 	},
 	/// Work with drawing styles (`styles/`): the finish, bodies and kit puppets are drawn with.
 	#[command(name = "style")]
@@ -246,6 +254,7 @@ fn run(cli: Cli) -> Result<()> {
 				PuppetAction::Sheet { id, out } => puppet_sheet(&world()?, &id, &out),
 			}
 		}
+		Command::Mcp { root } => fables::mcp::serve(&root),
 		Command::DrawingStyle { action } => {
 			match action {
 				StyleAction::List => {
@@ -763,23 +772,21 @@ fn puppet_template(world: &World, id: &str, from: Option<&str>) -> Result<()> {
 	Ok(())
 }
 
+/// A puppet's model sheet (the one designs are signed off on) and its parts sheet.
 fn puppet_sheet(world: &World, id: &str, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	let cast = world.cast()?;
-	let path = puppet_file(world, &cast, id)?;
-	let parts = Parts::load_puppet(&path, &world.style()?.kit)?;
-	let name = cast.member(id).map_or(id, |member| member.name.as_str());
 	let dir = out.join("puppets");
 	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
-	let sheet = dir.join(format!("{id}-parts.png"));
-	std::fs::write(
-		&sheet,
-		raster::png(&press::sheets::parts_sheet(
-			&format!("{name}: parts"),
-			&parts,
-		)?)?,
-	)?;
-	done(&sheet, started);
+	let kinds = [SheetKind::Model, SheetKind::Parts];
+	let images = fables::studio::sheets_for(world, id, &kinds, 2600)?;
+
+	for (kind, image) in ["model", "parts"].iter().zip(images) {
+		let sheet = dir.join(format!("{id}-{kind}.png"));
+		std::fs::write(&sheet, image.png)
+			.with_context(|| format!("could not write {}", sheet.display()))?;
+		done(&sheet, started);
+	}
+
 	Ok(())
 }
 

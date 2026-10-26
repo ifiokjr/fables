@@ -47,6 +47,24 @@ impl Kind {
 	pub fn is_figure(&self) -> bool {
 		matches!(self, Kind::Figure(_))
 	}
+
+	/// The `kind` a cast file gives this, e.g. `kid`, `grown-up` or `dog`.
+	pub fn name(&self) -> &'static str {
+		match self {
+			Kind::Figure(look) => {
+				match look.build {
+					Build::Kid => "kid",
+					Build::Grownup => "grown-up",
+				}
+			}
+			Kind::Bird(_) => "bird",
+			Kind::Dog(_) => "dog",
+			Kind::Worm => "worm",
+			Kind::Flower(..) => "flower",
+			Kind::Tree(_) => "tree",
+			Kind::Toothbrush(_) => "toothbrush",
+		}
+	}
 }
 
 /// A character from the cast file.
