@@ -25,6 +25,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::art::figure::Mood;
 use crate::art::pack::Face;
 use crate::art::pack::Finish;
 use crate::art::pack::StylePack;
@@ -39,6 +40,10 @@ use crate::cast::Kind;
 use crate::cast::Member;
 use crate::press::sheets;
 use crate::raster;
+use crate::video::voice;
+use crate::video::voice::Delivery;
+use crate::video::voice::Utterance;
+use crate::video::voice::Voice;
 use crate::world;
 use crate::world::World;
 
@@ -248,6 +253,83 @@ const RULES: [&str; 8] = [
 	"Draw a part as the character would look in the style: compare with the template's parts \
 	 (`character_parts` with names) before redrawing.",
 ];
+
+/// A voice to cast: which provider speaks and as whom (see `voice_providers`).
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct VoiceChoice {
+	/// `say`, `command`, `elevenlabs`, `openai`, `cartesia` or `hume`.
+	pub provider: String,
+	/// A macOS voice for `say` (see `voice_list`), or a built-in voice for `openai`.
+	pub name: Option<String>,
+	/// The provider's voice id, for `elevenlabs`, `cartesia` and `hume`.
+	pub id: Option<String>,
+	/// The provider's model, if not its default.
+	pub model: Option<String>,
+	/// How the character talks, as acting direction (`openai`, `hume`), e.g. "A cheeky
+	/// six-year-old, loud and bouncy".
+	pub style: Option<String>,
+	/// Words per minute, for `say`.
+	pub rate: Option<u32>,
+}
+
+impl VoiceChoice {
+	fn voice(&self) -> Voice {
+		let plain = Voice::default();
+		Voice {
+			provider: self.provider.clone(),
+			name: self.name.clone().unwrap_or(plain.name),
+			rate: self.rate.unwrap_or(plain.rate),
+			command: None,
+			id: self.id.clone(),
+			model: self.model.clone(),
+			style: self.style.clone(),
+		}
+	}
+
+	/// The `[id.voice]` table for a cast file.
+	fn table(&self, id: &str) -> String {
+		let mut lines = vec![
+			format!("[{id}.voice]"),
+			format!("provider = {}", quoted(&self.provider)),
+		];
+		let mut text = |key: &str, value: Option<&String>| {
+			if let Some(value) = value {
+				lines.push(format!("{key} = {}", quoted(value)));
+			}
+		};
+		text("name", self.name.as_ref());
+		text("id", self.id.as_ref());
+		text("model", self.model.as_ref());
+		text("style", self.style.as_ref());
+
+		if let Some(rate) = self.rate {
+			lines.push(format!("rate = {rate}"));
+		}
+
+		lines.join("\n") + "\n"
+	}
+}
+
+/// A voice provider and whether it can speak right now.
+#[derive(Clone, Debug, Serialize)]
+pub struct ProviderReport {
+	pub provider: &'static str,
+	/// Whether it runs on this machine without a network.
+	pub offline: bool,
+	/// Whether it can speak now: the program is here, or its key is in the environment.
+	pub ready: bool,
+	/// What it needs.
+	pub needs: &'static str,
+}
+
+/// A line spoken in a voice.
+#[derive(Clone, Debug)]
+pub struct Audition {
+	pub label: String,
+	/// 16-bit mono WAV.
+	pub wav: Vec<u8>,
+	pub seconds: f32,
+}
 
 impl Studio {
 	pub fn new(root: &Path) -> Studio {
@@ -505,6 +587,122 @@ impl Studio {
 		sheets_for(&self.world(folder)?, id, kinds, SHEET_PX)
 	}
 
+	/// The voice providers, and which can speak right now.
+	pub fn voice_providers() -> Vec<ProviderReport> {
+		let key =
+			|variable: &str| std::env::var_os(variable).is_some_and(|value| !value.is_empty());
+		let report = |provider, offline, ready, needs| {
+			ProviderReport {
+				provider,
+				offline,
+				ready,
+				needs,
+			}
+		};
+
+		vec![
+			report(
+				"say",
+				true,
+				cfg!(target_os = "macos"),
+				"macOS; `voice_list` shows its voices",
+			),
+			report(
+				"command",
+				true,
+				true,
+				"any local TTS program (Piper, mlx-audio), set in the cast file",
+			),
+			report(
+				"elevenlabs",
+				false,
+				key("ELEVENLABS_API_KEY"),
+				"ELEVENLABS_API_KEY and a voice id",
+			),
+			report("openai", false, key("OPENAI_API_KEY"), "OPENAI_API_KEY"),
+			report(
+				"cartesia",
+				false,
+				key("CARTESIA_API_KEY"),
+				"CARTESIA_API_KEY and a voice id",
+			),
+			report(
+				"hume",
+				false,
+				key("HUME_API_KEY"),
+				"HUME_API_KEY and a voice id",
+			),
+		]
+	}
+
+	/// The macOS voices `say` can speak with, by name and language.
+	pub fn say_voices() -> Result<Vec<(String, String)>> {
+		let output = std::process::Command::new("say")
+			.args(["-v", "?"])
+			.output()
+			.context("could not run `say`; it is only on macOS")?;
+		ensure!(output.status.success(), "`say -v ?` failed");
+
+		Ok(String::from_utf8_lossy(&output.stdout)
+			.lines()
+			.filter_map(|line| {
+				let (name, rest) = line.split_once('#')?.0.trim_end().rsplit_once(' ')?;
+				Some((name.trim().to_owned(), rest.trim().to_owned()))
+			})
+			.collect())
+	}
+
+	/// Gives a cast member their own voice, replacing any they had.
+	pub fn cast_voice(&self, folder: &str, id: &str, choice: &VoiceChoice) -> Result<MemberReport> {
+		let world = self.world(folder)?;
+		check_slug("character", id)?;
+		choice.voice().validate()?;
+		ensure!(
+			world.cast()?.member(id).is_some(),
+			"`{id}` is not in {}'s cast",
+			world.name
+		);
+		let cast_file = world.cast_file();
+		let before = std::fs::read_to_string(&cast_file)?;
+		let mut cast = without_table(&before, &format!("[{id}.voice]"));
+
+		if !cast.ends_with("\n\n") {
+			cast.push('\n');
+		}
+
+		cast.push_str(&choice.table(id));
+		std::fs::write(&cast_file, &cast)?;
+
+		match world.cast() {
+			Ok(cast) => {
+				let member = cast.member(id).context("the character left the cast")?;
+				Ok(member_report(&world, member))
+			}
+			Err(error) => {
+				std::fs::write(&cast_file, before)?;
+				Err(error.context(format!("`{id}`'s voice was not changed")))
+			}
+		}
+	}
+
+	/// Speaks a line in a cast member's voice (or the narrator's), with a mood's delivery.
+	/// Takes are cached under the root's `out/cache/voice`, so a line is only paid for once.
+	pub fn audition(
+		&self,
+		folder: &str,
+		who: &str,
+		line: &str,
+		mood: Option<&str>,
+	) -> Result<Audition> {
+		audition(
+			&self.world(folder)?,
+			who,
+			line,
+			mood,
+			&self.root.join("out/cache/voice"),
+		)
+	}
+
 	/// The built-in styles, with a sentence on each.
 	pub fn styles() -> Result<Vec<(String, String)>> {
 		StylePack::names()
@@ -639,6 +837,53 @@ pub fn sheets_for(world: &World, id: &str, kinds: &[SheetKind], px: u32) -> Resu
 		.collect()
 }
 
+/// Speaks a line in a world's cast member's voice (`narrator` for the narrator's), with a mood's
+/// delivery, caching takes in `cache`.
+pub fn audition(
+	world: &World,
+	who: &str,
+	line: &str,
+	mood: Option<&str>,
+	cache: &Path,
+) -> Result<Audition> {
+	let cast = world.cast()?;
+	let voice = if who == "narrator" {
+		world.narrator.clone().unwrap_or_default()
+	} else {
+		let member = cast
+			.member(who)
+			.with_context(|| format!("`{who}` is not in {}'s cast", world.name))?;
+		member
+			.voice
+			.clone()
+			.with_context(|| format!("`{who}` has no voice yet; cast one with voice_cast"))?
+	};
+	let mood = mood
+		.map(|name| {
+			Mood::ALL
+				.iter()
+				.find(|(key, _)| *key == name)
+				.map(|(_, mood)| *mood)
+				.with_context(|| format!("unknown mood `{name}`"))
+		})
+		.transpose()?;
+	let speech = voice::speak(
+		&Utterance {
+			text: line,
+			voice: &voice,
+			delivery: Delivery { mood, shout: false },
+		},
+		cache,
+	)?;
+	let speaker = voice.id.as_deref().unwrap_or(&voice.name);
+
+	Ok(Audition {
+		label: format!("{who} ({} {speaker}): {line}", voice.provider),
+		wav: wav_bytes(&speech.samples)?,
+		seconds: speech.duration(),
+	})
+}
+
 /// What [`Studio::set_parts`] did.
 #[derive(Clone, Debug, Serialize)]
 pub struct PartsUpdate {
@@ -749,6 +994,47 @@ fn cast_entry(brief: &CharacterBrief) -> String {
 	}
 
 	lines.join("\n") + "\n"
+}
+
+/// A cast file with one table (its header line and every line up to the next header) taken out.
+fn without_table(source: &str, header: &str) -> String {
+	let mut kept = Vec::new();
+	let mut skipping = false;
+
+	for line in source.lines() {
+		let trimmed = line.trim();
+
+		if trimmed.starts_with('[') {
+			skipping = trimmed == header;
+		}
+
+		if !skipping {
+			kept.push(line);
+		}
+	}
+
+	let mut text = kept.join("\n");
+	text.push('\n');
+	text
+}
+
+/// Mono samples as a 16-bit WAV file.
+fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>> {
+	let spec = hound::WavSpec {
+		channels: 1,
+		sample_rate: voice::SAMPLE_RATE,
+		bits_per_sample: 16,
+		sample_format: hound::SampleFormat::Int,
+	};
+	let mut bytes = std::io::Cursor::new(Vec::new());
+	let mut writer = hound::WavWriter::new(&mut bytes, spec)?;
+
+	for sample in samples {
+		writer.write_sample((sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16)?;
+	}
+
+	writer.finalize()?;
+	Ok(bytes.into_inner())
 }
 
 /// A TOML string literal.
@@ -946,6 +1232,68 @@ mod tests {
 		studio
 			.character_sheets("nibbleton", "nell", &[SheetKind::Model])
 			.unwrap();
+	}
+
+	#[test]
+	fn a_voice_is_cast_and_recast() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		let choice = |name: &str| {
+			VoiceChoice {
+				provider: "say".into(),
+				name: Some(name.into()),
+				id: None,
+				model: None,
+				style: None,
+				rate: Some(170),
+			}
+		};
+		studio
+			.cast_voice("nibbleton", "nell", &choice("Samantha"))
+			.unwrap();
+		studio
+			.cast_voice("nibbleton", "nell", &choice("Moira"))
+			.unwrap();
+
+		let world = studio.world("nibbleton").unwrap();
+		let cast = world.cast().unwrap();
+		let voice = cast.member("nell").unwrap().voice.clone().unwrap();
+		assert_eq!(voice.name, "Moira");
+		let file = std::fs::read_to_string(world.cast_file()).unwrap();
+		assert_eq!(file.matches("[nell.voice]").count(), 1, "{file}");
+
+		let bad = VoiceChoice {
+			provider: "cartesia".into(),
+			..choice("Moira")
+		};
+		assert!(
+			studio.cast_voice("nibbleton", "nell", &bad).is_err(),
+			"a library voice needs an id"
+		);
+	}
+
+	#[test]
+	fn every_provider_says_what_it_needs() {
+		let providers = Studio::voice_providers();
+		assert_eq!(providers.len(), voice::PROVIDERS.len());
+		assert!(
+			providers
+				.iter()
+				.any(|provider| provider.provider == "say" && provider.offline)
+		);
+	}
+
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn the_narrator_auditions_offline() {
+		let (_dir, studio) = studio();
+		let audition = studio
+			.audition("nibbleton", "narrator", "Once upon a time.", Some("happy"))
+			.unwrap();
+		assert!(audition.wav.starts_with(b"RIFF"));
+		assert!(audition.seconds > 0.3);
 	}
 
 	#[test]

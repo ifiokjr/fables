@@ -99,6 +99,8 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `character_parts` | A character's parts as path data, their own or the kit's. |
 | `character_set_parts` | Writes or replaces parts and checks the figure. Changes that would break it are refused with the findings, so the world always loads. |
 | `character_sheet` | The model sheet (five beats, front and three-quarters), the parts sheet, or all fifteen moods, as images. |
+| `voice_providers`, `voice_list` | Which voice providers can speak now, and the offline macOS voices. |
+| `voice_cast`, `voice_audition` | Give a character their voice, and hear a line in it, delivered in a mood, as audio. |
 
 Worlds and characters are named by slugs, never paths, so the server only reads and writes under its root. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
 
@@ -292,6 +294,8 @@ The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, an
 | `command` | any TTS program; `{text}`, `{out}`, `{mood}`, `{voice}` placeholders, text on stdin if `{text}` is absent | `{mood}` | estimated from the audio |
 | `elevenlabs` | `id`, optional `model` (default `eleven_v4`), `ELEVENLABS_API_KEY` | `[defiant]`-style audio tags | exact, per letter |
 | `openai` | `name` (a built-in voice), optional `style`, `OPENAI_API_KEY` | `style` plus the mood as an acting instruction | estimated from the audio |
+| `cartesia` | `id` (a Sonic voice), optional `model` (default `sonic-3.6`), `CARTESIA_API_KEY` | the mood as one of Sonic's emotions, and a speed | estimated from the audio |
+| `hume` | `id` (an Octave voice), optional `style`, `HUME_API_KEY` | `style` plus the mood as short acting directions | estimated from the audio |
 
 ```toml
 [narrator]                  # in world.toml: the narrator (or [voice] in a script, for one book)
@@ -302,6 +306,8 @@ rate = 158
 provider = "elevenlabs"
 id = "<voice id>"
 ```
+
+`fables voice providers` shows which providers can speak right now, `fables voice list` the macOS voices, and `fables voice audition <id> "<line>" --mood cross` speaks a line in a character's voice (or `narrator`) into `out/voices/`. Over MCP, `voice_providers`, `voice_list`, `voice_cast` and `voice_audition` do the same, and auditions come back as audio.
 
 Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Resolve keys with Monosecret once per batch: `msr --reason "voice the books" fables all worlds/kerfuffle`.
 

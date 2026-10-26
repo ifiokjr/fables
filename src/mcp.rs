@@ -23,11 +23,13 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::studio::Audition;
 use crate::studio::CharacterBrief;
 use crate::studio::Image;
 use crate::studio::PartData;
 use crate::studio::SheetKind;
 use crate::studio::Studio;
+use crate::studio::VoiceChoice;
 use crate::studio::WorldBrief;
 
 /// What the server tells a model before it calls anything.
@@ -97,6 +99,31 @@ pub struct SheetParams {
 	pub sheets: Vec<SheetKind>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CastVoiceParams {
+	pub world: String,
+	/// The character's cast id.
+	pub id: String,
+	pub voice: VoiceChoice,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AuditionParams {
+	pub world: String,
+	/// A cast id, or `narrator`.
+	pub who: String,
+	/// The line to speak.
+	pub line: String,
+	/// A mood to deliver it in, e.g. `cross`, `happy`, `sad`.
+	pub mood: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SayVoice {
+	name: String,
+	language: String,
+}
+
 #[derive(Serialize)]
 struct StyleLine {
 	name: String,
@@ -135,6 +162,22 @@ fn images(result: anyhow::Result<Vec<Image>>) -> CallToolResult {
 				})
 				.collect();
 			CallToolResult::success(content)
+		}
+		Err(error) => failed(&error),
+	}
+}
+
+/// A spoken line as audio, after a line saying who said it.
+fn audio(result: anyhow::Result<Audition>) -> CallToolResult {
+	match result {
+		Ok(audition) => {
+			CallToolResult::success(vec![
+				ContentBlock::text(format!("{} ({:.1}s)", audition.label, audition.seconds)),
+				ContentBlock::audio(
+					base64::engine::general_purpose::STANDARD.encode(&audition.wav),
+					"audio/wav",
+				),
+			])
 		}
 		Err(error) => failed(&error),
 	}
@@ -265,6 +308,57 @@ impl StudioServer {
 				.character_sheets(&params.world, &params.id, &params.sheets),
 		)
 	}
+
+	#[tool(
+		description = "List the voice providers: which run offline, which can speak right now \
+		               (their program is here or their key is set), and what each needs."
+	)]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn voice_providers(&self) -> CallToolResult {
+		json(Ok(Studio::voice_providers()))
+	}
+
+	#[tool(description = "List the macOS voices the offline `say` provider can speak with.")]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn voice_list(&self) -> CallToolResult {
+		json(Studio::say_voices().map(|voices| {
+			voices
+				.into_iter()
+				.map(|(name, language)| SayVoice { name, language })
+				.collect::<Vec<_>>()
+		}))
+	}
+
+	#[tool(
+		description = "Give a character their own voice for dialogue: a provider and a voice (a \
+		               name for say and openai, an id for elevenlabs, cartesia and hume), with \
+		               optional acting style. Replaces any voice they had."
+	)]
+	fn voice_cast(&self, Parameters(params): Parameters<CastVoiceParams>) -> CallToolResult {
+		json(
+			self.studio
+				.cast_voice(&params.world, &params.id, &params.voice),
+		)
+	}
+
+	#[tool(
+		description = "Hear a line in a character's voice (or the narrator's), delivered in a \
+		               mood. Returns the audio. Takes are cached, so a line is only paid for once."
+	)]
+	fn voice_audition(&self, Parameters(params): Parameters<AuditionParams>) -> CallToolResult {
+		audio(self.studio.audition(
+			&params.world,
+			&params.who,
+			&params.line,
+			params.mood.as_deref(),
+		))
+	}
 }
 
 #[expect(
@@ -319,6 +413,10 @@ mod tests {
 			"character_parts",
 			"character_set_parts",
 			"character_sheet",
+			"voice_providers",
+			"voice_list",
+			"voice_cast",
+			"voice_audition",
 		] {
 			assert!(
 				names.iter().any(|listed| listed == name),

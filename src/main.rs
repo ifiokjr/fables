@@ -119,6 +119,11 @@ enum Command {
 		#[arg(long, default_value = ".")]
 		root: PathBuf,
 	},
+	/// Hear voices: the providers, the offline voices, and a line in a character's voice.
+	Voice {
+		#[command(subcommand)]
+		action: VoiceAction,
+	},
 	/// Work with drawing styles (`styles/`): the finish, bodies and kit puppets are drawn with.
 	#[command(name = "style")]
 	DrawingStyle {
@@ -166,6 +171,25 @@ enum PuppetAction {
 	Sheet {
 		/// The cast id, e.g. stinky.
 		id: String,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+	},
+}
+
+#[derive(Subcommand)]
+enum VoiceAction {
+	/// The voice providers, and which can speak right now.
+	Providers,
+	/// The macOS voices the offline `say` provider can use.
+	List,
+	/// Speak a line in a cast member's voice (or `narrator`), and save it as a WAV.
+	Audition {
+		/// A cast id, or `narrator`.
+		who: String,
+		line: String,
+		/// A mood to deliver it in, e.g. cross.
+		#[arg(long)]
+		mood: Option<String>,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -255,6 +279,31 @@ fn run(cli: Cli) -> Result<()> {
 			}
 		}
 		Command::Mcp { root } => fables::mcp::serve(&root),
+		Command::Voice { action } => {
+			match action {
+				VoiceAction::Providers => {
+					for provider in fables::studio::Studio::voice_providers() {
+						let state = if provider.ready { "ready" } else { "not ready" };
+						println!("{:<11} {state:<10} {}", provider.provider, provider.needs);
+					}
+
+					Ok(())
+				}
+				VoiceAction::List => {
+					for (name, language) in fables::studio::Studio::say_voices()? {
+						println!("{name:<28} {language}");
+					}
+
+					Ok(())
+				}
+				VoiceAction::Audition {
+					who,
+					line,
+					mood,
+					out,
+				} => audition(&world()?, &who, &line, mood.as_deref(), &out),
+			}
+		}
 		Command::DrawingStyle { action } => {
 			match action {
 				StyleAction::List => {
@@ -787,6 +836,22 @@ fn puppet_sheet(world: &World, id: &str, out: &Path) -> Result<()> {
 		done(&sheet, started);
 	}
 
+	Ok(())
+}
+
+fn audition(world: &World, who: &str, line: &str, mood: Option<&str>, out: &Path) -> Result<()> {
+	let started = Instant::now();
+	let take = fables::studio::audition(world, who, line, mood, &out.join("cache/voice"))?;
+	let dir = out.join("voices");
+	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
+	let path = dir.join(format!(
+		"{who}-{}.wav",
+		fables::story::slugify(&line.chars().take(40).collect::<String>())
+	));
+	std::fs::write(&path, take.wav)
+		.with_context(|| format!("could not write {}", path.display()))?;
+	println!("  {} ({:.1}s)", take.label, take.seconds);
+	done(&path, started);
 	Ok(())
 }
 

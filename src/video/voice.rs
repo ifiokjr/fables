@@ -11,6 +11,8 @@
 //! | `command` (Piper, mlx-audio, anything) | yes | `{mood}` in the command | from the audio |
 //! | `elevenlabs` | no | `[defiant]`-style audio tags | exact, per letter |
 //! | `openai` | no | free-text acting instructions | from the audio |
+//! | `cartesia` (Sonic) | no | an emotion and a speed | from the audio |
+//! | `hume` (Octave) | no | free-text acting directions | from the audio |
 //!
 //! Everything is normalised to 48 kHz mono, and every take is cached by provider, voice, text
 //! and delivery, so editing one line re-records one line.
@@ -42,7 +44,7 @@ pub const ENVELOPE_RATE: f32 = 60.0;
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Voice {
-	/// `say` (default), `command`, `elevenlabs` or `openai`.
+	/// `say` (default), `command`, `elevenlabs`, `openai`, `cartesia` or `hume`.
 	#[serde(default = "default_provider")]
 	pub provider: String,
 	/// The voice name: a macOS voice for `say`, a built-in voice for `openai` (e.g. "marin").
@@ -54,13 +56,13 @@ pub struct Voice {
 	/// The external program for `command`, with `{text}`, `{out}`, `{mood}` placeholders.
 	#[serde(default)]
 	pub command: Option<Vec<String>>,
-	/// The provider's voice id (`elevenlabs`).
+	/// The provider's voice id (`elevenlabs`, `cartesia`, `hume`).
 	#[serde(default)]
 	pub id: Option<String>,
 	/// The provider's model, e.g. `eleven_v4` or `gpt-4o-mini-tts`.
 	#[serde(default)]
 	pub model: Option<String>,
-	/// How this character talks, sent as acting direction (`openai`), e.g.
+	/// How this character talks, sent as acting direction (`openai`, `hume`), e.g.
 	/// "A cheeky six-year-old boy, loud and bouncy, with a British accent".
 	#[serde(default)]
 	pub style: Option<String>,
@@ -101,16 +103,22 @@ impl Voice {
 			"command" => {
 				bail!("voice provider `command` needs `command = [\"program\", \"{{out}}\", …]`")
 			}
-			"elevenlabs" if self.id.is_some() => Ok(()),
-			"elevenlabs" => {
-				bail!("voice provider `elevenlabs` needs `id` (a voice id from your voice library)")
+			"elevenlabs" | "cartesia" | "hume" if self.id.is_some() => Ok(()),
+			provider @ ("elevenlabs" | "cartesia" | "hume") => {
+				bail!("voice provider `{provider}` needs `id` (a voice id from its voice library)")
 			}
 			other => {
-				bail!("unknown voice provider `{other}`; use say, command, elevenlabs or openai")
+				bail!(
+					"unknown voice provider `{other}`; use one of: {}",
+					PROVIDERS.join(", ")
+				)
 			}
 		}
 	}
 }
+
+/// Every voice provider, by its `provider` name.
+pub const PROVIDERS: [&str; 6] = ["say", "command", "elevenlabs", "openai", "cartesia", "hume"];
 
 /// How a line should be delivered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -260,6 +268,8 @@ fn record(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
 		"command" => run_command(utterance, stem),
 		"elevenlabs" => elevenlabs(utterance, stem),
 		"openai" => openai(utterance, stem),
+		"cartesia" => cartesia(utterance, stem),
+		"hume" => hume(utterance, stem),
 		other => bail!("unknown voice provider `{other}`"),
 	}
 }
@@ -501,18 +511,107 @@ fn openai(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
 		.context("could not reach OpenAI")?;
 	check_status("OpenAI", &mut response)?;
 
-	let audio = stem.with_extension("openai.wav");
+	write_audio("OpenAI", &mut response, &stem.with_extension("openai.wav"))
+}
+
+/// Cartesia Sonic's emotion for a delivery, from the emotions every Sonic 3 voice takes.
+fn cartesia_emotion(delivery: Delivery) -> &'static str {
+	if delivery.shout {
+		return "angry";
+	}
+
+	match delivery.mood {
+		None => "neutral",
+		Some(Mood::Happy | Mood::Grin | Mood::Laugh | Mood::Proud | Mood::Dreamy) => "content",
+		Some(Mood::Sleepy) => "calm",
+		Some(Mood::Sad | Mood::Fainted | Mood::Dizzy) => "sad",
+		Some(Mood::Cross | Mood::Grumpy | Mood::Defiant | Mood::Disgusted) => "angry",
+		Some(Mood::Shocked | Mood::Worried) => "scared",
+	}
+}
+
+/// The request body for Cartesia's bytes endpoint: WAV at the sample rate fables works in.
+pub fn cartesia_body(utterance: &Utterance<'_>) -> serde_json::Value {
+	serde_json::json!({
+		"model_id": utterance.voice.model.as_deref().unwrap_or("sonic-3.6"),
+		"transcript": utterance.text,
+		"voice": { "id": utterance.voice.id.as_deref().unwrap_or_default() },
+		"language": "en",
+		"output_format": { "container": "wav", "encoding": "pcm_s16le", "sample_rate": SAMPLE_RATE },
+		"generation_config": {
+			"speed": utterance.delivery.rate_scale().clamp(0.6, 1.5),
+			"emotion": cartesia_emotion(utterance.delivery),
+		},
+	})
+}
+
+fn cartesia(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
+	let key = api_key("CARTESIA_API_KEY")?;
+	let mut response = agent()
+		.post("https://api.cartesia.ai/tts/bytes")
+		.header("Authorization", &format!("Bearer {key}"))
+		.header("Cartesia-Version", "2026-08-14")
+		.send_json(cartesia_body(utterance))
+		.context("could not reach Cartesia")?;
+	check_status("Cartesia", &mut response)?;
+	write_audio(
+		"Cartesia",
+		&mut response,
+		&stem.with_extension("cartesia.wav"),
+	)
+}
+
+/// The request body for Hume's Octave file endpoint. The character's style and the line's
+/// delivery become its acting directions, kept short as Hume recommends.
+pub fn hume_body(utterance: &Utterance<'_>) -> serde_json::Value {
+	let how = utterance.delivery.direction().map(|(_, how)| how);
+	let description = match (utterance.voice.style.as_deref(), how) {
+		(Some(style), Some(how)) => format!("{style}; {how}"),
+		(Some(style), None) => style.to_owned(),
+		(None, Some(how)) => format!("Storytelling, {how}"),
+		(None, None) => "A warm storyteller reading aloud to a young child".to_owned(),
+	};
+	let description: String = description.chars().take(100).collect();
+
+	serde_json::json!({
+		"utterances": [{
+			"text": utterance.text,
+			"description": description,
+			"voice": { "id": utterance.voice.id.as_deref().unwrap_or_default() },
+		}],
+		"format": { "type": "wav" },
+		"version": 2,
+		"num_generations": 1,
+	})
+}
+
+fn hume(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
+	let key = api_key("HUME_API_KEY")?;
+	let mut response = agent()
+		.post("https://api.hume.ai/v0/tts/file")
+		.header("X-Hume-Api-Key", &key)
+		.send_json(hume_body(utterance))
+		.context("could not reach Hume")?;
+	check_status("Hume", &mut response)?;
+	write_audio("Hume", &mut response, &stem.with_extension("hume.wav"))
+}
+
+/// Saves a provider's audio reply.
+fn write_audio(
+	provider: &str,
+	response: &mut ureq::http::Response<ureq::Body>,
+	audio: &Path,
+) -> Result<Take> {
 	let bytes = response
 		.body_mut()
 		.with_config()
 		.limit(64 * 1024 * 1024)
 		.read_to_vec()
-		.context("could not read OpenAI audio")?;
-	std::fs::write(&audio, bytes)
-		.with_context(|| format!("could not write {}", audio.display()))?;
+		.with_context(|| format!("could not read {provider} audio"))?;
+	std::fs::write(audio, bytes).with_context(|| format!("could not write {}", audio.display()))?;
 
 	Ok(Take {
-		audio,
+		audio: audio.to_path_buf(),
 		alignment: None,
 	})
 }
@@ -611,6 +710,66 @@ fn envelope(samples: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	fn voice(provider: &str) -> Voice {
+		Voice {
+			provider: provider.into(),
+			id: Some("voice-123".into()),
+			style: Some("A bouncy six-year-old".into()),
+			..Voice::default()
+		}
+	}
+
+	#[test]
+	fn cartesia_gets_an_emotion_and_wav_at_our_rate() {
+		let voice = voice("cartesia");
+		let body = cartesia_body(&Utterance {
+			text: "Nope!",
+			voice: &voice,
+			delivery: Delivery {
+				mood: Some(Mood::Defiant),
+				shout: false,
+			},
+		});
+		assert_eq!(body["voice"]["id"], "voice-123");
+		assert_eq!(body["generation_config"]["emotion"], "angry");
+		assert_eq!(body["output_format"]["container"], "wav");
+		assert_eq!(body["output_format"]["sample_rate"], SAMPLE_RATE);
+		assert_eq!(body["model_id"], "sonic-3.6");
+	}
+
+	#[test]
+	fn hume_gets_short_acting_directions() {
+		let voice = voice("hume");
+		let body = hume_body(&Utterance {
+			text: "Brush your teeth!",
+			voice: &voice,
+			delivery: Delivery {
+				mood: Some(Mood::Cross),
+				shout: true,
+			},
+		});
+		let line = &body["utterances"][0];
+		assert_eq!(line["voice"]["id"], "voice-123");
+		let description = line["description"].as_str().unwrap();
+		assert!(
+			description.starts_with("A bouncy six-year-old; shouting"),
+			"{description}"
+		);
+		assert!(description.chars().count() <= 100);
+		assert_eq!(body["format"]["type"], "wav");
+	}
+
+	#[test]
+	fn library_voices_need_an_id() {
+		for provider in ["elevenlabs", "cartesia", "hume"] {
+			let mut voice = voice(provider);
+			assert!(voice.validate().is_ok());
+			voice.id = None;
+			let error = voice.validate().unwrap_err().to_string();
+			assert!(error.contains("needs `id`"), "{provider}: {error}");
+		}
+	}
 
 	#[test]
 	fn trims_silence_but_keeps_a_little_padding() {
