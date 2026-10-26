@@ -39,7 +39,9 @@ use crate::art::parts::Views;
 use crate::cast::Kind;
 use crate::cast::Member;
 use crate::press::sheets;
+use crate::publish;
 use crate::raster;
+use crate::story::Story;
 use crate::video::voice;
 use crate::video::voice::Delivery;
 use crate::video::voice::Utterance;
@@ -329,6 +331,35 @@ pub struct Audition {
 	/// 16-bit mono WAV.
 	pub wav: Vec<u8>,
 	pub seconds: f32,
+}
+
+/// Which book outputs to make.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Output {
+	/// Every page as a PNG, and a contact sheet.
+	Proofs,
+	/// The fixed-layout ePub and its store cover.
+	Ebook,
+	/// KDP paperback PDFs and setup numbers.
+	Print,
+}
+
+/// A video shape.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum VideoShape {
+	/// 16:9 for `YouTube`.
+	Landscape,
+	/// 9:16 for Shorts, `TikTok` and Reels.
+	#[default]
+	Portrait,
+}
+
+/// What a render wrote, relative to the studio's root.
+#[derive(Clone, Debug, Serialize)]
+pub struct Rendered {
+	pub files: Vec<String>,
 }
 
 impl Studio {
@@ -701,6 +732,173 @@ impl Studio {
 			mood,
 			&self.root.join("out/cache/voice"),
 		)
+	}
+
+	/// A world's book, loaded with its cast and furnished by its world.
+	fn book(&self, folder: &str, story: &str) -> Result<(World, Story, crate::cast::Cast)> {
+		let world = self.world(folder)?;
+		check_slug("story", story)?;
+		let path = world.stories().join(story).join("story.md");
+		ensure!(
+			path.is_file(),
+			"{} has no story `{story}`; world_describe lists its stories",
+			world.name
+		);
+		let mut script = Story::load(&path)?;
+		world.furnish(&mut script)?;
+		let cast = world.cast()?;
+		Ok((world, script, cast))
+	}
+
+	/// Writes a book's script (a whole `story.md`) and checks it against the cast. A script
+	/// that doesn't parse or rehearse is not kept; the error says what to fix, by line.
+	pub fn write_story(
+		&self,
+		folder: &str,
+		story: &str,
+		script: &str,
+	) -> Result<publish::CheckReport> {
+		let world = self.world(folder)?;
+		check_slug("story", story)?;
+		crate::story::parse(script)?;
+		let dir = world.stories().join(story);
+		let path = dir.join("story.md");
+		let before = std::fs::read_to_string(&path).ok();
+		std::fs::create_dir_all(&dir)?;
+		std::fs::write(&path, script)?;
+
+		match self.check_story(folder, story) {
+			Ok(report) => Ok(report),
+			Err(error) => {
+				match before {
+					Some(text) => std::fs::write(&path, text)?,
+					None => std::fs::remove_dir_all(&dir)?,
+				}
+
+				Err(error.context(format!("`{story}` was not written")))
+			}
+		}
+	}
+
+	/// A book's script.
+	pub fn read_story(&self, folder: &str, story: &str) -> Result<String> {
+		let world = self.world(folder)?;
+		check_slug("story", story)?;
+		let path = world.stories().join(story).join("story.md");
+		std::fs::read_to_string(&path).with_context(|| format!("could not read {}", path.display()))
+	}
+
+	/// Rehearses a book against its cast and lays it out, without rendering.
+	pub fn check_story(&self, folder: &str, story: &str) -> Result<publish::CheckReport> {
+		let (_, script, cast) = self.book(folder, story)?;
+		publish::check(&script, &cast)
+	}
+
+	/// Makes a book's outputs under the root's `out/`. Returns what was written, and the proofs'
+	/// contact sheet when proofs were made.
+	pub fn render_book(
+		&self,
+		folder: &str,
+		story: &str,
+		outputs: &[Output],
+	) -> Result<(Rendered, Option<Image>)> {
+		let (_, script, cast) = self.book(folder, story)?;
+		let out = self.root.join("out");
+		let outputs = if outputs.is_empty() {
+			&[Output::Proofs][..]
+		} else {
+			outputs
+		};
+		let mut files = Vec::new();
+		let mut contact = None;
+
+		for output in outputs {
+			match output {
+				Output::Proofs => {
+					let dir = publish::proofs(&script, &cast, &out)?;
+					let sheet = dir.join("contact-sheet.png");
+					let pixmap = Pixmap::load_png(&sheet)
+						.with_context(|| format!("could not read {}", sheet.display()))?;
+					contact = Some(Image {
+						label: format!("{}: every page", script.meta.title),
+						png: raster::png(&fit_width(&pixmap, SHEET_PX))?,
+					});
+					files.push(dir);
+				}
+				Output::Ebook => {
+					let ebook = publish::ebook(&script, &cast, &out)?;
+					files.extend([ebook.epub, ebook.cover]);
+				}
+				Output::Print => {
+					let print = publish::print(&script, &cast, &out)?;
+					files.extend([print.interior, print.cover, print.setup]);
+				}
+			}
+		}
+
+		Ok((self.relative(&files), contact))
+	}
+
+	/// One page of a book as an image: page 1 is the front cover, then every page in order.
+	pub fn render_page(&self, folder: &str, story: &str, page: usize) -> Result<Image> {
+		let (_, script, cast) = self.book(folder, story)?;
+		let mut pages = vec![crate::book::front_cover(&script, &cast)?];
+		pages.extend(crate::book::assemble(&script, &cast)?);
+		pages.push(crate::book::back_cover(&script, &cast)?);
+		let count = pages.len();
+		let chosen = page
+			.checked_sub(1)
+			.and_then(|index| pages.get(index))
+			.with_context(|| format!("there is no page {page}; the book has {count} pages"))?;
+		let mut pixmap = raster::render(&crate::book::page_svg(
+			chosen,
+			crate::book::Side::Screen,
+			SHEET_PX,
+			SHEET_PX,
+			true,
+		))?;
+		raster::finish(&mut pixmap, &chosen.style, 0.035, 0);
+
+		Ok(Image {
+			label: format!(
+				"{}: page {page} of {count} ({})",
+				script.meta.title, chosen.label
+			),
+			png: raster::png(&pixmap)?,
+		})
+	}
+
+	/// Narrates and animates a book into a video under the root's `out/`. A preview is half size
+	/// at 15 frames a second, for checking timing quickly.
+	pub fn render_video(
+		&self,
+		folder: &str,
+		story: &str,
+		shape: VideoShape,
+		preview: bool,
+	) -> Result<Rendered> {
+		let (_, script, cast) = self.book(folder, story)?;
+		let format = match shape {
+			VideoShape::Landscape => crate::video::frames::Format::Landscape,
+			VideoShape::Portrait => crate::video::frames::Format::Portrait,
+		};
+		let files = publish::video(&script, &cast, &self.root.join("out"), &[format], preview)?;
+		Ok(self.relative(&files))
+	}
+
+	/// Paths as the studio's root sees them.
+	fn relative(&self, files: &[PathBuf]) -> Rendered {
+		Rendered {
+			files: files
+				.iter()
+				.map(|file| {
+					file.strip_prefix(&self.root)
+						.unwrap_or(file)
+						.display()
+						.to_string()
+				})
+				.collect(),
+		}
 	}
 
 	/// The built-in styles, with a sentence on each.
@@ -1294,6 +1492,58 @@ mod tests {
 			.unwrap();
 		assert!(audition.wav.starts_with(b"RIFF"));
 		assert!(audition.seconds > 0.3);
+	}
+
+	#[test]
+	fn a_story_is_written_checked_and_rendered() {
+		let (dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		let script = "+++\ntitle = \"Nell Nibbles\"\nauthor = \"A\"\nstar = \"nell\"\n+++\n# \
+		              park\n@nell x=0.5 happy wave\nNell waved.\n";
+		let report = studio
+			.write_story("nibbleton", "nell-nibbles", script)
+			.unwrap();
+		assert_eq!(report.script_pages, 1);
+		assert_eq!(
+			studio.read_story("nibbleton", "nell-nibbles").unwrap(),
+			script
+		);
+
+		let page = studio.render_page("nibbleton", "nell-nibbles", 4).unwrap();
+		assert!(page.png.starts_with(b"\x89PNG"));
+		assert!(
+			studio
+				.render_page("nibbleton", "nell-nibbles", 999)
+				.is_err()
+		);
+
+		let (rendered, contact) = studio
+			.render_book("nibbleton", "nell-nibbles", &[Output::Proofs])
+			.unwrap();
+		assert!(contact.is_some());
+		assert!(
+			rendered.files[0].starts_with("out/"),
+			"{:?}",
+			rendered.files
+		);
+		assert!(dir.path().join(&rendered.files[0]).is_dir());
+	}
+
+	#[test]
+	fn a_script_that_does_not_rehearse_is_not_kept() {
+		let (_dir, studio) = studio();
+		let bad = "+++\ntitle = \"Who\"\nauthor = \"A\"\n+++\n# park\n@nobody wave\nHello.\n";
+		let error = format!(
+			"{:#}",
+			studio.write_story("nibbleton", "who", bad).unwrap_err()
+		);
+		assert!(error.contains("nobody"), "{error}");
+		assert!(
+			studio.read_story("nibbleton", "who").is_err(),
+			"nothing is left behind"
+		);
 	}
 
 	#[test]

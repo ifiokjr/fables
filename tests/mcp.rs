@@ -1,6 +1,6 @@
 //! `fables mcp` end to end: the real binary on stdio, driven the way an agent drives it. It
-//! starts a world, adds a character, redraws a part and gets the model sheet back as an image,
-//! without touching a file itself.
+//! starts a world, adds a character, redraws a part, gets the model sheet back as an image, and
+//! writes and renders a page of a book, without touching a file itself.
 
 use std::io::BufRead as _;
 use std::io::BufReader;
@@ -170,6 +170,22 @@ fn an_agent_designs_a_character_without_touching_files() {
 		.expect("the sheet comes back as an image");
 	assert_eq!(image["mimeType"], "image/png");
 	assert!(image["data"].as_str().unwrap().len() > 10_000);
+
+	// Then a one-page book with her in it, checked against the cast, and its page rendered.
+	let report = session.json(
+		"story_write",
+		&json!({
+			"world": "nibbleton",
+			"story": "nell-nibbles",
+			"script": "+++\ntitle = \"Nell Nibbles\"\nauthor = \"A\"\nstar = \"nell\"\n+++\n# park\n@nell x=0.5 happy wave\nNell waved.\n"
+		}),
+	);
+	assert_eq!(report["script_pages"], 1);
+	let page = session.call(
+		"page_render",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles", "page": 4 }),
+	);
+	assert!(page.iter().any(|block| block["type"] == "image"));
 
 	// A mistake comes back as a tool error the agent can read, not a broken session.
 	let missing = session.request(

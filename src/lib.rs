@@ -4,12 +4,17 @@
 //! the [`cast`] of its [`world`], [`book`] lays out pages, and [`press`] prints them as proofs, an
 //! ePub and KDP print PDFs. [`video`] performs the same rehearsal with narration and motion.
 
+// The MCP server speaks its protocol on stdout, so the library never prints there: progress
+// goes to stderr, and results are returned for the CLI to print.
+#![deny(clippy::print_stdout)]
+
 pub mod art;
 pub mod book;
 pub mod cast;
 pub mod compose;
 pub mod mcp;
 pub mod press;
+pub mod publish;
 pub mod raster;
 pub mod stage;
 pub mod story;

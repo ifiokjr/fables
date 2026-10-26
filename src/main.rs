@@ -15,12 +15,10 @@ use fables::art::parts::Parts;
 use fables::art::style::Style;
 use fables::art::style::StyleName;
 use fables::book;
-use fables::book::Side;
 use fables::cast::Cast;
 use fables::press;
-use fables::press::print::Spec;
+use fables::publish;
 use fables::raster;
-use fables::stage;
 use fables::story::Story;
 use fables::studio::SheetKind;
 use fables::video::frames::Format;
@@ -435,12 +433,6 @@ fn each_style(
 	})
 }
 
-/// Where a book's outputs go: one folder per style, so renders in different styles sit side
-/// by side instead of overwriting each other.
-fn book_dir(out: &Path, story: &Story) -> PathBuf {
-	out.join(&story.slug).join(story.style().name.name())
-}
-
 /// Runs `action` on one script, on every `story.md` in a folder of books, or on every book in a
 /// world (stopping at the first failure so a broken script is never silently skipped).
 fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> {
@@ -563,21 +555,10 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 }
 
 fn check(story: &Story, cast: &Cast) -> Result<()> {
-	let rehearsals = stage::rehearse(story, cast)?;
-	let pages = book::assemble(story, cast)?;
-	let words: usize = story
-		.pages
-		.iter()
-		.flat_map(|page| page.book_text())
-		.map(|text| text.split_whitespace().count())
-		.sum();
-
+	let report = publish::check(story, cast)?;
 	println!(
-		"✓ {} — {} script pages, {} book pages, {words} words, {} cast members",
-		story.meta.title,
-		rehearsals.len(),
-		pages.len(),
-		cast.members.len()
+		"✓ {} — {} script pages, {} book pages, {} words, {} cast members",
+		report.title, report.script_pages, report.book_pages, report.words, report.cast_members
 	);
 
 	Ok(())
@@ -585,61 +566,22 @@ fn check(story: &Story, cast: &Cast) -> Result<()> {
 
 fn proofs(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	let mut pages = vec![book::front_cover(story, cast)?];
-	pages.extend(book::assemble(story, cast)?);
-	pages.push(book::back_cover(story, cast)?);
-	let dir = book_dir(out, story).join("proofs");
-	press::proofs::write(&pages, &dir)?;
-	done(&dir, started);
-
+	done(&publish::proofs(story, cast, out)?, started);
 	Ok(())
 }
 
 fn ebook(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	let pages = book::assemble(story, cast)?;
-	let front = book::front_cover(story, cast)?;
-	let dir = book_dir(out, story).join("ebook");
-	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
-
-	// KDP wants a separate marketing cover of at least 1600px on the short side and under 5 MB.
-	let mut store = raster::render(&book::page_svg(&front, Side::Screen, 2560, 2560, true))?;
-	raster::finish(&mut store, &front.style, 0.05, 0);
-	let store_path = dir.join("cover.jpg");
-	std::fs::write(&store_path, raster::jpeg(&store, 88)?)
-		.with_context(|| format!("could not write {}", store_path.display()))?;
-
-	let size = press::epub::PAGE_PX;
-	let mut inner = raster::render(&book::page_svg(&front, Side::Screen, size, size, true))?;
-	raster::finish(&mut inner, &front.style, 0.035, 0);
-	let epub_path = dir.join(format!("{}.epub", story.slug));
-	press::epub::write(story, &pages, &raster::jpeg(&inner, 84)?, &epub_path)?;
-	done(&epub_path, started);
-
+	done(&publish::ebook(story, cast, out)?.epub, started);
 	Ok(())
 }
 
 fn print(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	let pages = book::assemble(story, cast)?;
-	let spec = Spec::for_pages(pages.len());
-	let dir = book_dir(out, story).join("print");
-	let interior = dir.join(format!("{}-interior.pdf", story.slug));
-	press::print::write_interior(story, &pages, &interior)?;
-	done(&interior, started);
-
-	let started = Instant::now();
-	let cover = dir.join(format!("{}-cover.pdf", story.slug));
-	let front = book::front_cover(story, cast)?;
-	let back = book::back_cover(story, cast)?;
-	press::print::write_cover(story, &front, &back, spec, &cover)?;
-	done(&cover, started);
-
-	let specs = dir.join("kdp-setup.txt");
-	std::fs::write(&specs, press::print::specs_text(story, spec))
-		.with_context(|| format!("could not write {}", specs.display()))?;
-	println!("{}", press::print::specs_text(story, spec));
-
+	let print = publish::print(story, cast, out)?;
+	done(&print.interior, started);
+	done(&print.cover, started);
+	println!("{}", print.specs);
 	Ok(())
 }
 
@@ -922,21 +864,8 @@ fn styles(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 
 fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bool) -> Result<()> {
 	let started = Instant::now();
-	// Voices are shared by every style, so the take cache sits above the per-style folders.
-	let timeline = fables::video::plan(
-		story,
-		cast,
-		&out.join(&story.slug).join("cache").join("voice"),
-	)?;
-	let paths = fables::video::make(
-		story,
-		&timeline,
-		formats,
-		fables::video::Options { preview },
-		&book_dir(out, story).join("video"),
-	)?;
 
-	for path in paths {
+	for path in publish::video(story, cast, out, formats, preview)? {
 		done(&path, started);
 	}
 

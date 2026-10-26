@@ -1,0 +1,22 @@
+# The folk of Mumbleton. Every table is one character.
+
+[mo]
+name = "Mo Mumble"
+born = "Morris"
+about = "A kind, shy boy who always has something to say."
+habit = "Mumbles so quietly that the wind carries every word away."
+kind = "kid"
+puppet = "puppets/mo.svg"
+skin = "#d99a6c"
+hair-colour = "#3b2a24"
+top = "teal"
+trim = "#fff8ef"
+bottom = "#3a4a7a"
+shoes = "tangerine"
+eyes = "#4a3426"
+pattern = "stripes"
+
+[mo.voice]
+provider = "say"
+name = "Junior"
+rate = 150

@@ -26,9 +26,11 @@ use serde::Serialize;
 use crate::studio::Audition;
 use crate::studio::CharacterBrief;
 use crate::studio::Image;
+use crate::studio::Output;
 use crate::studio::PartData;
 use crate::studio::SheetKind;
 use crate::studio::Studio;
+use crate::studio::VideoShape;
 use crate::studio::VoiceChoice;
 use crate::studio::WorldBrief;
 
@@ -48,7 +50,17 @@ To design a character:
                             themselves: a clear silhouette, a face that shows every mood.
 
 Changes that would break a figure are refused with the part check's findings. A person signs off \
-                            every character's model sheet before the character is used in a book.";
+                            every character's model sheet before the character is used in a book.
+
+To make a book:
+1. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
+2. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
+                            pages that start `# setting`, with narration and `@actor` stage \
+                            directions). It is checked against the cast and refused, with the \
+                            line to fix, if it doesn't work. `story_read` reads one back, for \
+                            example a world's existing books, to learn the format.
+3. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
+                            the ePub and KDP print files; `video_render` narrates and animates it.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct WorldParams {
@@ -116,6 +128,51 @@ pub struct AuditionParams {
 	pub line: String,
 	/// A mood to deliver it in, e.g. `cross`, `happy`, `sad`.
 	pub mood: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StoryParams {
+	pub world: String,
+	/// The book's folder under the world's `stories/`, e.g. `ren-runs`.
+	pub story: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WriteStoryParams {
+	pub world: String,
+	/// The book's folder under the world's `stories/`: lowercase words joined by hyphens.
+	pub story: String,
+	/// The whole story.md.
+	pub script: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BookParams {
+	pub world: String,
+	pub story: String,
+	/// Which outputs: `proofs` (the default), `ebook`, `print`.
+	#[serde(default)]
+	pub outputs: Vec<Output>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PageParams {
+	pub world: String,
+	pub story: String,
+	/// Page 1 is the front cover, then every page in order, ending with the back cover.
+	pub page: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VideoParams {
+	pub world: String,
+	pub story: String,
+	/// `portrait` (9:16, the default) or `landscape` (16:9).
+	#[serde(default)]
+	pub shape: VideoShape,
+	/// Half size at 15 frames a second, for checking timing quickly.
+	#[serde(default)]
+	pub preview: bool,
 }
 
 #[derive(Serialize)]
@@ -348,6 +405,80 @@ impl StudioServer {
 	}
 
 	#[tool(
+		description = "Write a book's script (the whole story.md) into a world and check it \
+		               against the cast. A script that doesn't parse or rehearse is not kept; the \
+		               error says what to fix, by line."
+	)]
+	fn story_write(&self, Parameters(params): Parameters<WriteStoryParams>) -> CallToolResult {
+		json(
+			self.studio
+				.write_story(&params.world, &params.story, &params.script),
+		)
+	}
+
+	#[tool(description = "Read a book's script (its story.md).")]
+	fn story_read(&self, Parameters(params): Parameters<StoryParams>) -> CallToolResult {
+		match self.studio.read_story(&params.world, &params.story) {
+			Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+			Err(error) => failed(&error),
+		}
+	}
+
+	#[tool(description = "Check a book against its cast: page and word counts, or what to fix.")]
+	fn story_check(&self, Parameters(params): Parameters<StoryParams>) -> CallToolResult {
+		json(self.studio.check_story(&params.world, &params.story))
+	}
+
+	#[tool(
+		description = "Make a book's outputs: proofs (every page, returned as a contact sheet \
+		               image), the ePub, and KDP print files. Returns the files written."
+	)]
+	fn book_render(&self, Parameters(params): Parameters<BookParams>) -> CallToolResult {
+		match self
+			.studio
+			.render_book(&params.world, &params.story, &params.outputs)
+		{
+			Ok((rendered, contact)) => {
+				let mut content = match serde_json::to_string_pretty(&rendered) {
+					Ok(text) => vec![ContentBlock::text(text)],
+					Err(error) => return failed(&error.into()),
+				};
+
+				if let Some(sheet) = contact {
+					content.push(ContentBlock::text(sheet.label));
+					content.push(ContentBlock::image(
+						base64::engine::general_purpose::STANDARD.encode(&sheet.png),
+						"image/png",
+					));
+				}
+
+				CallToolResult::success(content)
+			}
+			Err(error) => failed(&error),
+		}
+	}
+
+	#[tool(description = "Show one page of a book as an image (page 1 is the front cover).")]
+	fn page_render(&self, Parameters(params): Parameters<PageParams>) -> CallToolResult {
+		images(
+			self.studio
+				.render_page(&params.world, &params.story, params.page)
+				.map(|image| vec![image]),
+		)
+	}
+
+	#[tool(
+		description = "Narrate and animate a book as an MP4, lip-synced, in its world's voices. \
+		               Takes minutes; a preview is quicker. Returns the files written."
+	)]
+	fn video_render(&self, Parameters(params): Parameters<VideoParams>) -> CallToolResult {
+		json(
+			self.studio
+				.render_video(&params.world, &params.story, params.shape, params.preview),
+		)
+	}
+
+	#[tool(
 		description = "Hear a line in a character's voice (or the narrator's), delivered in a \
 		               mood. Returns the audio. Takes are cached, so a line is only paid for once."
 	)]
@@ -417,6 +548,12 @@ mod tests {
 			"voice_list",
 			"voice_cast",
 			"voice_audition",
+			"story_write",
+			"story_read",
+			"story_check",
+			"book_render",
+			"page_render",
+			"video_render",
 		] {
 			assert!(
 				names.iter().any(|listed| listed == name),

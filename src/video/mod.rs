@@ -56,7 +56,7 @@ pub fn plan(story: &Story, cast: &Cast, cache: &Path) -> Result<Timeline> {
 		voice::speak(line, cache)
 	})?;
 
-	println!(
+	eprintln!(
 		"  voiced {spoken} lines ({} character voices), {:.0}s total",
 		characters.len(),
 		timeline.duration
@@ -205,6 +205,8 @@ impl Clip<'_> {
 			.args(["-movflags", "+faststart"])
 			.arg(path)
 			.stdin(Stdio::piped())
+			// Never on our stdout: under `fables mcp` that is the protocol's channel.
+			.stdout(Stdio::null())
 			.spawn()
 			.context("could not run ffmpeg; install it to make videos")?;
 		let mut stdin = ffmpeg.stdin.take().context("ffmpeg has no stdin")?;
@@ -241,7 +243,7 @@ impl Clip<'_> {
 
 				if percent >= last_report + 10 {
 					last_report = percent / 10 * 10;
-					print!("\r  {} {width}x{height}: {percent}%", self.label);
+					eprint!("\r  {} {width}x{height}: {percent}%", self.label);
 					let _ = std::io::stdout().flush();
 				}
 			}
@@ -253,7 +255,7 @@ impl Clip<'_> {
 		});
 
 		let status = ffmpeg.wait().context("ffmpeg did not finish")?;
-		println!();
+		eprintln!();
 		rendered?;
 
 		if !status.success() {

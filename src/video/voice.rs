@@ -629,6 +629,8 @@ fn normalise(input: &Path, output: &Path) -> Result<()> {
 			"s16",
 		])
 		.arg(output)
+		// Never on our stdout: under `fables mcp` that is the protocol's channel.
+		.stdout(Stdio::null())
 		.status()
 		.context("could not run ffmpeg; install it to make videos")?;
 

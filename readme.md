@@ -101,6 +101,9 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `character_sheet` | The model sheet (five beats, front and three-quarters), the parts sheet, or all fifteen moods, as images. |
 | `voice_providers`, `voice_list` | Which voice providers can speak now, and the offline macOS voices. |
 | `voice_cast`, `voice_audition` | Give a character their voice, and hear a line in it, delivered in a mood, as audio. |
+| `story_write`, `story_read`, `story_check` | Write a book's script into a world, checked against the cast (a script that doesn't rehearse is refused, with the line to fix), or read and check one. |
+| `page_render`, `book_render` | One page as an image, or the proofs (with a contact sheet image), ePub and KDP print files under `<root>/out/`. |
+| `video_render` | The narrated, lip-synced MP4, 9:16 or 16:9, or a quick preview. |
 
 Worlds and characters are named by slugs, never paths, so the server only reads and writes under its root. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
 
@@ -354,6 +357,7 @@ src/
   art/pack.rs     drawing styles: style.toml, kit and template
   studio.rs       worlds and characters as operations: what the CLI and MCP server share
   mcp.rs          `fables mcp`: the studio's tools over the Model Context Protocol
+  publish.rs      a book's outputs: the check, proofs, ePub, print files and videos
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, frame renderer, soundtrack, ffmpeg
