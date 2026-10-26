@@ -8,6 +8,7 @@ use anyhow::Result;
 use resvg::tiny_skia::Pixmap;
 use resvg::usvg;
 
+use crate::art::dials::Tone;
 use crate::art::style::Style;
 
 /// Fonts embedded in the binary so renders never depend on what is installed.
@@ -108,8 +109,8 @@ pub fn grain(pixmap: &mut Pixmap, strength: f32, shift: u32) {
 pub fn finish(pixmap: &mut Pixmap, style: &Style, grain_amount: f32, shift: u32) {
 	let look = style.finish;
 
-	if look.screentone {
-		screentone(pixmap);
+	if let Some(tone) = look.tone {
+		screentone(pixmap, tone);
 		return;
 	}
 	let grading = (look.saturation - 1.0).abs() > 0.01 || look.lift > 0.0 || look.mottle > 0.0;
@@ -124,7 +125,7 @@ pub fn finish(pixmap: &mut Pixmap, style: &Style, grain_amount: f32, shift: u32)
 /// Manga printing: black ink on white paper. Near-white becomes paper, near-black ink, and the
 /// tones between become dot screens at 45 degrees, coarser for darker tones, the way sheets of
 /// screentone are cut and laid on a page. The screen is fixed to the page, whatever is drawn.
-pub fn screentone(pixmap: &mut Pixmap) {
+pub fn screentone(pixmap: &mut Pixmap, tone: Tone) {
 	const PAPER: f32 = 255.0;
 	const INK: f32 = 22.0;
 	let width = pixmap.width() as usize;
@@ -156,6 +157,11 @@ pub fn screentone(pixmap: &mut Pixmap) {
 		};
 		let ink = if coverage <= 0.0 || coverage >= 1.0 {
 			coverage
+		} else if tone == Tone::Lines {
+			// Line tone: parallel lines at 45 degrees, thicker for darker tones.
+			let u = (x + y) * std::f32::consts::FRAC_1_SQRT_2 / cell;
+			let across = (u - u.floor() - 0.5).abs();
+			((coverage / 2.0 + soft - across) / (2.0 * soft)).clamp(0.0, 1.0)
 		} else {
 			let u = (x + y) * std::f32::consts::FRAC_1_SQRT_2 / cell;
 			let v = (x - y) * std::f32::consts::FRAC_1_SQRT_2 / cell;
@@ -263,7 +269,7 @@ mod tests {
 			pixmap.fill_rect(rect, &paint, resvg::tiny_skia::Transform::identity(), None);
 		}
 
-		screentone(&mut pixmap);
+		screentone(&mut pixmap, Tone::Dots);
 		let at = |x: u32, y: u32| pixmap.pixel(x, y).unwrap();
 		let ink = |x0: u32| {
 			(x0..x0 + 100)

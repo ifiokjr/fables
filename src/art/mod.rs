@@ -7,6 +7,7 @@
 //! two print passes did not quite line up.
 
 pub mod critters;
+pub mod dials;
 pub mod figure;
 pub mod fx;
 pub mod pack;
@@ -400,6 +401,46 @@ pub struct Svg {
 	/// Base ink outline width in stage units.
 	pub line: f32,
 	pub style: Style,
+	/// How the brushed finish inks and shades, set by whoever is drawing (an authored puppet
+	/// sets its style's line and shade dials while it draws).
+	pub brush: Brush,
+}
+
+/// The line and shade dials as the brushed finish uses them (see [`dials`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Brush {
+	pub line: dials::Line,
+	pub tones: u8,
+	pub highlight: dials::Highlight,
+	/// The ink a self-coloured line replaces with the fill it outlines.
+	pub ink: Color,
+	/// The last fill laid down, which a self-coloured line takes its colour from.
+	last_fill: Option<Color>,
+}
+
+impl Default for Brush {
+	fn default() -> Brush {
+		Brush {
+			line: dials::Line::default(),
+			tones: 1,
+			highlight: dials::Highlight::None,
+			ink: palette::INK,
+			last_fill: None,
+		}
+	}
+}
+
+impl Brush {
+	/// A style's line and shade dials, replacing `ink` when lines are self-coloured.
+	pub fn new(line: dials::Line, shade: &dials::Shade, ink: Color) -> Brush {
+		Brush {
+			line,
+			tones: shade.tones,
+			highlight: shade.highlight,
+			ink,
+			last_fill: None,
+		}
+	}
 }
 
 impl Default for Svg {
@@ -426,6 +467,7 @@ impl Svg {
 			registration: style.registration,
 			line: 7.0,
 			style,
+			brush: Brush::default(),
 		}
 	}
 
@@ -573,25 +615,95 @@ impl Svg {
 	/// the edge swells on the shadow side like a brush line. Unlike [`Svg::inked`], the brushed
 	/// finish ignores the style: it is the authored-puppet look.
 	pub fn brush_fill(&mut self, path: &Path, fill: Color, line: Color, weight: f32) {
-		self.begin(&format!(
-			"translate({:.2} {:.2})",
-			weight * 0.3,
-			weight * 0.45
-		));
-		self.plain_stroke(path, line, weight * 1.3, 1.0);
-		self.end();
-		self.fill(path, fill);
+		self.brush.last_fill = Some(fill);
+
+		if self.brush.line.stroke == dials::Stroke::Brush {
+			let line = self.brush_ink(line);
+			self.begin(&format!(
+				"translate({:.2} {:.2})",
+				weight * 0.3,
+				weight * 0.45
+			));
+			self.plain_stroke(path, line, weight * 1.3, 1.0);
+			self.end();
+		}
+
+		let register = self.brush.line.register;
+
+		if register == pt(0.0, 0.0) {
+			self.fill(path, fill);
+		} else {
+			self.begin(&format!("translate({:.2} {:.2})", register.x, register.y));
+			self.fill(path, fill);
+			self.end();
+		}
 	}
 
 	/// The brushed finish, last step: the line on top.
 	pub fn brush_line(&mut self, path: &Path, line: Color, weight: f32) {
-		self.plain_stroke(path, line, weight, 1.0);
+		let line = self.brush_ink(line);
+
+		match self.brush.line.stroke {
+			dials::Stroke::None => {}
+			dials::Stroke::Broken => {
+				let _ = write!(
+					self.body,
+					r#"<path d="{}" fill="none" stroke="{line}" stroke-width="{weight:.1}" stroke-linecap="round" stroke-dasharray="{:.1} {:.1}"/>"#,
+					path.as_str(),
+					weight * 9.0,
+					weight * 2.2
+				);
+			}
+			dials::Stroke::Brush | dials::Stroke::Uniform => {
+				self.plain_stroke(path, line, weight, 1.0);
+			}
+		}
+	}
+
+	/// The line colour: ink, or the fill just laid down, darkened, for self-coloured lines.
+	fn brush_ink(&self, line: Color) -> Color {
+		match (self.brush.line.colour, self.brush.last_fill) {
+			(dials::LineColour::SelfColoured, Some(fill)) if line == self.brush.ink => {
+				fill.darken(0.45)
+			}
+			_ => line,
+		}
 	}
 
 	/// One tone of cel shadow in `shadow`, multiplied over whatever is already painted inside
 	/// `shape` (stripes included). The lit area is the shape itself moved towards the light, so
 	/// the shadow hugs the far edge and follows the part's own curvature.
 	pub fn cel_shade(&mut self, shape: &Shape, light: Pt, shadow: Color) {
+		if self.brush.tones == 0 {
+			return;
+		}
+
+		self.shadow_band(shape, light, shadow);
+
+		// A second, deeper tone in the far edge of the first.
+		if self.brush.tones >= 2 {
+			self.shadow_band(shape, light * 0.45, shadow.darken(0.12));
+		}
+
+		// A light rim along the lit edge.
+		if self.brush.highlight == dials::Highlight::Rim {
+			let path = shape.path();
+			let rim = Path::new()
+				.append(&path)
+				.append(&shape.shift(light * -0.55).path());
+			self.begin_clip(&path);
+			let _ = write!(
+				self.body,
+				r#"<path d="{}" fill="{}" fill-opacity="0.38" fill-rule="evenodd"/>"#,
+				rim.as_str(),
+				palette::WHITE
+			);
+			self.end();
+		}
+	}
+
+	/// One band of cel shadow: the shape minus itself moved towards the light, multiplied.
+	fn shadow_band(&mut self, shape: &Shape, light: Pt, shadow: Color) {
 		let path = shape.path();
 		let lit = Path::new().append(&path).append(&shape.shift(light).path());
 		let id = self.next_id("cel");

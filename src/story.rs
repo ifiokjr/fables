@@ -23,6 +23,10 @@ use anyhow::Result;
 use anyhow::bail;
 use serde::Deserialize;
 
+use crate::art::dials::Fill;
+use crate::art::dials::Motion;
+use crate::art::dials::Palette;
+use crate::art::dials::Tone;
 use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::art::style::StyleName;
@@ -236,12 +240,13 @@ pub struct Story {
 }
 
 /// How a world's drawing style prints and moves (see [`StylePack`](crate::art::pack::StylePack)).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Drawing {
-	/// Black ink on white paper, with colours as screentone.
-	pub screentone: bool,
-	/// Characters animated on twos.
-	pub on_twos: bool,
+	/// How colour is laid down on the page: flat, snapped to a palette, or screentone.
+	pub fill: Fill,
+	pub tone: Tone,
+	pub palette: Palette,
+	pub motion: Motion,
 }
 
 impl Story {
@@ -260,7 +265,8 @@ impl Story {
 			.as_deref()
 			.and_then(Style::parse)
 			.unwrap_or_default();
-		style.finish.screentone = self.drawing.screentone;
+		style.finish.tone = (self.drawing.fill == Fill::Screentone).then_some(self.drawing.tone);
+		style.finish.palette = (self.drawing.fill == Fill::Palette).then_some(self.drawing.palette);
 		style
 	}
 

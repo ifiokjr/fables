@@ -7,6 +7,8 @@
 
 use super::Color;
 use super::Pt;
+use super::dials::Palette;
+use super::dials::Tone;
 use super::palette;
 use super::pt;
 
@@ -90,8 +92,10 @@ pub struct Finish {
 	pub saturation: f32,
 	/// Lift towards white (0..1), for airy watercolour.
 	pub lift: f32,
-	/// Black ink on white paper, with every colour turned into screentone dots (manga).
-	pub screentone: bool,
+	/// Black ink on white paper, with every colour turned into this screentone (manga).
+	pub tone: Option<Tone>,
+	/// Every colour snapped to a limited palette.
+	pub palette: Option<Palette>,
 }
 
 /// Everything that decides how ink meets paper.
@@ -136,7 +140,8 @@ impl Style {
 			mottle: 0.0,
 			saturation: 1.0,
 			lift: 0.0,
-			screentone: false,
+			tone: None,
+			palette: None,
 		};
 
 		match name {
@@ -226,7 +231,8 @@ impl Style {
 						mottle: 0.35,
 						saturation: 0.95,
 						lift: 0.0,
-						screentone: false,
+						tone: None,
+						palette: None,
 					},
 				}
 			}
@@ -251,7 +257,8 @@ impl Style {
 						mottle: 0.25,
 						saturation: 1.12,
 						lift: 0.0,
-						screentone: false,
+						tone: None,
+						palette: None,
 					},
 				}
 			}
@@ -276,7 +283,8 @@ impl Style {
 						mottle: 0.7,
 						saturation: 0.8,
 						lift: 0.05,
-						screentone: false,
+						tone: None,
+						palette: None,
 					},
 				}
 			}

@@ -230,6 +230,7 @@ fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 		heading: 1.0,
 		breath: 0.0,
 		lift: 0.0,
+		smear: 0.0,
 	}
 }
 

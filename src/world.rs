@@ -219,8 +219,10 @@ impl World {
 		story.matter.clone_from(&self.matter);
 		story.settings = self.settings()?;
 		story.drawing = Drawing {
-			screentone: style.finish.screentone,
-			on_twos: style.motion.on_twos,
+			fill: style.shade.fill,
+			tone: style.shade.tone,
+			palette: style.shade.palette,
+			motion: style.motion,
 		};
 
 		if story.meta.voice.is_none() {

@@ -512,7 +512,7 @@ impl Part {
 				fill,
 				outline,
 			} => {
-				let color = self.color(*fill, weather);
+				let color = snap(svg, self.color(*fill, weather));
 
 				if *outline {
 					svg.inked_weight(path, color, weight);
@@ -537,7 +537,7 @@ impl Part {
 				width,
 				noodle,
 			} => {
-				let color = self.color(*color, weather);
+				let color = snap(svg, self.color(*color, weather));
 
 				if *noodle {
 					svg.inked_noodle(path, color, *width);
@@ -580,6 +580,14 @@ impl Part {
 			svg.end();
 		}
 	}
+}
+
+/// A colour snapped to the page's limited palette, if its style has one.
+fn snap(svg: &Svg, color: Color) -> Color {
+	svg.style
+		.finish
+		.palette
+		.map_or(color, |palette| palette.nearest(color))
 }
 
 /// The settings a story can use: the built-in ones, and its world's own.

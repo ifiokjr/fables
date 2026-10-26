@@ -32,6 +32,9 @@ use serde::Serialize;
 
 use super::Color;
 use super::Pt;
+use super::dials::Line;
+use super::dials::Motion;
+use super::dials::Shade;
 use super::figure::Build;
 use super::parts::Finding;
 use super::parts::Level;
@@ -74,6 +77,8 @@ pub struct StylePack {
 	pub face: Face,
 	pub features: Features,
 	pub eyes: Eyes,
+	pub line: Line,
+	pub shade: Shade,
 	pub motion: Motion,
 	pub inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
@@ -97,19 +102,6 @@ pub struct Finish {
 	pub cel_shadow: Color,
 	/// What limbs on the far side of the body are pushed back towards.
 	pub far: Color,
-	/// Print in black ink on white paper, with colours turned into screentone dots.
-	#[serde(default)]
-	pub screentone: bool,
-}
-
-/// How a style moves in video.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct Motion {
-	/// Hold each drawing for two frames (twelve a second), as anime and manga cartoons do,
-	/// while the camera still moves on every frame.
-	#[serde(default)]
-	pub on_twos: bool,
 }
 
 /// The cylinder face features are wrapped round as the head turns.
@@ -216,6 +208,10 @@ struct Entry {
 	features: Features,
 	eyes: Eyes,
 	#[serde(default)]
+	line: Line,
+	#[serde(default)]
+	shade: Shade,
+	#[serde(default)]
 	motion: Motion,
 	inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
@@ -287,6 +283,8 @@ impl StylePack {
 			face: entry.face,
 			features: entry.features,
 			eyes: entry.eyes,
+			line: entry.line,
+			shade: entry.shade,
 			motion: entry.motion,
 			inks: entry.inks,
 			bodies: entry.bodies,

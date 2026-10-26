@@ -77,6 +77,15 @@ impl Shot {
 	pub fn duration(&self) -> f32 {
 		self.end - self.start
 	}
+
+	/// Whether characters are moving between keys at `time`: within `tween` seconds of a key
+	/// that changes the scene (the shot's first key only sets it up).
+	pub fn moving(&self, time: f32, tween: f32) -> bool {
+		self.keys
+			.iter()
+			.rposition(|key| key.time <= time)
+			.is_some_and(|index| index > 0 && time - self.keys[index].time < tween)
+	}
 }
 
 /// A sound effect at a moment in the video.

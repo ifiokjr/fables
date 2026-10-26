@@ -142,20 +142,6 @@ fn ease_out_back(t: f32) -> f32 {
 	1.0 + c3 * (t - 1.0).powi(3) + c1 * (t - 1.0).powi(2)
 }
 
-/// Ease in and out with a small wind-up before the move and a little overshoot after it:
-/// anticipation and follow-through, two of the classic principles of animation.
-fn anticipate(t: f32) -> f32 {
-	let c = 1.1 * 1.525;
-
-	if t < 0.5 {
-		let x = 2.0 * t;
-		x * x * ((c + 1.0) * x - c) / 2.0
-	} else {
-		let x = 2.0 * t - 2.0;
-		f32::midpoint(x * x * ((c + 1.0) * x + c), 2.0)
-	}
-}
-
 fn ease_out_bounce(t: f32) -> f32 {
 	let n1 = 7.5625;
 	let d1 = 2.75;
@@ -177,19 +163,6 @@ fn ease_out_bounce(t: f32) -> f32 {
 fn smoothstep(t: f32) -> f32 {
 	let t = t.clamp(0.0, 1.0);
 	t * t * (3.0 - 2.0 * t)
-}
-
-/// Drawings a second when animating on twos: every other frame of 24.
-const DRAWINGS_ON_TWOS: f32 = 12.0;
-
-/// The moment characters are drawn at. On twos they hold each drawing for two frames (never
-/// reaching back before the shot began); the camera still moves on every frame.
-fn drawing_time(time: f32, shot_start: f32, on_twos: bool) -> f32 {
-	if on_twos {
-		((time * DRAWINGS_ON_TWOS).floor() / DRAWINGS_ON_TWOS).max(shot_start)
-	} else {
-		time
-	}
 }
 
 /// Everything needed to draw frames for one output shape.
@@ -214,7 +187,8 @@ impl Renderer<'_> {
 	pub fn svg(&self, time: f32, frame: u64) -> String {
 		let shot = self.timeline.shot_at(time);
 		let local = time - shot.start;
-		let posed = drawing_time(time, shot.start, self.story.drawing.on_twos);
+		let motion = self.story.drawing.motion;
+		let posed = motion.drawing_time(time, shot.start, shot.moving(time, TWEEN));
 		let (scene, puppets) = self.stage_at(shot, posed);
 		let view = self.camera(shot, time);
 		let (w, h) = (self.width as f32, self.height as f32);
@@ -268,6 +242,7 @@ impl Renderer<'_> {
 
 	/// The scene at `time`, with puppets blended between keyframes and brought to life.
 	fn stage_at(&self, shot: &Shot, time: f32) -> (Scene, Vec<Puppet>) {
+		let motion = self.story.drawing.motion;
 		let index = shot
 			.keys
 			.iter()
@@ -300,10 +275,11 @@ impl Renderer<'_> {
 					let eased = if knocked_down {
 						ease_out_bounce(progress)
 					} else {
-						anticipate(progress)
+						motion.ease(progress)
 					};
 					let mut moved = compose::blend(old, puppet, eased);
-					follow_through(&mut moved, old, since);
+					follow_through(&mut moved, old, since, motion.follow_through);
+					moved.smear = smear(old, puppet, progress, motion.smears);
 					moved
 				}
 				_ if fresh => puppet.clone(),
@@ -321,7 +297,7 @@ impl Renderer<'_> {
 				&& new.hops > old.hops
 				&& !fresh
 			{
-				hop(&mut blended, since);
+				hop(&mut blended, since, motion.squash);
 			}
 
 			puppets.push(blended);
@@ -389,7 +365,8 @@ impl Renderer<'_> {
 			let end = line.start + speech.duration();
 
 			if time >= line.start && time < end {
-				let t = time - line.start;
+				// Limited animation flaps the mouth a few times a second instead of every frame.
+				let t = self.story.drawing.motion.mouth_time(time - line.start);
 				mouth = mouth.max(speech.mouth(t) * 0.95);
 				viseme = Some(speech.track.at(t));
 				shouting |= line.text.contains("**");
@@ -422,8 +399,23 @@ impl Renderer<'_> {
 			state.head_tilt += towards * 3.0;
 		}
 
+		let motion = self.story.drawing.motion;
 		let seed = seed_of(&puppet.id);
-		let period = 3.0 + (seed % 100) as f32 / 40.0;
+
+		// An idle loop (a rubber-hose bounce) for everyone standing.
+		if state.lie < 0.5 && state.gait.is_none() {
+			let (lift, squash) = motion.idle_at(time, seed);
+			puppet.lift += lift * puppet.scale;
+			state.squash *= squash;
+		}
+
+		// A moving hold: a pose held for long drifts a little, so it never freezes dead.
+		if motion.moving_hold > 0.0 {
+			state.tilt += (time * 0.7 + (seed % 17) as f32).sin() * motion.moving_hold;
+			state.head_tilt += (time * 0.5 + (seed % 11) as f32).sin() * motion.moving_hold;
+		}
+
+		let period = motion.blink_every + (seed % 100) as f32 / 40.0;
 		let phase = (time + (seed % 13) as f32 * 0.37) % period;
 
 		if phase < 0.14 && state.lie < 0.5 {
@@ -882,7 +874,19 @@ fn walk(puppet: &mut Puppet, time: f32, amount: f32) {
 }
 
 /// A jump: stretch on the way up, squash on landing, then settle.
-fn hop(puppet: &mut Puppet, since: f32) {
+/// Speed lines behind a puppet crossing the stage fast: strongest mid-move, and only for
+/// styles that smear.
+fn smear(old: &Puppet, new: &Puppet, progress: f32, amount: f32) -> f32 {
+	let travel = new.at.x - old.at.x;
+
+	if amount <= 0.0 || travel.abs() < 80.0 || !(0.0..1.0).contains(&progress) {
+		return 0.0;
+	}
+
+	travel.signum() * amount * (1.0 - (2.0 * progress - 1.0).abs())
+}
+
+fn hop(puppet: &mut Puppet, since: f32, squash: f32) {
 	let t = since / 0.5;
 
 	if !(0.0..1.5).contains(&t) {
@@ -895,9 +899,9 @@ fn hop(puppet: &mut Puppet, since: f32) {
 
 	if let Body::Figure(state) = &mut puppet.body {
 		state.squash = if t < 0.9 {
-			1.0 + 0.09 * (t / 0.9 * PI).sin()
+			1.0 + 0.09 * squash * (t / 0.9 * PI).sin()
 		} else {
-			1.0 - 0.16 * ((t - 0.9) / 0.6 * PI).sin()
+			1.0 - 0.16 * squash * ((t - 0.9) / 0.6 * PI).sin()
 		};
 		state.sway = -((t * PI).sin()) * 0.6;
 	}
@@ -905,7 +909,7 @@ fn hop(puppet: &mut Puppet, since: f32) {
 
 /// After a move, loose parts keep going and swing back: a damped spring, solved in closed form
 /// so any frame can be rendered on its own (frames are drawn in parallel).
-fn follow_through(puppet: &mut Puppet, before: &Puppet, since: f32) {
+fn follow_through(puppet: &mut Puppet, before: &Puppet, since: f32, amount: f32) {
 	let Body::Figure(state) = &mut puppet.body else {
 		return;
 	};
@@ -927,7 +931,7 @@ fn follow_through(puppet: &mut Puppet, before: &Puppet, since: f32) {
 	} else {
 		1.0
 	};
-	state.sway += direction * push * (-3.2 * since).exp() * (11.0 * since).sin();
+	state.sway += direction * push * (-3.2 * since).exp() * (11.0 * since).sin() * amount;
 }
 
 /// Splits a paragraph into caption-sized pieces, preferring breaks after punctuation.
@@ -1026,20 +1030,6 @@ fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 
 #[cfg(test)]
 mod tests {
-	#[test]
-	fn on_twos_holds_each_drawing_for_two_frames() {
-		let frame = 1.0 / 24.0;
-		let first = drawing_time(1.0, 0.0, true);
-		assert_eq!(drawing_time(1.0 + frame * 0.9, 0.0, true), first);
-		assert!(drawing_time(1.0 + frame * 2.0, 0.0, true) > first);
-		assert_eq!(drawing_time(1.0 + frame, 0.0, false), 1.0 + frame);
-		assert_eq!(
-			drawing_time(5.01, 5.0, true),
-			5.0,
-			"a shot never shows the one before"
-		);
-	}
-
 	use super::*;
 
 	#[test]
@@ -1107,13 +1097,14 @@ mod tests {
 
 	#[test]
 	fn moves_wind_up_then_overshoot() {
-		assert!(anticipate(0.0).abs() < 1e-5);
-		assert!((anticipate(1.0) - 1.0).abs() < 1e-5);
+		let motion = crate::art::dials::Motion::default();
+		assert!(motion.ease(0.0).abs() < 1e-5);
+		assert!((motion.ease(1.0) - 1.0).abs() < 1e-5);
 		assert!(
-			anticipate(0.12) < 0.0,
+			motion.ease(0.12) < 0.0,
 			"a move starts by winding up the other way"
 		);
-		assert!(anticipate(0.88) > 1.0, "and overshoots before it settles");
+		assert!(motion.ease(0.88) > 1.0, "and overshoots before it settles");
 	}
 
 	#[test]

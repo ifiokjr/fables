@@ -120,6 +120,50 @@ Authored-puppet layer 9 (Biscuit on a four-legged rig, Wormsley, Brushy and the 
 - **LLM drawing quality varies.** The sheet loop and the part check catch broken shapes, not ugly ones. Human sign-off stays the gate, and each style's template parts give every new character a good starting point.
 - **Render time grows with style effects** (screentones, filters). Measure per-frame time when each style lands.
 
+## Style dials and more packs
+
+Approved by Ifiok on 26 October 2026: "Yes. Add the motion dial, the line and shade options and the new style packs (manga, rubber hose, clear line, mid-century, chibi) to the studio stack after anime."
+
+Layers 13 to 16 had already landed by then. So these layers stack on top of layer 14 rather than being inserted after anime, and manga, built in layer 13 with its own switches, moves onto the dials.
+
+A style becomes four dials: construction (the bodies, features, eyes and kit it already has), line, shade and motion.
+
+| # | Layer | What it does | Done when |
+| --- | --- | --- | --- |
+| 17 | `feat(styles): dials` | `[motion]`, `[line]` and `[shade]` in style.toml (see the lists below). Today's cartoon values become the defaults. | Kerfuffle and the anime test world render byte-identically, and a short clip shows one character in two motion settings. |
+| 18 | `refactor(styles): manga on the dials` | Black and white with screentones, a heavy tapered outer line, speed lines and impact frames, on threes with modulation and long holds. | Ren and his page re-render from the dials. |
+| 19 | `feat(styles): rubber hose` | Hose limbs, round heads, pie-cut eyes and four-finger white gloves (a kit part); a uniform thick black line, flat colour and no shading; lots of squash, stretch and overshoot, and a bouncy idle loop on twos; an optional 1930s palette. | One test character designed through MCP. |
+| 20 | `feat(styles): clear line` | Lines of equal importance with no hatching; flat vivid colours with at most one tone; cartoony characters on more realistic settings with depth from layered planes; restrained, eased motion. | One test character designed through MCP. |
+| 21 | `feat(styles): mid-century` | Angular, geometric shapes; a limited flat palette; broken or absent lines, with colour slightly off-register; abstract settings; held poses that snap between keys, on twos and threes. | One test character designed through MCP. |
+| 22 | `feat(styles): chibi` | A body about 2 to 2.5 heads tall with mitten hands, big or dot eyes, and bouncy motion. Mostly proportions and kit. | One test character designed through MCP. |
+
+The dials:
+
+- **Motion:**
+  - timing on ones, twos or threes, with modulation (fast moves drop to ones, holds go to threes);
+  - easing: anticipation and overshoot amounts, or a hard snap between keys;
+  - squash and stretch;
+  - moving holds (a slight drift while a pose is held);
+  - speed-line smears on fast moves;
+  - limbs: jointed (IK) or rubber hose (one smooth curve);
+  - follow-through;
+  - blink and mouth-flap rates;
+  - an optional idle loop, such as a bounce.
+- **Line:**
+  - weight;
+  - taper (brushed thick-and-thin, or uniform);
+  - outer and inner weights;
+  - colour: ink, or self-coloured (the fill, darkened);
+  - broken lines;
+  - fills off-register from their lines;
+  - no line at all.
+- **Shade:**
+  - tones (0, 1 or 2) and the cel-shadow offset;
+  - highlights;
+  - fill: flat, a limited palette, or screentone (dot or line tone).
+
+Every pack's test character is designed through the MCP loop, and their sheets are collected for sign-off together. Designs are original: no named artists or studios, no tracing, and no existing characters. Pixar-style 3D, watercolour, claymation and painted backgrounds are out of scope, because vector art can't reach them.
+
 ## Status
 
 Every layer landed on 26 October 2026, as stacked local branches. Layer 14 went last, because 15 and 16 didn't depend on it.

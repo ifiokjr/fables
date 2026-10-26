@@ -45,6 +45,8 @@ pub struct Puppet {
 	pub breath: f32,
 	/// Height above the ground (hops). The puppet rises; its contact shadow stays put.
 	pub lift: f32,
+	/// Speed lines trailing a fast move: their strength, signed by the way it is going.
+	pub smear: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -177,6 +179,7 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 		heading,
 		breath,
 		lift: 0.0,
+		smear: 0.0,
 	}
 }
 
@@ -253,6 +256,7 @@ pub fn blend(a: &Puppet, b: &Puppet, t: f32) -> Puppet {
 		heading: if t < 0.5 { a.heading } else { b.heading },
 		breath: lerp(a.breath, b.breath, t),
 		lift: lerp(a.lift, b.lift, t),
+		smear: b.smear,
 	}
 }
 
@@ -326,6 +330,14 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 
 	if puppet.opacity < 0.99 {
 		svg.begin_opacity(puppet.opacity);
+	}
+
+	if puppet.smear != 0.0 {
+		let height = match &puppet.kind {
+			Kind::Figure(look) => look.frame().height() * puppet.scale,
+			_ => 300.0 * puppet.scale,
+		};
+		fx::smear_lines(svg, puppet.at, height, puppet.smear);
 	}
 
 	draw_shadow(svg, puppet);

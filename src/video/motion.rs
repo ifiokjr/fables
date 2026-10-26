@@ -12,6 +12,7 @@ use resvg::tiny_skia::Pixmap;
 
 use crate::art::Path as Shape;
 use crate::art::Svg;
+use crate::art::dials::Motion;
 use crate::art::escape;
 use crate::art::figure;
 use crate::art::figure::FigureState;
@@ -153,8 +154,16 @@ fn state(look: &Look, beat: &Beat, time: f32) -> FigureState {
 	state
 }
 
-/// The character at `time` in the routine, with eased moves between beats.
-fn at(look: &Look, time: f32) -> (FigureState, &'static str) {
+/// The character at `time` in the routine, moving between beats the way `motion` says: its
+/// timing, easing, squash and idle loop.
+fn at(look: &Look, time: f32, motion: &Motion) -> (FigureState, &'static str) {
+	let moving = |time: f32| {
+		ROUTINE
+			.iter()
+			.rposition(|beat| beat.at <= time)
+			.is_some_and(|index| index > 0 && time - ROUTINE[index].at < MOVE)
+	};
+	let time = motion.drawing_time(time, 0.0, moving(time));
 	let index = ROUTINE
 		.iter()
 		.rposition(|beat| beat.at <= time)
@@ -162,15 +171,33 @@ fn at(look: &Look, time: f32) -> (FigureState, &'static str) {
 	let current = &ROUTINE[index];
 	let previous = &ROUTINE[index.saturating_sub(1)];
 	let t = ((time - current.at) / MOVE).clamp(0.0, 1.0);
-	let eased = t * t * (3.0 - 2.0 * t);
-	let state = state(look, previous, time).blend(&state(look, current, time), eased);
+	let mut state = state(look, previous, time).blend(&state(look, current, time), motion.ease(t));
+
+	if current.stance == Stance::Jump {
+		state.squash = 1.0 + 0.09 * motion.squash * (t * std::f32::consts::PI).sin();
+	}
+
+	if current.gait.is_none() {
+		let (_, squash) = motion.idle_at(time, 0);
+		state.squash *= squash;
+	}
 
 	(state, current.label)
 }
 
 /// One frame: the character on the left, the same pose with its skeleton on the right.
-fn frame_svg(look: &Look, name: &str, style: Style, time: f32, width: u32, height: u32) -> String {
-	let (state, label) = at(look, time);
+fn frame_svg(
+	look: &Look,
+	name: &str,
+	(style, motion): (Style, &Motion),
+	time: f32,
+	(width, height): (u32, u32),
+) -> String {
+	let (state, label) = at(look, time, motion);
+	let lift = match state.gait {
+		None => motion.idle_at(time, 0).0,
+		Some(_) => 0.0,
+	};
 	let frame = look.frame();
 	let (w, h) = (width as f32, height as f32);
 	let scale = h * 0.62 / frame.height();
@@ -181,7 +208,8 @@ fn frame_svg(look: &Look, name: &str, style: Style, time: f32, width: u32, heigh
 
 	for (x, skeleton) in [(w * 0.27, false), (w * 0.73, true)] {
 		svg.begin(&format!("translate({x:.1} {ground:.1}) scale({scale:.4})"));
-		figure::shadow(&mut svg, look, &state, 0.0);
+		figure::shadow(&mut svg, look, &state, lift);
+		svg.begin(&format!("translate(0 {:.1})", -lift));
 		svg.begin_layer();
 		figure::draw(&mut svg, look, &state);
 		svg.end();
@@ -190,6 +218,7 @@ fn frame_svg(look: &Look, name: &str, style: Style, time: f32, width: u32, heigh
 			figure::draw_skeleton(&mut svg, look, &state);
 		}
 
+		svg.end();
 		svg.end();
 	}
 
@@ -210,8 +239,13 @@ fn frame_svg(look: &Look, name: &str, style: Style, time: f32, width: u32, heigh
 	svg.finish((0.0, 0.0, w, h), width, height)
 }
 
-/// Renders the motion test as an MP4.
-pub fn motion_test(look: &Look, name: &str, style: Style, path: &Path) -> Result<()> {
+/// Renders the motion test as an MP4, moving the way `motion` says.
+pub fn motion_test(
+	look: &Look,
+	name: &str,
+	(style, motion): (Style, &Motion),
+	path: &Path,
+) -> Result<()> {
 	let (width, height, fps) = (1280, 720, 30);
 	let clip = Clip {
 		width,
@@ -224,7 +258,13 @@ pub fn motion_test(look: &Look, name: &str, style: Style, path: &Path) -> Result
 
 	clip.encode(path, |index| {
 		let time = index as f32 / fps as f32;
-		let mut pixmap = raster::render(&frame_svg(look, name, style, time, width, height))?;
+		let mut pixmap = raster::render(&frame_svg(
+			look,
+			name,
+			(style, motion),
+			time,
+			(width, height),
+		))?;
 		raster::finish(&mut pixmap, &style, 0.03, index as u32 / 2);
 		Ok(pixmap.take())
 	})
@@ -312,8 +352,8 @@ mod tests {
 		let crate::cast::Kind::Figure(look) = cast.resolve("kid").unwrap() else {
 			panic!("kid is a person");
 		};
-		let (standing, _) = at(&look, 2.5);
-		let (crouching, label) = at(&look, 3.5);
+		let (standing, _) = at(&look, 2.5, &Motion::default());
+		let (crouching, label) = at(&look, 3.5, &Motion::default());
 		assert_eq!(label, "crouch · hands on hips");
 		assert!(crouching.legs.crouch > standing.legs.crouch);
 	}

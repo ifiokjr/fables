@@ -27,10 +27,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use anyhow::ensure;
 
+use super::Brush;
 use super::Color;
 use super::Path;
 use super::Pt;
 use super::Svg;
+use super::dials::Fill;
+use super::dials::Joints;
 use super::figure::Build;
 use super::figure::Extra;
 use super::figure::FigureState;
@@ -201,7 +204,7 @@ fn blush(skin: Color, warm: Color) -> Color {
 
 impl Inks {
 	fn of(look: &Look, style: &StylePack, teeth: Teeth) -> Inks {
-		Inks {
+		let inks = Inks {
 			finish: style.finish,
 			face: style.face,
 			features: style.features,
@@ -223,6 +226,30 @@ impl Inks {
 				Teeth::Clean | Teeth::Sparkly => style.inks.clean_teeth,
 				Teeth::Grotty => palette::GROT,
 			},
+		};
+
+		if style.shade.fill == Fill::Palette {
+			inks.snapped(|color| style.shade.palette.nearest(color))
+		} else {
+			inks
+		}
+	}
+
+	/// The character's colours snapped to a limited palette (the line stays ink).
+	fn snapped(self, snap: impl Fn(Color) -> Color) -> Inks {
+		Inks {
+			skin: snap(self.skin),
+			nose: snap(self.nose),
+			freckle: snap(self.freckle),
+			blush: snap(self.blush),
+			hair: snap(self.hair),
+			hair_light: snap(self.hair_light),
+			top: snap(self.top),
+			stripe: snap(self.stripe),
+			bottom: snap(self.bottom),
+			shoes: snap(self.shoes),
+			pupil: snap(self.pupil),
+			..self
 		}
 	}
 }
@@ -762,6 +789,9 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	let solved = Solved::new(&posed, body);
 	let inks = Inks::of(look, &puppet.style, state.teeth);
 	let t = solved.t;
+	// The style's line and shade dials, for this figure only.
+	let saved = svg.brush;
+	svg.brush = Brush::new(puppet.style.line, &puppet.style.shade, inks.line);
 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 
@@ -829,6 +859,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	}
 
 	svg.end();
+	svg.brush = saved;
 }
 
 /// A soft contact shadow under the feet, so the figure stands on the ground.
@@ -953,9 +984,16 @@ fn draw_leg(
 	let (hip, knee, ankle) = solved.leg(side);
 	let shin = solved.limbs.shin;
 
-	// The leg is one tapered shape bent through the knee, so there's no seam at the joint.
+	// The leg is one tapered shape bent through the knee, so there's no seam at the joint. A
+	// rubber-hose leg only bends gently where the knee would be.
+	let bend = if puppet.style.motion.limbs == Joints::Hose {
+		let middle = hip.lerp(ankle, 0.5);
+		middle + (knee - middle) * 0.4
+	} else {
+		knee
+	};
 	let leg = Shape::taper(
-		&[hip, hip.lerp(knee, 0.5), knee, knee.lerp(ankle, 0.5), ankle],
+		&[hip, hip.lerp(bend, 0.5), bend, bend.lerp(ankle, 0.5), ankle],
 		solved.body.leg_width.0,
 		solved.body.leg_width.1,
 	);
@@ -1310,99 +1348,125 @@ impl Arm<'_> {
 			(inks.skin, inks.skin)
 		};
 
-		let angle = begin_bone(svg, elbow, wrist);
-		let (elbow_width, wrist_width) = solved.body.forearm_width;
-		let forearm = capsule(solved.limbs.forearm, elbow_width, wrist_width);
-		svg.brushed_shaded(
-			&forearm,
-			far(arm_skin, is_far, inks.finish.far),
-			inks.finish.light.rotate(-angle),
-			inks.finish.cel_shadow,
-			ink,
-			inks.finish.line,
-		);
-
-		// A long sleeve carries on down the forearm.
-		if let Some(lower) = puppet.part("forearm-sleeve", t) {
+		if puppet.style.motion.limbs == Joints::Hose {
+			// Rubber hose: one smooth tube from shoulder to wrist; the elbow only bends it.
+			let middle = shoulder.lerp(wrist, 0.5);
+			let bend = middle + (elbow - middle) * 0.4;
+			let width = solved.body.forearm_width.0;
+			let tube = Shape::taper(
+				&[
+					shoulder,
+					shoulder.lerp(bend, 0.5),
+					bend,
+					bend.lerp(wrist, 0.5),
+					wrist,
+				],
+				width,
+				width,
+			);
 			svg.brushed_shaded(
-				&lower,
-				far(inks.top, is_far, inks.finish.far),
+				&tube,
+				far(arm_skin, is_far, inks.finish.far),
+				inks.finish.light,
+				inks.finish.cel_shadow,
+				ink,
+				inks.finish.line,
+			);
+		} else {
+			let angle = begin_bone(svg, elbow, wrist);
+			let (elbow_width, wrist_width) = solved.body.forearm_width;
+			let forearm = capsule(solved.limbs.forearm, elbow_width, wrist_width);
+			svg.brushed_shaded(
+				&forearm,
+				far(arm_skin, is_far, inks.finish.far),
 				inks.finish.light.rotate(-angle),
 				inks.finish.cel_shadow,
 				ink,
 				inks.finish.line,
 			);
 
-			if let Some(cuff) = puppet.part("forearm-sleeve-cuff", t) {
+			// A long sleeve carries on down the forearm.
+			if let Some(lower) = puppet.part("forearm-sleeve", t) {
+				svg.brushed_shaded(
+					&lower,
+					far(inks.top, is_far, inks.finish.far),
+					inks.finish.light.rotate(-angle),
+					inks.finish.cel_shadow,
+					ink,
+					inks.finish.line,
+				);
+
+				if let Some(cuff) = puppet.part("forearm-sleeve-cuff", t) {
+					svg.brush_line(&cuff.path(), ink, inks.finish.detail);
+				}
+			}
+
+			svg.end();
+
+			let angle = begin_bone(svg, shoulder, elbow);
+			let sleeve = puppet.required("sleeve", t);
+			let path = sleeve.path();
+			svg.brush_fill(
+				&path,
+				far(inks.top, is_far, inks.finish.far),
+				ink,
+				inks.finish.line,
+			);
+			svg.begin_clip(&path);
+
+			// The pattern runs down the sleeve to its cuff, a band at the end of the upper arm.
+			let cuff_y = solved.limbs.upper_arm - 12.0;
+
+			match self.look.pattern {
+				Pattern::Stripes => {
+					let mut y = 6.0;
+
+					while y <= cuff_y - 4.0 {
+						svg.fill(
+							&Path::rect(-20.0, y, 40.0, 10.0),
+							far(inks.stripe, is_far, inks.finish.far),
+						);
+						y += 18.0;
+					}
+				}
+				Pattern::Dots => {
+					let dot = puppet.required("pattern-dot", t);
+					let mut step = 0.0;
+
+					while 6.0 + step <= cuff_y - 4.0 {
+						for (x, y) in [(-6.0, 6.0), (7.0, 16.0), (-5.0, 27.0)] {
+							if y + step <= cuff_y {
+								svg.fill(
+									&dot.shift(pt(x, y + step)).path(),
+									far(inks.stripe, is_far, inks.finish.far),
+								);
+							}
+						}
+
+						step += 30.0;
+					}
+				}
+				Pattern::Plain | Pattern::Star => {}
+			}
+
+			svg.fill(
+				&Path::rect(-20.0, cuff_y, 40.0, 16.0),
+				far(inks.top.darken(0.12), is_far, inks.finish.far),
+			);
+			svg.end();
+			svg.cel_shade(
+				&sleeve,
+				inks.finish.light.rotate(-angle),
+				inks.finish.cel_shadow,
+			);
+
+			if let Some(cuff) = puppet.part("sleeve-cuff", t) {
 				svg.brush_line(&cuff.path(), ink, inks.finish.detail);
 			}
+
+			svg.brush_line(&path, ink, inks.finish.line);
+			svg.end();
 		}
-
-		svg.end();
-
-		let angle = begin_bone(svg, shoulder, elbow);
-		let sleeve = puppet.required("sleeve", t);
-		let path = sleeve.path();
-		svg.brush_fill(
-			&path,
-			far(inks.top, is_far, inks.finish.far),
-			ink,
-			inks.finish.line,
-		);
-		svg.begin_clip(&path);
-
-		// The pattern runs down the sleeve to its cuff, a band at the end of the upper arm.
-		let cuff_y = solved.limbs.upper_arm - 12.0;
-
-		match self.look.pattern {
-			Pattern::Stripes => {
-				let mut y = 6.0;
-
-				while y <= cuff_y - 4.0 {
-					svg.fill(
-						&Path::rect(-20.0, y, 40.0, 10.0),
-						far(inks.stripe, is_far, inks.finish.far),
-					);
-					y += 18.0;
-				}
-			}
-			Pattern::Dots => {
-				let dot = puppet.required("pattern-dot", t);
-				let mut step = 0.0;
-
-				while 6.0 + step <= cuff_y - 4.0 {
-					for (x, y) in [(-6.0, 6.0), (7.0, 16.0), (-5.0, 27.0)] {
-						if y + step <= cuff_y {
-							svg.fill(
-								&dot.shift(pt(x, y + step)).path(),
-								far(inks.stripe, is_far, inks.finish.far),
-							);
-						}
-					}
-
-					step += 30.0;
-				}
-			}
-			Pattern::Plain | Pattern::Star => {}
-		}
-
-		svg.fill(
-			&Path::rect(-20.0, cuff_y, 40.0, 16.0),
-			far(inks.top.darken(0.12), is_far, inks.finish.far),
-		);
-		svg.end();
-		svg.cel_shade(
-			&sleeve,
-			inks.finish.light.rotate(-angle),
-			inks.finish.cel_shadow,
-		);
-
-		if let Some(cuff) = puppet.part("sleeve-cuff", t) {
-			svg.brush_line(&cuff.path(), ink, inks.finish.detail);
-		}
-
-		svg.brush_line(&path, ink, inks.finish.line);
-		svg.end();
 
 		// Held things sit in the fist, under the fingers.
 		let along = (wrist - elbow).norm();

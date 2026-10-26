@@ -338,3 +338,24 @@ pub fn impact_burst(svg: &mut Svg, focus: Pt, size: f32, strength: f32, seed: u6
 	svg.fill(&burst, palette::WHITE);
 	svg.stroke(&burst, palette::INK, svg.line * 1.2);
 }
+
+/// Speed lines trailing a fast move: horizontal strokes behind a figure `height` tall standing
+/// at `feet`, on the side it is leaving. `strength` is signed by the direction of travel.
+pub fn smear_lines(svg: &mut Svg, feet: Pt, height: f32, strength: f32) {
+	let behind = -strength.signum();
+	let count = (4.0 + 6.0 * strength.abs()) as u64;
+
+	for i in 0..count {
+		let y = feet.y - height * (0.15 + 0.7 * (i as f32 + 0.5) / count as f32);
+		let reach = height * (0.35 + 0.35 * noise(91, i).abs()) * strength.abs();
+		let start = feet.x + behind * height * (0.18 + 0.05 * noise(92, i));
+		svg.stroke_alpha(
+			&Path::new()
+				.move_to(pt(start, y))
+				.line_to(pt(start + behind * reach, y)),
+			palette::INK,
+			svg.line * 0.9,
+			0.6,
+		);
+	}
+}

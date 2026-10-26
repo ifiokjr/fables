@@ -25,6 +25,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::art::dials::Fill;
 use crate::art::figure::Mood;
 use crate::art::pack::Face;
 use crate::art::pack::Finish;
@@ -1177,8 +1178,8 @@ impl Studio {
 		let look = crate::cast::template_look(&pack, crate::art::figure::Build::Kid)?;
 		let mut model = sheets::model_sheet(&format!("The {name} style"), &look, px)?;
 
-		if pack.finish.screentone {
-			raster::screentone(&mut model);
+		if pack.shade.fill == Fill::Screentone {
+			raster::screentone(&mut model, pack.shade.tone);
 		}
 
 		let parts = sheets::parts_sheet(
@@ -1240,8 +1241,8 @@ pub fn sheets_for(world: &World, id: &str, kinds: &[SheetKind], px: u32) -> Resu
 
 			let mut pixmap = fit_width(&pixmap, px);
 
-			if puppet.style.finish.screentone {
-				raster::screentone(&mut pixmap);
+			if puppet.style.shade.fill == Fill::Screentone {
+				raster::screentone(&mut pixmap, puppet.style.shade.tone);
 			}
 
 			Ok(Image {

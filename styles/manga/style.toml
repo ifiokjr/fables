@@ -11,10 +11,12 @@ detail = 1.9
 light = [-15.0, -12.0]
 cel-shadow = "#b4b4b4"  # a neutral grey: shadows print as a darker screentone
 far = "#5a5a5a"
-screentone = true
+
+[shade]
+fill = "screentone"
 
 [motion]
-on-twos = true
+timing = "twos"
 
 [face]
 turn = 0.42

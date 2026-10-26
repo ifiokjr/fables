@@ -102,6 +102,9 @@ enum Command {
 	Rig {
 		/// The cast id to test, e.g. stinky.
 		id: String,
+		/// Move the way another drawing style moves, e.g. manga (default: the character's own).
+		#[arg(long)]
+		motion: Option<String>,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -316,11 +319,17 @@ fn run(cli: Cli) -> Result<()> {
 				StyleAction::Sheet { name, out } => style_sheet(&name, &out),
 			}
 		}
-		Command::Rig { id, out } => {
+		Command::Rig { id, motion, out } => {
 			let world = world()?;
 
 			for style in sheet_styles(&choices) {
-				rig(&world, &id, &out.join("rig").join(style.name.name()), style)?;
+				rig(
+					&world,
+					&id,
+					motion.as_deref(),
+					&out.join("rig").join(style.name.name()),
+					style,
+				)?;
 			}
 
 			Ok(())
@@ -619,7 +628,7 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	Ok(())
 }
 
-fn rig(world: &World, id: &str, out: &Path, style: Style) -> Result<()> {
+fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) -> Result<()> {
 	let started = Instant::now();
 	let cast = world.cast()?;
 	let member = cast
@@ -638,8 +647,17 @@ fn rig(world: &World, id: &str, out: &Path, style: Style) -> Result<()> {
 	)?;
 	done(&sheet, started);
 
-	let video = dir.join(format!("{id}-motion.mp4"));
-	fables::video::motion::motion_test(look, &member.name, style, &video)?;
+	let (motion, label) = if let Some(name) = motion {
+		(StylePack::named(name)?.motion, format!("-{name}"))
+	} else {
+		let own = look
+			.puppet
+			.as_ref()
+			.map_or_else(Default::default, |puppet| puppet.style.motion);
+		(own, String::new())
+	};
+	let video = dir.join(format!("{id}-motion{label}.mp4"));
+	fables::video::motion::motion_test(look, &member.name, (style, &motion), &video)?;
 	done(&video, started);
 
 	Ok(())

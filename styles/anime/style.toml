@@ -69,6 +69,26 @@ satchel = "#5a4a6c"
 apron = "#ffffff"
 mud = "#6e4a30"
 
+# The dials (see src/art/dials.rs). These are the cartoon values, which every style starts from.
+[line]
+stroke = "brush"        # thick-and-thin: a heavier pass swells the line on the shadow side
+colour = "ink"
+
+[shade]
+tones = 1               # one tone of cel shadow
+highlight = "none"
+fill = "flat"
+
+[motion]
+timing = "ones"         # a new drawing every frame
+easing = "eased"        # every move winds up, overshoots and settles
+anticipation = 1.0
+overshoot = 1.0
+squash = 1.0
+follow-through = 1.0
+limbs = "jointed"
+blink-every = 3.0
+
 # A kid (eleven or twelve): about 900 tall, the head a quarter of it, long legs.
 [bodies.kid]
 neck = [0.0, -690.0]
