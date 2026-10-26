@@ -5,7 +5,7 @@
 # character (`@stinky.monday`), which is handy for "before and after" pages.
 #
 # People (kind = "kid" or "grown-up") are built from puppet parts:
-#   skin, hair-colour, top, trim, bottom, shoes   palette names (see world/kerfuffle.md) or "#rrggbb"
+#   skin, hair-colour, top, trim, bottom, shoes   palette names (see kerfuffle.md) or "#rrggbb"
 #   hair      bald | tuft | bun | curls | pigtails | bob | spikes | puff | fringe
 #   pattern   plain | stripes | dots | star       (on the top, drawn in the trim colour)
 #   legwear   shorts | trousers | skirt

@@ -22,11 +22,12 @@ use fables::raster;
 use fables::stage;
 use fables::story::Story;
 use fables::video::frames::Format;
+use fables::world::World;
 
 /// Turn a picture-book script into proofs, an ePub, KDP print files and narrated videos.
 ///
-/// Every command that takes a story also takes a folder of books (e.g. `stories/`) and builds
-/// each `story.md` inside it.
+/// Every command that takes a story also takes a folder of books (e.g. a world's `stories/`), or a
+/// world folder, and builds each `story.md` inside it.
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
@@ -36,22 +37,26 @@ struct Cli {
 	/// storybook, a comma-separated list (bold,tv), or all. Each style renders into its own folder.
 	#[arg(long, global = true)]
 	style: Option<String>,
+	/// The world to work in: a folder with a world.toml. Defaults to the nearest world above the
+	/// script (or the current folder), or the only one in a `worlds/` folder here.
+	#[arg(long, global = true)]
+	world: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
 enum Command {
-	/// Start a new book from the Kerfuffle recipe.
+	/// Start a new book from the world's recipe.
 	New {
 		/// The book (and its star's) name, e.g. "Bogey `McBogeyface`".
 		title: String,
-		/// The cast id of the star, from world/cast.toml.
+		/// The cast id of the star, from the world's cast.toml.
 		#[arg(long)]
 		star: String,
 		#[arg(long, default_value = "Ifiok Jr.")]
 		author: String,
-		/// Where books live.
-		#[arg(long, default_value = "stories")]
-		dir: PathBuf,
+		/// Where books live (default: the world's stories/ folder).
+		#[arg(long)]
+		dir: Option<PathBuf>,
 	},
 	/// Check a script for mistakes without rendering anything.
 	Check { story: PathBuf },
@@ -87,9 +92,6 @@ enum Command {
 	},
 	/// Render reference sheets: the whole cast, one character's moods, and every setting.
 	Sheets {
-		/// The cast file to draw.
-		#[arg(long, default_value = "world/cast.toml")]
-		cast: PathBuf,
 		/// Also draw every mood for this cast member.
 		#[arg(long)]
 		moods: Option<String>,
@@ -100,12 +102,10 @@ enum Command {
 	Rig {
 		/// The cast id to test, e.g. stinky.
 		id: String,
-		#[arg(long, default_value = "world/cast.toml")]
-		cast: PathBuf,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
-	/// Work with authored puppets' part files (`world/puppets/`).
+	/// Work with authored puppets' part files (the world's `puppets/`).
 	Puppet {
 		#[command(subcommand)]
 		action: PuppetAction,
@@ -137,8 +137,6 @@ enum PuppetAction {
 	Check {
 		/// The cast id to check; leave it out to check every member with a puppet.
 		id: Option<String>,
-		#[arg(long, default_value = "world/cast.toml")]
-		cast: PathBuf,
 	},
 	/// Start a cast member's part file from another puppet's drawings, to redraw part by part.
 	Template {
@@ -147,15 +145,11 @@ enum PuppetAction {
 		/// The puppet whose drawings to start from.
 		#[arg(long, default_value = "stinky")]
 		from: String,
-		#[arg(long, default_value = "world/cast.toml")]
-		cast: PathBuf,
 	},
 	/// Render every part of a puppet: each turning part front-on, half-turned and three-quarters.
 	Sheet {
 		/// The cast id, e.g. stinky.
 		id: String,
-		#[arg(long, default_value = "world/cast.toml")]
-		cast: PathBuf,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -190,6 +184,14 @@ fn main() {
 
 fn run(cli: Cli) -> Result<()> {
 	let choices = style_choices(cli.style.as_deref())?;
+	let flag = cli.world.as_deref();
+	// The world for commands that don't start from a script.
+	let world = || {
+		match flag {
+			Some(dir) => World::load(dir),
+			None => World::find(Path::new(".")),
+		}
+	};
 
 	match cli.command {
 		Command::New {
@@ -197,11 +199,13 @@ fn run(cli: Cli) -> Result<()> {
 			star,
 			author,
 			dir,
-		} => new_story(&title, &star, &author, &dir),
-		Command::Sheets { cast, moods, out } => {
+		} => new_story(&world()?, &title, &star, &author, dir.as_deref()),
+		Command::Sheets { moods, out } => {
+			let world = world()?;
+
 			for style in sheet_styles(&choices) {
 				sheets(
-					&cast,
+					&world,
 					moods.as_deref(),
 					&out.join("sheets").join(style.name.name()),
 					style,
@@ -212,12 +216,16 @@ fn run(cli: Cli) -> Result<()> {
 		}
 		Command::Puppet { action } => {
 			match action {
-				PuppetAction::Check { id, cast } => puppet_check(id.as_deref(), &cast),
-				PuppetAction::Template { id, from, cast } => puppet_template(&id, &from, &cast),
-				PuppetAction::Sheet { id, cast, out } => puppet_sheet(&id, &cast, &out),
+				PuppetAction::Check { id } => puppet_check(id.as_deref(), &world()?.cast_file()),
+				PuppetAction::Template { id, from } => {
+					puppet_template(&id, &from, &world()?.cast_file())
+				}
+				PuppetAction::Sheet { id, out } => puppet_sheet(&id, &world()?.cast_file(), &out),
 			}
 		}
-		Command::Rig { id, cast, out } => {
+		Command::Rig { id, out } => {
+			let cast = world()?.cast_file();
+
 			for style in sheet_styles(&choices) {
 				rig(&id, &cast, &out.join("rig").join(style.name.name()), style)?;
 			}
@@ -226,22 +234,28 @@ fn run(cli: Cli) -> Result<()> {
 		}
 		Command::Styles { story, out } => {
 			each(&story, |path| {
-				let (story, cast) = load(path, None)?;
+				let (story, cast) = load(path, None, flag)?;
 				styles(&story, &cast, &out)
 			})
 		}
-		Command::Check { story } => each_style(&story, &choices, check),
+		Command::Check { story } => each_style(&story, &choices, flag, check),
 		Command::Proofs { story, out } => {
-			each_style(&story, &choices, |story, cast| proofs(story, cast, &out))
+			each_style(&story, &choices, flag, |story, cast| {
+				proofs(story, cast, &out)
+			})
 		}
 		Command::Ebook { story, out } => {
-			each_style(&story, &choices, |story, cast| ebook(story, cast, &out))
+			each_style(&story, &choices, flag, |story, cast| {
+				ebook(story, cast, &out)
+			})
 		}
 		Command::Print { story, out } => {
-			each_style(&story, &choices, |story, cast| print(story, cast, &out))
+			each_style(&story, &choices, flag, |story, cast| {
+				print(story, cast, &out)
+			})
 		}
 		Command::Book { story, out } => {
-			each_style(&story, &choices, |story, cast| {
+			each_style(&story, &choices, flag, |story, cast| {
 				proofs(story, cast, &out)?;
 				ebook(story, cast, &out)?;
 				print(story, cast, &out)
@@ -253,12 +267,12 @@ fn run(cli: Cli) -> Result<()> {
 			format,
 			preview,
 		} => {
-			each_style(&story, &choices, |story, cast| {
+			each_style(&story, &choices, flag, |story, cast| {
 				video(story, cast, &out, &format.formats(), preview)
 			})
 		}
 		Command::All { story, out } => {
-			each_style(&story, &choices, |story, cast| {
+			each_style(&story, &choices, flag, |story, cast| {
 				proofs(story, cast, &out)?;
 				ebook(story, cast, &out)?;
 				print(story, cast, &out)?;
@@ -312,11 +326,12 @@ fn sheet_styles(choices: &[Option<String>]) -> Vec<Style> {
 fn each_style(
 	path: &Path,
 	choices: &[Option<String>],
+	world: Option<&Path>,
 	mut action: impl FnMut(&Story, &Cast) -> Result<()>,
 ) -> Result<()> {
 	each(path, |script| {
 		for choice in choices {
-			let (story, cast) = load(script, choice.as_deref())?;
+			let (story, cast) = load(script, choice.as_deref(), world)?;
 			println!("  style: {}", story.style().name.name());
 			action(&story, &cast)?;
 		}
@@ -331,12 +346,20 @@ fn book_dir(out: &Path, story: &Story) -> PathBuf {
 	out.join(&story.slug).join(story.style().name.name())
 }
 
-/// Runs `action` on one script, or on every `story.md` in a folder of books (stopping at the
-/// first failure so a broken script is never silently skipped).
+/// Runs `action` on one script, on every `story.md` in a folder of books, or on every book in a
+/// world (stopping at the first failure so a broken script is never silently skipped).
 fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> {
 	if path.is_file() {
 		return action(path);
 	}
+
+	let stories;
+	let path = if path.join(fables::world::FILE).is_file() {
+		stories = World::load(path)?.stories();
+		stories.as_path()
+	} else {
+		path
+	};
 
 	let mut scripts: Vec<PathBuf> = std::fs::read_dir(path)
 		.with_context(|| {
@@ -365,12 +388,26 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	Ok(())
 }
 
-/// The Kerfuffle recipe, filled in with a title and a star.
-const RECIPE: &str = include_str!("../templates/recipe.md");
-
-fn new_story(title: &str, star: &str, author: &str, dir: &Path) -> Result<()> {
+/// Starts a book from the world's recipe, filled in with a title, a star and an author.
+fn new_story(
+	world: &World,
+	title: &str,
+	star: &str,
+	author: &str,
+	dir: Option<&Path>,
+) -> Result<()> {
+	let recipe = world.recipe().with_context(|| {
+		format!(
+			"{} has no recipe.md to start a book from",
+			world.dir.display()
+		)
+	})?;
+	let recipe = std::fs::read_to_string(&recipe)
+		.with_context(|| format!("could not read {}", recipe.display()))?;
 	let slug = fables::story::slugify(title);
-	let folder = dir.join(&slug);
+	let folder = dir
+		.map_or_else(|| world.stories(), Path::to_path_buf)
+		.join(&slug);
 	let path = folder.join("story.md");
 
 	if path.exists() {
@@ -384,7 +421,7 @@ fn new_story(title: &str, star: &str, author: &str, dir: &Path) -> Result<()> {
 		+ std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
 			.map_or(0, |elapsed| elapsed.as_secs() / 31_556_952);
-	let script = RECIPE
+	let script = recipe
 		.replace("{{title}}", title)
 		.replace("{{star}}", star)
 		.replace("{{author}}", author)
@@ -393,12 +430,15 @@ fn new_story(title: &str, star: &str, author: &str, dir: &Path) -> Result<()> {
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
 	std::fs::write(&path, script).with_context(|| format!("could not write {}", path.display()))?;
-	println!("✓ wrote {} from the Kerfuffle recipe", path.display());
+	println!("✓ wrote {} from the {} recipe", path.display(), world.name);
 
-	if let Err(error) = load(&path, None).and_then(|(story, cast)| check(&story, &cast)) {
+	if let Err(error) =
+		load(&path, None, Some(&world.dir)).and_then(|(story, cast)| check(&story, &cast))
+	{
 		println!("  next: {error:#}");
 		println!(
-			"  (add `[{star}]` to world/cast.toml, then run `fables proofs {}`)",
+			"  (add `[{star}]` to {}, then run `fables proofs {}`)",
+			world.cast_file().display(),
 			path.display()
 		);
 	}
@@ -406,7 +446,8 @@ fn new_story(title: &str, star: &str, author: &str, dir: &Path) -> Result<()> {
 	Ok(())
 }
 
-fn load(path: &Path, style: Option<&str>) -> Result<(Story, Cast)> {
+/// Loads a script and its world's cast, furnished with the world's book matter and narrator.
+fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story, Cast)> {
 	let mut story = Story::load(path)?;
 
 	if let Some(name) = style {
@@ -419,8 +460,9 @@ fn load(path: &Path, style: Option<&str>) -> Result<(Story, Cast)> {
 		story.meta.style = Some(name.to_owned());
 	}
 
-	let cast_path = Cast::locate(&story.dir, story.meta.cast.as_deref())?;
-	let cast = Cast::load(&cast_path)?;
+	let world = World::for_story(&story, world)?;
+	world.furnish(&mut story);
+	let cast = world.cast()?;
 
 	Ok((story, cast))
 }
@@ -506,26 +548,27 @@ fn print(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	Ok(())
 }
 
-fn sheets(cast_path: &Path, moods: Option<&str>, out: &Path, style: Style) -> Result<()> {
+fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Result<()> {
 	let started = Instant::now();
-	let cast = Cast::load(cast_path)?;
+	let cast = world.cast()?;
+	let slug = fables::story::slugify(&world.name);
 	std::fs::create_dir_all(out).with_context(|| format!("could not create {}", out.display()))?;
 
-	let path = out.join("kerfuffle-cast.png");
+	let path = out.join(format!("{slug}-cast.png"));
 	std::fs::write(
 		&path,
-		raster::png(&press::sheets::cast_sheet(&cast, style)?)?,
+		raster::png(&press::sheets::cast_sheet(&cast, &world.name, style)?)?,
 	)?;
 	done(&path, started);
 
-	let path = out.join("kerfuffle-places.png");
+	let path = out.join(format!("{slug}-places.png"));
 	std::fs::write(&path, raster::png(&press::sheets::places_sheet(style)?)?)?;
 	done(&path, started);
 
 	if let Some(id) = moods {
 		let member = cast
 			.member(id)
-			.with_context(|| format!("`{id}` is not in {}", cast_path.display()))?;
+			.with_context(|| format!("`{id}` is not in {}", world.cast_file().display()))?;
 		let sheet = press::sheets::mood_sheet(member, style)?
 			.with_context(|| format!("`{id}` is not a person, so has no moods"))?;
 		let path = out.join(format!("{id}-moods.png"));

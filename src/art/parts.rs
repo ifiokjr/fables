@@ -2,8 +2,8 @@
 //!
 //! An authored puppet is built from parts (a head, hair, a torso, hands, a chart of mouths),
 //! and every part is a drawing that can be opened and changed in Figma, Inkscape or Affinity.
-//! Parts every character starts with live in `world/puppets/kit.svg`. A character's own file,
-//! such as `world/puppets/stinky.svg`, adds their parts and can redraw any kit part.
+//! Parts every character starts with live in a world's `puppets/kit.svg`. A character's own file,
+//! such as `worlds/kerfuffle/puppets/stinky.svg`, adds their parts and can redraw any kit part.
 //!
 //! The rules for a part file:
 //!

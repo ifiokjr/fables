@@ -60,17 +60,18 @@ pub struct Meta {
 	/// The cast member drawn on the cover.
 	#[serde(default)]
 	pub star: Option<String>,
-	/// Path to the cast file, relative to the script. Defaults to the nearest `world/cast.toml`.
+	/// The world the book belongs to, as a folder relative to the script. Defaults to the
+	/// nearest `world.toml` above the script (see [`world`](crate::world)).
 	#[serde(default)]
-	pub cast: Option<String>,
+	pub world: Option<String>,
 	#[serde(default)]
 	pub cover: Option<CoverSpec>,
 	/// The art style: riso, tv, bold, cut-paper, crayon or storybook (default riso).
 	#[serde(default)]
 	pub style: Option<String>,
-	/// The narrator.
+	/// The narrator; without one, the world's narrator reads (see [`Story::narrator`]).
 	#[serde(default)]
-	pub voice: Voice,
+	pub voice: Option<Voice>,
 	#[serde(default)]
 	pub video: VideoOptions,
 }
@@ -224,9 +225,17 @@ pub struct Story {
 	pub dir: std::path::PathBuf,
 	/// File-name-safe identifier derived from the title.
 	pub slug: String,
+	/// The words its world writes into the front and back matter.
+	pub matter: crate::world::Matter,
 }
 
 impl Story {
+	/// Who reads the book aloud: the script's own `[voice]`, else the default voice.
+	pub fn narrator(&self) -> &Voice {
+		static DEFAULT: std::sync::LazyLock<Voice> = std::sync::LazyLock::new(Voice::default);
+		self.meta.voice.as_ref().unwrap_or(&DEFAULT)
+	}
+
 	/// The book's art style.
 	pub fn style(&self) -> Style {
 		self.meta
@@ -271,6 +280,7 @@ pub fn parse(source: &str) -> Result<Story> {
 		pages,
 		dir: std::path::PathBuf::new(),
 		slug,
+		matter: crate::world::Matter::default(),
 	})
 }
 

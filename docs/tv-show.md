@@ -13,7 +13,7 @@ Facts about providers were checked on 16 October 2026. Prices and policies chang
 
 | Piece | How it works |
 | --- | --- |
-| A voice per character | `[stinky.voice]` in `world/cast.toml`. Once set, a character sounds the same in every line of every book. |
+| A voice per character | `[stinky.voice]` in `worlds/kerfuffle/cast.toml`. Once set, a character sounds the same in every line of every book. |
 | Characters speak their own lines | With `[video] cast-voices = true` in a script, `"Brush your teeth!" said Mum.` is split. Mum's voice says the quote, the narrator says "said Mum.", and Mum's mouth only moves for her own words. |
 | Show mode | `[video] drop-tags = true` drops short tags like "said Mum." so scenes play like a cartoon, not a read-aloud. |
 | Emotion | The mood the script gives a character (`@stinky defiant`) becomes the line's delivery: an audio tag such as `[defiant]`, an acting instruction such as "say this defiantly, like a cheeky child refusing", or a change of pace. `**SHOUTED**` words are delivered as shouts. |
@@ -23,7 +23,7 @@ Facts about providers were checked on 16 October 2026. Prices and policies chang
 | Providers | `say` (macOS, offline), `command` (any TTS program: Piper, mlx-audio, a script), `elevenlabs`, `openai`. |
 
 ```toml
-# world/cast.toml
+# worlds/kerfuffle/cast.toml
 [stinky.voice]
 provider = "elevenlabs"
 id = "<voice id from your ElevenLabs library>"
@@ -38,7 +38,7 @@ style = "A warm, brisk British mum who is running out of patience."
 API keys are read from `ELEVENLABS_API_KEY` and `OPENAI_API_KEY`. Resolve them once for the whole batch with Monosecret:
 
 ```bash
-msr --reason "voice the Kerfuffle episodes" fables all stories/
+msr --reason "voice the Kerfuffle episodes" fables all worlds/kerfuffle
 ```
 
 A failed API call is reported once and never retried in a loop.
@@ -108,7 +108,7 @@ Human recordings drop straight into the pipeline as files once the `recorded` pr
 
 ## Keeping every character consistent
 
-1. **One voice per character, forever.** The voice lives in the cast file, never in a book. Commit `world/cast.toml`, and treat changing a voice id like recasting a role.
+1. **One voice per character, forever.** The voice lives in the cast file, never in a book. Commit `worlds/kerfuffle/cast.toml`, and treat changing a voice id like recasting a role.
 2. **Design once.** Use ElevenLabs Voice Design (describe the character, get a voice id), or audition offline with `say`/Qwen3 first. Write the `style` line like a casting note; it is sent as acting direction on every line.
 3. **Same mood, same delivery.** The mapping from mood to delivery is fixed in code (`src/video/voice.rs`), so "defiant" sounds the same in book 1 and book 9.
 4. **Pronunciation.** Spell tricky names phonetically in `>` video-only lines if a voice stumbles ("Mc-STINK-breath").
@@ -195,10 +195,10 @@ The real risk is the **"inauthentic content"** policy against mass-produced, tem
 The fast loop:
 
 ```bash
-fables new "Bogey McBogeyface" --star bogey     # a 12-beat recipe skeleton
-fables proofs stories/bogey-mcbogeyface/story.md   # iterate on words and staging (about 1 second)
-fables video stories/bogey-mcbogeyface/story.md --preview --format portrait
-fables all stories/                             # every book: ePub, print PDFs, both videos
+fables new "Bogey McBogeyface" --star bogey                        # a 12-beat recipe skeleton
+fables proofs worlds/kerfuffle/stories/bogey-mcbogeyface/story.md  # iterate on words and staging (about 1 second)
+fables video worlds/kerfuffle/stories/bogey-mcbogeyface/story.md --preview --format portrait
+fables all worlds/kerfuffle                                        # every book: ePub, print PDFs, both videos
 ```
 
 ## What comes next

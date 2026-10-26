@@ -1,7 +1,7 @@
 //! Model sheets for the kids redrawn after Stinky, plus a lineup to check their silhouettes and
 //! sizes together. Characters already wired in are drawn from their cast entries exactly as the
 //! books draw them; proposed ones are drawn from their part file with proposed colours, so they
-//! can be signed off before `world/cast.toml` changes.
+//! can be signed off before `worlds/kerfuffle/cast.toml` changes.
 
 use std::path::Path;
 use std::path::PathBuf;

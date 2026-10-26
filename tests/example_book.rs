@@ -16,11 +16,15 @@ use fables::video::frames::Renderer;
 use fables::video::voice::SAMPLE_RATE;
 use fables::video::voice::Speech;
 use fables::video::voice::Utterance;
+use fables::world::World;
 
 fn example() -> (Story, Cast) {
 	let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-	let story = Story::load(&root.join("stories/stinky-mcstinkbreath/story.md")).unwrap();
-	let cast = Cast::load(&Cast::locate(&story.dir, story.meta.cast.as_deref()).unwrap()).unwrap();
+	let mut story =
+		Story::load(&root.join("worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md")).unwrap();
+	let world = World::for_story(&story, None).unwrap();
+	world.furnish(&mut story);
+	let cast = world.cast().unwrap();
 
 	(story, cast)
 }

@@ -101,7 +101,7 @@ The stack continues from layer 8. Each layer is one reviewable branch and leaves
 
 | # | Layer | What it does | Done when |
 | --- | --- | --- | --- |
-| 9 | `refactor: worlds` | `worlds/kerfuffle/` with `world.toml`; `--world` and discovery; settings, palette and narrator per world. | The Kerfuffle book is byte-identical. A second, empty world renders a blank page. |
+| 9 | `refactor: worlds` | `worlds/kerfuffle/` with `world.toml`; `--world` and discovery; the narrator, the recipe and the book's front and back matter per world. Palette and settings follow in layers 10 and 14. | The Kerfuffle book is byte-identical. A second, empty world renders a blank page. |
 | 10 | `refactor(art): styles as data` | `styles/cartoon/` holds today's finish, proportions and kit; the puppet reads the style instead of constants. | Byte-identical book. `fables style check cartoon` passes. |
 | 11 | `feat: MCP server` | `fables mcp` with the world, style, character and render tools, and sheets returned as images. | An agent creates a character from a brief and iterates its sheet without touching files. |
 | 12 | `feat(styles): anime` | The anime finish, proportions, eyes and kit. A test world with one character designed through MCP. | That character's model sheet is signed off by Ifiok. |

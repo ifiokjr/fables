@@ -8,7 +8,7 @@ Write a children's picture book as one plain-text script, and get all of these f
 - **narrated, voice-acted videos** for YouTube (16:9) and for Shorts, TikTok and Reels (9:16). The characters do what the narrator says and can speak their own lines in their own voices, lip-synced.
 
 ```bash
-cargo run --release -- all stories/stinky-mcstinkbreath/story.md
+cargo run --release -- all worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
 ```
 
 ## Why it works this way
@@ -18,16 +18,46 @@ Every character is a **puppet drawn in code**, not a generated picture. That one
 - **Characters stay on-model.** Stinky looks the same on page 3, page 23, the cover, the back cover and frame 4,812 of the video. AI image tools still struggle with that.
 - **Stage directions are data.** `@stinky faint` is a still on the printed page and a bouncing pratfall in the video, from the same line of script.
 - **It's free, offline and repeatable.** There are no API keys and no per-image costs, and the same script always gives the same book.
-- **The world grows by editing text.** A new character is a new table in [`world/cast.toml`](world/cast.toml). A new book is a new `story.md`.
+- **The world grows by editing text.** A new character is a new table in [`worlds/kerfuffle/cast.toml`](worlds/kerfuffle/cast.toml). A new book is a new `story.md`, and a new series is a new world.
 - **It's cut-out animation, the TV technique.** Each character is built once from parts (head shapes, eyes with irises, a 9-shape mouth chart for lip-sync, tapered limbs, hands that point and make fists), the same way Toon Boom Harmony and Moho rigs work. Motion follows the classic principles: anticipation, follow-through, squash and stretch, walk cycles, parallax.
 
-The house style, setting and series rules live in the series bible, [`world/kerfuffle.md`](world/kerfuffle.md). Character voices, voice APIs and turning the books into a show are covered in [`docs/tv-show.md`](docs/tv-show.md).
+The house style, setting and series rules live in the series bible, [`worlds/kerfuffle/kerfuffle.md`](worlds/kerfuffle/kerfuffle.md). Character voices, voice APIs and turning the books into a show are covered in [`docs/tv-show.md`](docs/tv-show.md).
+
+## Worlds
+
+A world is a series: a folder with a `world.toml`, its cast, its puppets and its books. Kerfuffle is the first one.
+
+```text
+worlds/kerfuffle/
+  world.toml      the series' name, its narrator, and the words in every book's front and back matter
+  cast.toml       who lives there and what they look like
+  puppets/        authored puppets' part files
+  recipe.md       the 12-beat recipe `fables new` starts a book from
+  stories/        one folder per book, each with a story.md
+```
+
+Commands find a script's world by walking up to the nearest `world.toml`. Commands without a script, such as `sheets`, `rig`, `new` and `puppet`, use the world above the current folder, or the only world in `./worlds/`. `--world <folder>` picks one explicitly, and a script can name its own with `world = "…"` in its front matter, relative to the script.
+
+A world needs only a name to start:
+
+```toml
+name = "Kerfuffle"
+
+[narrator]                  # optional: who reads every book aloud, unless a script names its own [voice]
+name = "Daniel"
+rate = 158
+
+[book]                      # optional: the words in the front and back matter
+note = "Psst! Wormsley the worm is hiding on every page. Can you find him?"
+meet = ["Have you met the rest of **Kerfuffle**?"]
+draw = ["**Draw your own Kerfuffle folk!**"]
+```
 
 ## Commands
 
 | Command | What it makes |
 | --- | --- |
-| `fables new "<Title>" --star <id>` | A new book in `stories/<title>/story.md`, laid out as the 12-beat Kerfuffle recipe with the star already staged. |
+| `fables new "<Title>" --star <id>` | A new book in the world's `stories/<title>/story.md`, laid out from its `recipe.md` with the star already staged. |
 | `fables check <story>` | Validates the script and reports page and word counts. Errors give line numbers and list valid options. |
 | `fables proofs <story>` | `out/<book>/<style>/proofs/`: one PNG per page plus `contact-sheet.png`, in about a second. |
 | `fables ebook <story>` | `out/<book>/<style>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
@@ -39,7 +69,7 @@ The house style, setting and series rules live in the series bible, [`world/kerf
 | `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every art style, side by side. |
 | `fables rig <id>` | `out/rig/<style>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character) and a motion-test video. |
 
-Every command that takes `<story>` also takes a folder of books: `fables all stories/` builds every `story.md` under it.
+Every command that takes `<story>` also takes a folder of books or a world: `fables all worlds/kerfuffle` builds every `story.md` in it.
 Every command also takes `--style`, so any render can be in any style without editing the script:
 
 - `--style storybook` draws in one style;
@@ -72,10 +102,6 @@ moral = "Brush your teeth, morning and night."
 [cover]
 tint = "moss"
 pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
-
-[voice]
-name = "Daniel"
-rate = 158
 +++
 
 # bathroom night
@@ -118,7 +144,7 @@ rate = 158
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from `world/cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page, and `@camera zoom=… look=…` the framing.
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page, and `@camera zoom=… look=…` the framing.
 
 | Kind | Values |
 | --- | --- |
@@ -141,7 +167,7 @@ Teeth, stink and mint **carry over from page to page** until changed, so grotty 
 
 ### New characters
 
-Add a table to [`world/cast.toml`](world/cast.toml), built from puppet parts, then run `fables sheets` to see them:
+Add a table to the world's cast file, such as [`worlds/kerfuffle/cast.toml`](worlds/kerfuffle/cast.toml), built from puppet parts, then run `fables sheets` to see them:
 
 ```toml
 [grubby]
@@ -199,7 +225,7 @@ Run `fables rig <id>` for the rig sheet and motion test.
 
 ## Voices
 
-**The narrator** is the script's `[voice]` table. **Each character** can have their own `[id.voice]` table in the cast file. With `[video] cast-voices = true`, quoted dialogue is spoken by the character whose `talk` direction introduced it, in their voice, and the narrator reads the rest:
+**The narrator** is the world's `[narrator]` table, or the script's own `[voice]` table. **Each character** can have their own `[id.voice]` table in the cast file. With `[video] cast-voices = true`, quoted dialogue is spoken by the character whose `talk` direction introduced it, in their voice, and the narrator reads the rest:
 
 ```text
 @mum point cross talk
@@ -218,16 +244,16 @@ The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, an
 | `openai` | `name` (a built-in voice), optional `style`, `OPENAI_API_KEY` | `style` plus the mood as an acting instruction | estimated from the audio |
 
 ```toml
-[voice]                     # in the script: the narrator
+[narrator]                  # in world.toml: the narrator (or [voice] in a script, for one book)
 name = "Daniel"             # any voice from `say -v '?'`; Enhanced and Premium voices sound best
 rate = 158
 
-[stinky.voice]              # in world/cast.toml: Stinky, in every book
+[stinky.voice]              # in the world's cast.toml: Stinky, in every book
 provider = "elevenlabs"
 id = "<voice id>"
 ```
 
-Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Resolve keys with Monosecret once per batch: `msr --reason "voice the books" fables all stories/`.
+Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Resolve keys with Monosecret once per batch: `msr --reason "voice the books" fables all worlds/kerfuffle`.
 
 Sourcing voices, provider prices and policies, local models, human actors and keeping characters consistent are all in [`docs/tv-show.md`](docs/tv-show.md).
 
@@ -268,13 +294,12 @@ src/
   compose.rs      scene → positioned puppets (blendable for animation)
   text.rs         page text layout with real font metrics
   book.rs         page assembly: title, copyright, story, back matter, covers
+  world.rs        worlds: discovery, world.toml, the narrator and book matter
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, frame renderer, soundtrack, ffmpeg
-world/            series bible and cast
+worlds/           one folder per series: world.toml, bible, cast, puppets, recipe and books
 docs/             voices and turning the books into a show
-templates/        the 12-beat recipe used by `fables new`
-stories/          one folder per book
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```
 

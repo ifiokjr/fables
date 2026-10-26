@@ -2293,7 +2293,7 @@ mod tests {
 
 	fn stinky() -> Look {
 		let cast = crate::cast::Cast::load(
-			&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("world/cast.toml"),
+			&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/cast.toml"),
 		)
 		.unwrap();
 		let Ok(crate::cast::Kind::Figure(look)) = cast.resolve("stinky") else {
@@ -2349,7 +2349,8 @@ mod tests {
 
 	#[test]
 	fn every_puppet_file_draws_a_figure() {
-		let world = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("world/puppets");
+		let world =
+			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 
 		for name in ["stinky", "bogey", "grubby", "shouty", "fibby"] {
 			let puppet = Authored::load(&world.join(format!("{name}.svg")))
@@ -2366,7 +2367,8 @@ mod tests {
 
 	#[test]
 	fn only_hair_that_hangs_past_the_ears_covers_them() {
-		let world = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("world/puppets");
+		let world =
+			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 		let hair = |name: &str| {
 			Authored::load(&world.join(format!("{name}.svg")))
 				.unwrap()

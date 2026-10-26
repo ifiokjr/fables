@@ -15,10 +15,6 @@ setting = "plain"
 tint = "moss"
 pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
-[voice]
-name = "Daniel"
-rate = 158
-
 [video]
 # Characters speak their own quoted lines in their cast voices; the narrator reads the rest.
 cast-voices = true

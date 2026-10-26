@@ -1,8 +1,8 @@
-//! The cast file: who lives in Kerfuffle and what they look like.
+//! The cast file: who lives in a world and what they look like.
 //!
 //! Characters are data, not code. A new character for a new book is a new table in
-//! `world/cast.toml` built from the puppet's parts (hair styles, patterns, extras), so authors
-//! never need to touch Rust to grow the world.
+//! a world's `cast.toml`, built from the puppet's parts (hair styles, patterns, extras), so
+//! authors never need to touch Rust to grow the world.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -167,34 +167,6 @@ impl Cast {
 		}
 
 		Ok(Cast { members })
-	}
-
-	/// Finds the cast file for a story: an explicit path, or the nearest `world/cast.toml` above it.
-	pub fn locate(story_dir: &Path, explicit: Option<&str>) -> Result<PathBuf> {
-		if let Some(path) = explicit {
-			return Ok(story_dir.join(path));
-		}
-
-		let start = if story_dir.as_os_str().is_empty() {
-			Path::new(".")
-		} else {
-			story_dir
-		};
-		let start = start.canonicalize().unwrap_or_else(|_| start.to_path_buf());
-
-		for dir in start.ancestors() {
-			let candidate = dir.join("world").join("cast.toml");
-
-			if candidate.is_file() {
-				return Ok(candidate);
-			}
-		}
-
-		bail!(
-			"no cast file found: add `cast = \"path/to/cast.toml\"` to the front matter or create \
-			 world/cast.toml above {}",
-			start.display()
-		)
 	}
 
 	/// Resolves an actor id like `stinky`, `bird.a` or `flower.3` to how it is drawn.
@@ -432,8 +404,8 @@ colour = "#c9865a"
 	fn authored_grown_ups_stand_taller_than_kids() {
 		let cast = Cast::parse(
 			"[mum]\nname = \"Mum\"\nkind = \"grown-up\"\npuppet = \
-			 \"world/puppets/stinky.svg\"\n[kid]\nname = \"Kid\"\npuppet = \
-			 \"world/puppets/stinky.svg\"\n",
+			 \"worlds/kerfuffle/puppets/stinky.svg\"\n[kid]\nname = \"Kid\"\npuppet = \
+			 \"worlds/kerfuffle/puppets/stinky.svg\"\n",
 		)
 		.unwrap();
 		let height = |id: &str| {
@@ -450,7 +422,7 @@ colour = "#c9865a"
 		let dir = tempfile::tempdir().unwrap();
 		let path = dir.path().join("cast.toml");
 		std::fs::create_dir(dir.path().join("puppets")).unwrap();
-		let world = Path::new(env!("CARGO_MANIFEST_DIR")).join("world/puppets");
+		let world = Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 
 		for file in ["kit.svg", "stinky.svg"] {
 			std::fs::copy(world.join(file), dir.path().join("puppets").join(file)).unwrap();

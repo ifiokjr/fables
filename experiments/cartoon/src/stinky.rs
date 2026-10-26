@@ -23,7 +23,7 @@ use fables::cast::Kind;
 pub const THREE_QUARTER: f32 = 0.35;
 
 pub fn cast_file() -> PathBuf {
-	PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../world/cast.toml")
+	PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../worlds/kerfuffle/cast.toml")
 }
 
 /// Loads the cast and checks Stinky is drawn by an authored puppet, before anything is drawn.

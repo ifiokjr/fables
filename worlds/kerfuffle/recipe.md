@@ -14,17 +14,13 @@ setting = "plain"
 tint = "sunflower"
 pose = "x=0.5 grin wave"
 
-[voice]
-name = "Daniel"
-rate = 158
-
 [video]
 cast-voices = true
 +++
 
 // The Kerfuffle recipe: twelve beats, each a page or two. Replace every [bracketed] line with
 // the story, keep the directions that fit, and run `fables proofs` to see it. The series bible
-// (world/kerfuffle.md) explains each beat.
+// (kerfuffle.md, beside this recipe) explains each beat.
 
 // 1. The town: same opening line in every book, with cameos showing their habits.
 # town

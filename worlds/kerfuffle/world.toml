@@ -1,0 +1,20 @@
+# Kerfuffle: the town where whatever you do shows on the outside. The series bible is
+# kerfuffle.md, the cast is cast.toml, and every book lives in stories/.
+name = "Kerfuffle"
+
+# Who reads every Tale from Kerfuffle aloud. A script can name its own `[voice]` instead.
+[narrator]
+name = "Daniel"
+rate = 158
+
+# The words in every Tale's front and back matter.
+[book]
+note = "Psst! Wormsley the worm is hiding on every page. Can you find him?"
+meet = [
+	"Have you met the rest of **Kerfuffle**?",
+	"In Kerfuffle, whatever you do shows on the outside.",
+]
+draw = [
+	"**Draw your own Kerfuffle folk!**",
+	"What do they always do? What does it make happen? And what would everyone call them?",
+]

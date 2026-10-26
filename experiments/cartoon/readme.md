@@ -1,6 +1,6 @@
 # Cartoon experiment
 
-Where Stinky's authored cut-out puppet began. His parts now live in `world/puppets/` and the drawing in `fables::art::puppet`, so this crate only arranges him (through the same `FigureState` the books use) for review sheets, one park setting, a composed page and a short film.
+Where Stinky's authored cut-out puppet began. His parts now live in `worlds/kerfuffle/puppets/` and the drawing in `fables::art::puppet`, so this crate only arranges him (through the same `FigureState` the books use) for review sheets, one park setting, a composed page and a short film.
 
 ```bash
 devenv shell -- cargo run --release --manifest-path experiments/cartoon/Cargo.toml

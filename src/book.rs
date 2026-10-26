@@ -89,7 +89,7 @@ pub fn assemble(story: &Story, cast: &Cast) -> Result<Vec<BookPage>> {
 
 	// Short books are padded to KDP's minimum: one activity page, then plain endpapers.
 	if pages.len() < MIN_PAGES || pages.len() % 2 == 1 {
-		pages.push(drawing_page(pages.len()));
+		pages.push(drawing_page(story, pages.len()));
 	}
 
 	while pages.len() < MIN_PAGES || pages.len() % 2 == 1 {
@@ -450,7 +450,9 @@ fn copyright_page(story: &Story) -> BookPage {
 		paragraphs.push(format!("*{dedication}*"));
 	}
 
-	paragraphs.push("Psst! Wormsley the worm is hiding on every page. Can you find him?".into());
+	if let Some(note) = &story.matter.note {
+		paragraphs.push(note.clone());
+	}
 
 	let small = lines.iter().map(String::as_str).collect::<Vec<_>>();
 	let fine_print = text::layout(
@@ -539,11 +541,9 @@ fn meet_the_folk(story: &Story, cast: &Cast) -> Result<BookPage> {
 		captions.push((x, member.name.clone()));
 	}
 
+	let heading: Vec<&str> = story.matter.meet.iter().map(String::as_str).collect();
 	let heading = text::layout(
-		&[
-			"Have you met the rest of **Kerfuffle**?",
-			"In Kerfuffle, whatever you do shows on the outside.",
-		],
+		&heading,
 		Area {
 			x: SAFE + 120.0,
 			y: SAFE + 70.0,
@@ -600,13 +600,11 @@ fn blank_page(number: usize) -> BookPage {
 	}
 }
 
-fn drawing_page(number: usize) -> BookPage {
+fn drawing_page(story: &Story, number: usize) -> BookPage {
 	let scene = plain_scene(palette::PAPER);
+	let prompt: Vec<&str> = story.matter.draw.iter().map(String::as_str).collect();
 	let prompt = text::layout(
-		&[
-			"**Draw your own Kerfuffle folk!**",
-			"What do they always do? What does it make happen? And what would everyone call them?",
-		],
+		&prompt,
 		Area {
 			x: SAFE + 120.0,
 			y: SAFE + 60.0,

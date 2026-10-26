@@ -45,8 +45,8 @@ const CARD_W: f32 = 900.0;
 const CARD_H: f32 = 1300.0;
 const COLUMNS: usize = 4;
 
-/// Every cast member on a card with their name, birth name and habit.
-pub fn cast_sheet(cast: &Cast, style: Style) -> Result<Pixmap> {
+/// Every cast member of the world called `world` on a card with their name, birth name and habit.
+pub fn cast_sheet(cast: &Cast, world: &str, style: Style) -> Result<Pixmap> {
 	let members: Vec<&Member> = cast.members.values().collect();
 	let rows = members.len().div_ceil(COLUMNS);
 	let width = CARD_W * COLUMNS as f32;
@@ -54,8 +54,9 @@ pub fn cast_sheet(cast: &Cast, style: Style) -> Result<Pixmap> {
 	let mut svg = Svg::styled(style);
 	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::INK);
 
+	let heading = format!("**The folk of {world}**");
 	let heading = text::layout(
-		&["**The folk of Kerfuffle**"],
+		&[heading.as_str()],
 		Area {
 			x: 0.0,
 			y: 50.0,

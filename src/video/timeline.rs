@@ -126,7 +126,7 @@ pub fn build(
 	rehearsals: &[Rehearsal],
 	speak: impl Speaker,
 ) -> Result<Timeline> {
-	story.meta.voice.validate()?;
+	story.narrator().validate()?;
 
 	let mut builder = Builder {
 		story,
@@ -168,7 +168,7 @@ impl<S: Speaker> Builder<'_, S> {
 	}
 
 	fn narrator(&self) -> &Voice {
-		&self.story.meta.voice
+		self.story.narrator()
 	}
 
 	/// Speaks `text` and returns the speech index and its length.
