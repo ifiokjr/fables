@@ -136,6 +136,7 @@ A style becomes four dials: construction (the bodies, features, eyes and kit it 
 | 20 | `feat(styles): clear line` | Lines of equal importance with no hatching; flat vivid colours with at most one tone; cartoony characters on more realistic settings with depth from layered planes; restrained, eased motion. | One test character designed through MCP. |
 | 21 | `feat(styles): mid-century` | Angular, geometric shapes; a limited flat palette; broken or absent lines, with colour slightly off-register; abstract settings; held poses that snap between keys, on twos and threes. | One test character designed through MCP. |
 | 22 | `feat(styles): chibi` | A body about 2 to 2.5 heads tall with mitten hands, big or dot eyes, and bouncy motion. Mostly proportions and kit. | One test character designed through MCP. |
+| 23 | `feat(styles): manga family` | Manga in full anime colour, and the two big manga looks: `manga-colour`, `manga-shojo` (delicate, sparkly) and `manga-shonen` (bold, punchy), on the anime kit and template. Asked for by Ifiok: "Manga should include anime style with full colour and different styles". | Hana drawn in every manga style. |
 
 The dials:
 
@@ -176,3 +177,4 @@ Every layer landed on 26 October 2026, as stacked local branches. Layer 14 went 
   - A fuller repaint to the [authored-puppet rules](authored-puppets.md#settings) (vanishing points, framing foregrounds) is now an art task on these files, not a code change.
 - **Voices (15).** Cartesia and Hume sit behind `Voice`. They are unit-tested on their request shapes but have not been run against the live services.
 - **Dials and packs (17 to 22).** The dials (line, shade, motion) landed with every existing render byte-identical. Manga moved onto them, and rubber hose (with a 1930s variant), clear line (with a `clear` page skin), mid-century and chibi followed, each with a test character designed through MCP: Clem, Zia, Otto and Mochi. All their sheets await sign-off.
+- **Manga family (23).** Manga now comes in full colour too: `manga-colour`, `manga-shojo` and `manga-shonen` sit beside the black-and-white `manga`, all pure data on the dials. Hana (whose anime palette is full colour; Ren's is grey by design) is drawn in each, awaiting sign-off.

@@ -45,7 +45,7 @@ use super::puppet::Proportions;
 pub const DEFAULT: &str = "cartoon";
 
 /// The packs compiled into fables: name, `style.toml`, `kit.svg` and `template.svg`.
-const BUILT_IN: [(&str, &str, &str, &str); 8] = [
+const BUILT_IN: [(&str, &str, &str, &str); 11] = [
 	(
 		"cartoon",
 		include_str!("../../styles/cartoon/style.toml"),
@@ -58,10 +58,28 @@ const BUILT_IN: [(&str, &str, &str, &str); 8] = [
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
 	),
-	// Manga is anime anatomy in ink and screentone, so it shares the anime kit and template.
+	// Every manga style is anime anatomy, so they all share the anime kit and template.
 	(
 		"manga",
 		include_str!("../../styles/manga/style.toml"),
+		include_str!("../../styles/anime/kit.svg"),
+		include_str!("../../styles/anime/template.svg"),
+	),
+	(
+		"manga-colour",
+		include_str!("../../styles/manga-colour/style.toml"),
+		include_str!("../../styles/anime/kit.svg"),
+		include_str!("../../styles/anime/template.svg"),
+	),
+	(
+		"manga-shojo",
+		include_str!("../../styles/manga-shojo/style.toml"),
+		include_str!("../../styles/anime/kit.svg"),
+		include_str!("../../styles/anime/template.svg"),
+	),
+	(
+		"manga-shonen",
+		include_str!("../../styles/manga-shonen/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
 	),

@@ -1,0 +1,137 @@
+# Colour manga: anime anatomy and full anime colour, inked the way manga is. A heavy brushed
+# outer line, hard two-tone cel shading with a light rim, and manga's limited animation: threes
+# with modulation, speed lines on fast moves, flapping mouths. It shares the anime kit and
+# template, so a character can move between anime and every manga style.
+name = "manga-colour"
+description = "Colour manga: full anime colour with a heavy brushed manga line, hard two-tone cel shading and a rim light, speed lines and limited animation on threes."
+
+[finish]
+line = 4.2
+detail = 1.8
+light = [-15.0, -12.0]
+cel-shadow = "#bfa9d6"  # a cool lilac, multiplied twice for the deeper tone
+far = "#4e4a78"
+
+[line]
+stroke = "brush"
+
+[shade]
+tones = 2               # two hard tones of cel shadow
+highlight = "rim"
+fill = "flat"
+
+# Limited animation: drawings held for three frames, moves dropping to ones so they stay
+# crisp, long holds, speed lines behind fast moves, and mouths that flap rather than sync.
+[motion]
+timing = "threes"
+modulate = true
+anticipation = 0.6
+overshoot = 0.5
+smears = 0.9
+blink-every = 4.5
+mouth-rate = 8.0
+
+[face]
+turn = 0.42
+radius = 112.0
+slide = 128.0
+
+# Eyes sit low and wide, at the middle of the face; the brows ride high above them.
+[features]
+eye = [37.0, 6.0]
+brow = [39.0, -44.0]
+brow-weight = 1.4
+blush = [52.0, 44.0]
+blush-size = [15.0, 4.5]
+nose = [2.0, 40.0]
+nose-scale = 1.0
+nose-shine = false
+mouth = [0.0, 70.0]
+mouth-scale = 0.55
+
+# Big eyes: a tall coloured iris shaded darker at the top, a pupil, a dark rim, one large and
+# one small highlight, a heavy upper lash line with a flick, and a short lower lash.
+[eyes]
+size = [25.0, 31.0]
+iris = [17.0, 25.0]
+iris-dark = 0.55
+iris-band = 0.5
+pupil = [7.5, 11.0]
+rim = 2.4
+shines = [[-6.5, -10.0, 6.5], [6.0, 9.0, 2.8]]
+gaze = [7.0, 5.0]
+lash = 10.0
+lower-lid = 2.2
+lower-lash = 2.2
+lashes = true
+
+[inks]
+blush = "#f07a8a"
+eye = "#ffffff"
+maw = "#7a2a3a"
+tongue = "#ef8a92"
+sock = "#ffffff"
+sole = "#e9e4ee"
+clean-teeth = "#ffffff"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#ffffff"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#3b4b8c"
+badge = "#f2c24b"
+satchel = "#5a4a6c"
+apron = "#ffffff"
+mud = "#6e4a30"
+
+# A kid (eleven or twelve): about 900 tall, the head a quarter of it, long legs.
+[bodies.kid]
+neck = [0.0, -690.0]
+head-above-neck = 100.0
+shoulder-y = -650.0
+shoulder-half = 50.0
+shoulders-turned = [-44.0, 34.0]
+hips-turned = [-16.0, 22.0]
+hem-y = -400.0
+body-radius = 58.0
+leg-width = [32.0, 19.0]
+forearm-width = [19.0, 13.0]
+hand-scale = 1.4
+reach = [88.0, 224.0]
+
+[bodies.kid.limbs]
+pelvis-y = -420.0
+ankle-y = -24.0
+hip-spread = 22.0
+thigh = 200.0
+shin = 200.0
+upper-arm = 140.0
+forearm = 128.0
+
+# A grown-up: about 1100 tall, the head a fifth of it.
+[bodies.grown-up]
+neck = [0.0, -900.0]
+head-above-neck = 100.0
+shoulder-y = -858.0
+shoulder-half = 62.0
+shoulders-turned = [-56.0, 44.0]
+hips-turned = [-20.0, 28.0]
+hem-y = -540.0
+body-radius = 70.0
+leg-width = [36.0, 22.0]
+forearm-width = [21.0, 14.0]
+hand-scale = 1.6
+reach = [112.0, 290.0]
+
+[bodies.grown-up.limbs]
+pelvis-y = -560.0
+ankle-y = -24.0
+hip-spread = 28.0
+thigh = 270.0
+shin = 270.0
+upper-arm = 180.0
+forearm = 166.0
