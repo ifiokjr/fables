@@ -18,6 +18,7 @@ use fables::art::figure::Mood;
 use fables::art::figure::Pose;
 use fables::art::figure::Prop;
 use fables::art::figure::Viseme;
+use fables::art::pack::StylePack;
 use fables::art::puppet::Authored;
 use fables::art::rig::Stance;
 use fables::cast::Cast;
@@ -203,7 +204,7 @@ fn authored(cast: &Cast, sheet: &Sheet) -> Result<Look> {
 			let file = stinky::cast_file()
 				.with_file_name("puppets")
 				.join(format!("{id}.svg"));
-			look.puppet = Some(Authored::load(&file)?);
+			look.puppet = Some(Authored::load(&file, &StylePack::default_pack())?);
 			let [skin, hair, top, trim, bottom, shoes, eyes] = colours.map(Color);
 			(look.skin, look.hair_color, look.top, look.trim) = (skin, hair, top, trim);
 			(look.bottom, look.shoes, look.eyes) = (bottom, shoes, eyes);
@@ -232,7 +233,7 @@ fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
 
 /// One model sheet per redrawn kid, plus a lineup with Stinky.
 pub fn cast_preview(out: &Path) -> Result<Vec<PathBuf>> {
-	let cast = Cast::load(&stinky::cast_file())?;
+	let cast = Cast::load(&stinky::cast_file(), &StylePack::default_pack())?;
 	let mut written = Vec::new();
 	let mut lineup = vec![("Stinky", stinky::look().clone())];
 

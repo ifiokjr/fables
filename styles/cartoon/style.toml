@@ -1,0 +1,95 @@
+# The cartoon style: Kerfuffle's look. Round, friendly kids with big heads, a thick brushed
+# outline that swells on the shadow side, and one tone of cel shadow multiplied over the fills.
+# Every number here is in figure units (a kid is about 500 tall, the soles at y = 0).
+name = "cartoon"
+description = "Round, friendly picture-book characters: big heads, brushed outlines that swell on the shadow side, one tone of cel shadow."
+
+[finish]
+line = 4.2              # silhouettes, pressed harder like an inker's outside edge
+detail = 2.6            # interior lines: brows, creases, stripes
+light = [-9.0, -8.0]    # light from the top left, so shadows fall bottom right
+cel-shadow = "#d4bed8"  # multiplied over every fill: a cool lilac keeps every colour's shadow in one family
+far = "#6e5a7e"         # what limbs on the far side of the body are pushed back towards
+
+# The face is drawn front-on and wrapped round a cylinder as the head turns.
+[face]
+turn = 0.42             # how far the three-quarter view turns the face, in radians
+radius = 114.0          # the face cylinder's radius, in head units
+slide = 133.0           # how far the face slides sideways per unit of facing
+
+# Shared inks for the kit's parts. A character's own colours come from the cast.
+[inks]
+blush = "#ee6a5a"
+eye = "#fffcf5"
+maw = "#6a2034"
+tongue = "#e9747c"
+sock = "#f8f1e4"
+sole = "#f2e4c8"
+clean-teeth = "#fff5da"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#fffcf5"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#c9473d"
+badge = "#f2c24b"
+satchel = "#a85a3c"
+apron = "#f8f1e4"
+mud = "#6e4a30"
+
+# Bodies, by build. Kids and grown-ups share the head (head units are the same size), so a
+# grown-up is a kid-sized head on a taller body with longer limbs. A character's own torso,
+# sleeves, legwear and shoes are drawn to their body; the kit's hands are scaled to it.
+
+# A kid: about 500 tall with the hair, the head over 40% of it. Short arms on a narrow body:
+# hands hang close to the sides and still reach above the head.
+[bodies.kid]
+neck = [0.0, -226.0]          # where the head hinges on the torso
+head-above-neck = 96.0
+shoulder-y = -206.0
+shoulder-half = 40.0          # half the shoulders' width, front-on
+shoulders-turned = [-36.0, 27.0]  # near and far shoulder x, three-quarters turned
+hips-turned = [-14.0, 20.0]
+hem-y = -125.0                # the top of the ribbed hem at the bottom of the top
+body-radius = 64.0            # the cylinder the torso wraps round as it turns
+leg-width = [15.5, 12.5]      # at the hip and the ankle
+forearm-width = [12.0, 10.5]  # at the elbow and the wrist
+hand-scale = 1.08             # how much bigger than the kit's drawings hands are
+reach = [50.0, 80.0]          # the units pose reaches are measured in, across and up or down
+
+[bodies.kid.limbs]
+pelvis-y = -126.0
+ankle-y = -24.0
+hip-spread = 21.0
+thigh = 52.0
+shin = 52.0
+upper-arm = 50.0
+forearm = 46.0
+
+# A grown-up: about 800 tall, the same head on a long body and long legs.
+[bodies.grown-up]
+neck = [0.0, -560.0]
+head-above-neck = 96.0
+shoulder-y = -536.0
+shoulder-half = 56.0
+shoulders-turned = [-50.0, 38.0]
+hips-turned = [-20.0, 28.0]
+hem-y = -330.0
+body-radius = 82.0
+leg-width = [24.0, 17.0]
+forearm-width = [16.0, 13.0]
+hand-scale = 1.32
+reach = [64.0, 175.0]
+
+[bodies.grown-up.limbs]
+pelvis-y = -330.0
+ankle-y = -24.0
+hip-spread = 30.0
+thigh = 156.0
+shin = 156.0
+upper-arm = 118.0
+forearm = 108.0

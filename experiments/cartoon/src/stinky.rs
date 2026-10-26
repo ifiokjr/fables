@@ -14,6 +14,7 @@ use fables::art::figure::FigureState;
 use fables::art::figure::Look;
 use fables::art::figure::Mood;
 use fables::art::figure::Pose;
+use fables::art::pack::StylePack;
 use fables::art::rig::Stance;
 use fables::cast::Cast;
 use fables::cast::Kind;
@@ -28,7 +29,7 @@ pub fn cast_file() -> PathBuf {
 
 /// Loads the cast and checks Stinky is drawn by an authored puppet, before anything is drawn.
 pub fn check() -> Result<()> {
-	let cast = Cast::load(&cast_file())?;
+	let cast = Cast::load(&cast_file(), &StylePack::default_pack())?;
 	let Kind::Figure(look) = cast.resolve("stinky")? else {
 		bail!("stinky is a person in the cast file");
 	};
@@ -42,7 +43,8 @@ pub fn check() -> Result<()> {
 pub fn look() -> &'static Look {
 	static LOOK: OnceLock<Look> = OnceLock::new();
 	LOOK.get_or_init(|| {
-		let cast = Cast::load(&cast_file()).unwrap_or_else(|error| panic!("{error:#}"));
+		let cast = Cast::load(&cast_file(), &StylePack::default_pack())
+			.unwrap_or_else(|error| panic!("{error:#}"));
 
 		match cast.resolve("stinky") {
 			Ok(Kind::Figure(look)) => look,

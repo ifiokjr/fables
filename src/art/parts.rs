@@ -2,8 +2,10 @@
 //!
 //! An authored puppet is built from parts (a head, hair, a torso, hands, a chart of mouths),
 //! and every part is a drawing that can be opened and changed in Figma, Inkscape or Affinity.
-//! Parts every character starts with live in a world's `puppets/kit.svg`. A character's own file,
-//! such as `worlds/kerfuffle/puppets/stinky.svg`, adds their parts and can redraw any kit part.
+//! Parts every character starts with live in their style's kit (`styles/cartoon/kit.svg`, see
+//! [`pack`](super::pack)), and a world can add its own props in `puppets/kit.svg`. A
+//! character's own file, such as `worlds/kerfuffle/puppets/stinky.svg`, adds their parts and
+//! can redraw any kit part.
 //!
 //! The rules for a part file:
 //!
@@ -34,7 +36,7 @@ use super::escape;
 use super::pt;
 use super::shape::Shape;
 
-/// The file of parts every character starts from, beside the characters' own files.
+/// The file of kit parts: in a style pack, and optionally in a world's `puppets/` for its props.
 pub const KIT_FILE: &str = "kit.svg";
 
 /// The coordinate space a part is drawn in. Parts are placed by the rig, so each kind of part
@@ -311,16 +313,17 @@ impl Parts {
 		Self::parse(&source).with_context(|| format!("in {}", path.display()))
 	}
 
-	/// Reads a character's part file over the shared kit beside it (if there is one).
-	pub fn load_puppet(path: &Path) -> Result<Parts> {
+	/// Reads a character's part file over their style's `kit`, with a world's own kit (a
+	/// `kit.svg` beside the file, for the world's props) in between.
+	pub fn load_puppet(path: &Path, kit: &Parts) -> Result<Parts> {
 		let own = Self::load(path)?;
-		let kit = path.with_file_name(KIT_FILE);
+		let world_kit = path.with_file_name(KIT_FILE);
 
-		if kit == path || !kit.is_file() {
-			return Ok(own);
+		if world_kit == path || !world_kit.is_file() {
+			return Ok(own.over(kit.clone()));
 		}
 
-		Ok(own.over(Self::load(&kit)?))
+		Ok(own.over(Self::load(&world_kit)?.over(kit.clone())))
 	}
 
 	/// Reads parts from SVG text.

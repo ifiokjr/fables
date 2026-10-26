@@ -2,6 +2,9 @@
 # kerfuffle.md, the cast is cast.toml, and every book lives in stories/.
 name = "Kerfuffle"
 
+# How its folk are drawn: a style pack from styles/.
+style = "cartoon"
+
 # Who reads every Tale from Kerfuffle aloud. A script can name its own `[voice]` instead.
 [narrator]
 name = "Daniel"

@@ -29,7 +29,7 @@ A world is a series: a folder with a `world.toml`, its cast, its puppets and its
 
 ```text
 worlds/kerfuffle/
-  world.toml      the series' name, its narrator, and the words in every book's front and back matter
+  world.toml      the series' name, its drawing style, its narrator, and the words in every book's front and back matter
   cast.toml       who lives there and what they look like
   puppets/        authored puppets' part files
   recipe.md       the 12-beat recipe `fables new` starts a book from
@@ -42,6 +42,7 @@ A world needs only a name to start:
 
 ```toml
 name = "Kerfuffle"
+style = "cartoon"           # optional: the drawing style its folk are drawn in (default cartoon)
 
 [narrator]                  # optional: who reads every book aloud, unless a script names its own [voice]
 name = "Daniel"
@@ -52,6 +53,25 @@ note = "Psst! Wormsley the worm is hiding on every page. Can you find him?"
 meet = ["Have you met the rest of **Kerfuffle**?"]
 draw = ["**Draw your own Kerfuffle folk!**"]
 ```
+
+## Drawing styles
+
+A drawing style is a folder in `styles/` that authored puppets are drawn with, so a new look is data rather than code:
+
+```text
+styles/cartoon/
+  style.toml      the finish (line weights, light, cel shadow), the face cylinder, the kit's inks, and the bodies (kid, grown-up)
+  kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
+  template.svg    a plain character's own parts, which `fables puppet template` starts new characters from
+```
+
+| Command | What it does |
+| --- | --- |
+| `fables style list` | The drawing styles, with a sentence on each look. |
+| `fables style check <name>` | Checks the template over the kit draws a whole figure, and every body stands up. |
+| `fables style sheet <name>` | `out/styles/<name>-parts.png`: every kit and template part. |
+
+The built-in styles are compiled into fables, so a world anywhere on disk can name one. They are separate from the `--style` skins (riso, tv, bold…), which restyle the older parametric puppet and the settings.
 
 ## Commands
 
@@ -295,10 +315,12 @@ src/
   text.rs         page text layout with real font metrics
   book.rs         page assembly: title, copyright, story, back matter, covers
   world.rs        worlds: discovery, world.toml, the narrator and book matter
+  art/pack.rs     drawing styles: style.toml, kit and template
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, frame renderer, soundtrack, ffmpeg
 worlds/           one folder per series: world.toml, bible, cast, puppets, recipe and books
+styles/           drawing styles: style.toml, kit and template per look
 docs/             voices and turning the books into a show
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```

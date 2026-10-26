@@ -9,6 +9,7 @@
 pub mod critters;
 pub mod figure;
 pub mod fx;
+pub mod pack;
 pub mod palette;
 pub mod parts;
 pub mod puppet;
@@ -40,6 +41,14 @@ pub const STAGE: f32 = 2400.0;
 pub struct Pt {
 	pub x: f32,
 	pub y: f32,
+}
+
+/// Points in data files are `[x, y]`.
+impl<'de> serde::Deserialize<'de> for Pt {
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Pt, D::Error> {
+		let [x, y] = <[f32; 2]>::deserialize(deserializer)?;
+		Ok(pt(x, y))
+	}
 }
 
 /// Shorthand constructor for [`Pt`].
@@ -567,10 +576,10 @@ impl Svg {
 		self.plain_stroke(path, line, weight, 1.0);
 	}
 
-	/// One tone of cel shadow, multiplied over whatever is already painted inside `shape`
-	/// (stripes included). The lit area is the shape itself moved towards the light, so the
-	/// shadow hugs the far edge and follows the part's own curvature.
-	pub fn cel_shade(&mut self, shape: &Shape, light: Pt) {
+	/// One tone of cel shadow in `shadow`, multiplied over whatever is already painted inside
+	/// `shape` (stripes included). The lit area is the shape itself moved towards the light, so
+	/// the shadow hugs the far edge and follows the part's own curvature.
+	pub fn cel_shade(&mut self, shape: &Shape, light: Pt, shadow: Color) {
 		let path = shape.path();
 		let lit = Path::new().append(&path).append(&shape.shift(light).path());
 		let id = self.next_id("cel");
@@ -585,7 +594,7 @@ impl Svg {
 			self.body,
 			r#"<g clip-path="url(#{id})" style="mix-blend-mode:multiply"><path d="{}" fill="{}" fill-rule="evenodd"/></g>"#,
 			lit.as_str(),
-			palette::CEL_SHADOW
+			shadow
 		);
 	}
 
@@ -595,18 +604,19 @@ impl Svg {
 		self.brush_line(path, line, weight);
 	}
 
-	/// A part in the brushed finish with one tone of shadow away from `light`.
+	/// A part in the brushed finish with one tone of `shadow` away from `light`.
 	pub fn brushed_shaded(
 		&mut self,
 		shape: &Shape,
 		fill: Color,
 		light: Pt,
+		shadow: Color,
 		line: Color,
 		weight: f32,
 	) {
 		let path = shape.path();
 		self.brush_fill(&path, fill, line, weight);
-		self.cel_shade(shape, light);
+		self.cel_shade(shape, light, shadow);
 		self.brush_line(&path, line, weight);
 	}
 
@@ -889,6 +899,7 @@ mod tests {
 			&square,
 			Color(0xFF_FF_FF),
 			pt(-20.0, -20.0),
+			Color(0xD4_BE_D8),
 			palette::INK,
 			4.0,
 		);

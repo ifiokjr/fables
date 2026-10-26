@@ -19,6 +19,7 @@ use super::Svg;
 use super::fx;
 use super::lerp;
 use super::noise;
+use super::pack::StylePack;
 use super::palette;
 use super::pt;
 use super::puppet;
@@ -135,8 +136,8 @@ impl Look {
 	/// rather than the build, so a character can bring its own measurements (as authored
 	/// puppets will) without touching the stage, video or sheets.
 	pub fn frame(&self) -> Frame {
-		if self.puppet.is_some() {
-			Frame::authored(puppet::Proportions::of(self.build))
+		if let Some(authored) = &self.puppet {
+			Frame::authored(&authored.style, self.build)
 		} else {
 			Frame::of(self.build)
 		}
@@ -574,7 +575,8 @@ impl Frame {
 	}
 
 	/// The measurements an authored puppet is drawn to (see [`puppet`](super::puppet)).
-	pub fn authored(body: &puppet::Proportions) -> Frame {
+	pub fn authored(style: &StylePack, build: Build) -> Frame {
+		let body = style.body(build);
 		let limbs = body.limbs;
 
 		Frame {
@@ -595,7 +597,7 @@ impl Frame {
 			// so the fingers, not the wrist, are on it.
 			nose: pt(0.0, 50.0),
 			mouth: pt(0.0, 58.0),
-			face_slide: puppet::FACE_SLIDE,
+			face_slide: style.face.slide,
 			reach: body.reach,
 		}
 	}
@@ -737,8 +739,8 @@ impl FigureState {
 /// The soft contact shadow under a standing figure, drawn at the ground point. `lift` is how far
 /// the figure is off the ground (hops), which shrinks and fades the shadow.
 pub fn shadow(svg: &mut Svg, look: &Look, state: &FigureState, lift: f32) {
-	if look.puppet.is_some() {
-		puppet::shadow(svg, look, state, lift);
+	if let Some(authored) = &look.puppet {
+		puppet::shadow(svg, look, authored, state, lift);
 		return;
 	}
 
@@ -853,8 +855,8 @@ pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
 
 /// Draws the rig's bones and joints over a figure, for model sheets and rig checks.
 pub fn draw_skeleton(svg: &mut Svg, look: &Look, state: &FigureState) {
-	if look.puppet.is_some() {
-		puppet::draw_bones(svg, look, state);
+	if let Some(authored) = &look.puppet {
+		puppet::draw_bones(svg, look, authored, state);
 		return;
 	}
 

@@ -8,6 +8,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use fables::art::pack::StylePack;
 use fables::art::parts;
 use fables::art::parts::Level;
 use fables::art::parts::Parts;
@@ -110,6 +111,12 @@ enum Command {
 		#[command(subcommand)]
 		action: PuppetAction,
 	},
+	/// Work with drawing styles (`styles/`): the finish, bodies and kit puppets are drawn with.
+	#[command(name = "style")]
+	DrawingStyle {
+		#[command(subcommand)]
+		action: StyleAction,
+	},
 	/// Narrate and animate the story as MP4 videos.
 	Video {
 		story: PathBuf,
@@ -138,18 +145,34 @@ enum PuppetAction {
 		/// The cast id to check; leave it out to check every member with a puppet.
 		id: Option<String>,
 	},
-	/// Start a cast member's part file from another puppet's drawings, to redraw part by part.
+	/// Start a cast member's part file to redraw part by part, from the style's template or
+	/// another puppet's drawings.
 	Template {
 		/// The cast id the file is for, e.g. bogey.
 		id: String,
-		/// The puppet whose drawings to start from.
-		#[arg(long, default_value = "stinky")]
-		from: String,
+		/// The puppet whose drawings to start from (default: the style's template).
+		#[arg(long)]
+		from: Option<String>,
 	},
 	/// Render every part of a puppet: each turning part front-on, half-turned and three-quarters.
 	Sheet {
 		/// The cast id, e.g. stinky.
 		id: String,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+	},
+}
+
+#[derive(Subcommand)]
+enum StyleAction {
+	/// List the drawing styles.
+	List,
+	/// Check a style: its template over its kit must draw a whole figure, and its bodies must
+	/// stand up.
+	Check { name: String },
+	/// Render a style's parts: the kit and the template character.
+	Sheet {
+		name: String,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -216,18 +239,32 @@ fn run(cli: Cli) -> Result<()> {
 		}
 		Command::Puppet { action } => {
 			match action {
-				PuppetAction::Check { id } => puppet_check(id.as_deref(), &world()?.cast_file()),
+				PuppetAction::Check { id } => puppet_check(&world()?, id.as_deref()),
 				PuppetAction::Template { id, from } => {
-					puppet_template(&id, &from, &world()?.cast_file())
+					puppet_template(&world()?, &id, from.as_deref())
 				}
-				PuppetAction::Sheet { id, out } => puppet_sheet(&id, &world()?.cast_file(), &out),
+				PuppetAction::Sheet { id, out } => puppet_sheet(&world()?, &id, &out),
+			}
+		}
+		Command::DrawingStyle { action } => {
+			match action {
+				StyleAction::List => {
+					for name in StylePack::names() {
+						let pack = StylePack::named(name)?;
+						println!("{name}: {}", pack.description);
+					}
+
+					Ok(())
+				}
+				StyleAction::Check { name } => style_check(&name),
+				StyleAction::Sheet { name, out } => style_sheet(&name, &out),
 			}
 		}
 		Command::Rig { id, out } => {
-			let cast = world()?.cast_file();
+			let world = world()?;
 
 			for style in sheet_styles(&choices) {
-				rig(&id, &cast, &out.join("rig").join(style.name.name()), style)?;
+				rig(&world, &id, &out.join("rig").join(style.name.name()), style)?;
 			}
 
 			Ok(())
@@ -579,12 +616,12 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	Ok(())
 }
 
-fn rig(id: &str, cast_path: &Path, out: &Path, style: Style) -> Result<()> {
+fn rig(world: &World, id: &str, out: &Path, style: Style) -> Result<()> {
 	let started = Instant::now();
-	let cast = Cast::load(cast_path)?;
+	let cast = world.cast()?;
 	let member = cast
 		.member(id)
-		.with_context(|| format!("`{id}` is not in {}", cast_path.display()))?;
+		.with_context(|| format!("`{id}` is not in {}", world.cast_file().display()))?;
 	let fables::cast::Kind::Figure(look) = &member.kind else {
 		anyhow::bail!("`{id}` is not a person, so has no rig");
 	};
@@ -606,7 +643,8 @@ fn rig(id: &str, cast_path: &Path, out: &Path, style: Style) -> Result<()> {
 }
 
 /// A cast member's puppet part file, or an explanation of why they have none.
-fn puppet_file(cast: &Cast, id: &str, cast_path: &Path) -> Result<PathBuf> {
+fn puppet_file(world: &World, cast: &Cast, id: &str) -> Result<PathBuf> {
+	let cast_path = world.cast_file();
 	let member = cast
 		.member(id)
 		.with_context(|| format!("`{id}` is not in {}", cast_path.display()))?;
@@ -636,8 +674,9 @@ fn puppet_file(cast: &Cast, id: &str, cast_path: &Path) -> Result<PathBuf> {
 	}
 }
 
-fn puppet_check(id: Option<&str>, cast_path: &Path) -> Result<()> {
-	let cast = Cast::load(cast_path)?;
+fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
+	let cast = world.cast()?;
+	let style = world.style()?;
 	let ids: Vec<&str> = match id {
 		Some(id) => vec![id],
 		None => {
@@ -653,11 +692,15 @@ fn puppet_check(id: Option<&str>, cast_path: &Path) -> Result<()> {
 	let mut errors = 0;
 
 	for id in ids {
-		let path = puppet_file(&cast, id, cast_path)?;
-		let parts = Parts::load_puppet(&path)?;
+		let path = puppet_file(world, &cast, id)?;
+		let parts = Parts::load_puppet(&path, &style.kit)?;
 		let findings = parts.check();
 		let count = parts.iter().count();
-		println!("{id}: {count} parts from {} and its kit", path.display());
+		println!(
+			"{id}: {count} parts from {} over the {} kit",
+			path.display(),
+			style.name
+		);
 
 		for finding in &findings {
 			println!("  {finding}");
@@ -673,13 +716,14 @@ fn puppet_check(id: Option<&str>, cast_path: &Path) -> Result<()> {
 	Ok(())
 }
 
-fn puppet_template(id: &str, from: &str, cast_path: &Path) -> Result<()> {
-	let cast = Cast::load(cast_path)?;
+/// Starts a part file from another puppet's own parts, or from the style's template.
+fn puppet_template(world: &World, id: &str, from: Option<&str>) -> Result<()> {
+	let cast = world.cast()?;
+	let style = world.style()?;
 	let member = cast
 		.member(id)
-		.with_context(|| format!("`{id}` is not in {}", cast_path.display()))?;
-	let source = puppet_file(&cast, from, cast_path)?;
-	let target = source.with_file_name(format!("{id}.svg"));
+		.with_context(|| format!("`{id}` is not in {}", world.cast_file().display()))?;
+	let target = world.dir.join("puppets").join(format!("{id}.svg"));
 	anyhow::ensure!(
 		!target.exists(),
 		"{} already exists; edit it, or move it aside to start again",
@@ -687,28 +731,43 @@ fn puppet_template(id: &str, from: &str, cast_path: &Path) -> Result<()> {
 	);
 
 	// Only the character's own parts: the kit is shared, and redrawing a kit part is a choice.
-	let parts = Parts::load(&source)?;
+	let (parts, origin) = match from {
+		Some(from) => {
+			(
+				Parts::load(&puppet_file(world, &cast, from)?)?,
+				from.to_owned(),
+			)
+		}
+		None => {
+			(
+				style.template.clone(),
+				format!("the {} template", style.name),
+			)
+		}
+	};
 	let drawings: Vec<(&str, &fables::art::shape::Shape)> = parts.iter().collect();
 	let title = format!(
-		"{}: own parts (started from {from}; redraw each one)",
+		"{}: own parts (started from {origin}; redraw each one)",
 		member.name
 	);
+	std::fs::create_dir_all(world.dir.join("puppets"))
+		.with_context(|| format!("could not create {}", world.dir.join("puppets").display()))?;
 	std::fs::write(&target, parts::write(&title, &drawings))
 		.with_context(|| format!("could not write {}", target.display()))?;
 	println!(
 		"✓ wrote {}\n  Add `puppet = \"puppets/{id}.svg\"` to [{id}] in {}, redraw the parts, and \
 		 run `fables puppet check {id}`.",
 		target.display(),
-		cast_path.display()
+		world.cast_file().display()
 	);
 	Ok(())
 }
 
-fn puppet_sheet(id: &str, cast_path: &Path, out: &Path) -> Result<()> {
+fn puppet_sheet(world: &World, id: &str, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	let cast = Cast::load(cast_path)?;
-	let path = puppet_file(&cast, id, cast_path)?;
-	let parts = Parts::load_puppet(&path)?;
+	let cast = world.cast()?;
+	let path = puppet_file(world, &cast, id)?;
+	let parts = Parts::load_puppet(&path, &world.style()?.kit)?;
 	let name = cast.member(id).map_or(id, |member| member.name.as_str());
 	let dir = out.join("puppets");
 	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
@@ -718,6 +777,46 @@ fn puppet_sheet(id: &str, cast_path: &Path, out: &Path) -> Result<()> {
 		raster::png(&press::sheets::parts_sheet(
 			&format!("{name}: parts"),
 			&parts,
+		)?)?,
+	)?;
+	done(&sheet, started);
+	Ok(())
+}
+
+fn style_check(name: &str) -> Result<()> {
+	let pack = StylePack::named(name)?;
+	let findings = pack.check();
+	let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
+	println!(
+		"{name}: {} kit parts, {} template parts, bodies: {}",
+		pack.kit.iter().count(),
+		pack.template.iter().count(),
+		bodies.join(", ")
+	);
+
+	for finding in &findings {
+		println!("  {finding}");
+	}
+
+	let errors = findings
+		.iter()
+		.filter(|finding| finding.level == Level::Error)
+		.count();
+	anyhow::ensure!(errors == 0, "{errors} errors in the {name} style");
+	Ok(())
+}
+
+fn style_sheet(name: &str, out: &Path) -> Result<()> {
+	let started = Instant::now();
+	let pack = StylePack::named(name)?;
+	let dir = out.join("styles");
+	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
+	let sheet = dir.join(format!("{name}-parts.png"));
+	std::fs::write(
+		&sheet,
+		raster::png(&press::sheets::parts_sheet(
+			&format!("The {name} style: kit and template"),
+			&pack.template_figure(),
 		)?)?,
 	)?;
 	done(&sheet, started);

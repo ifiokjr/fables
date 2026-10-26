@@ -2,8 +2,9 @@
 //!
 //! The parametric puppet in [`figure`](super::figure) builds every character from one template.
 //! An authored puppet is drawn the way TV cut-out characters are: every part (head, hair,
-//! torso, sleeves, hands, the mouth chart) is a drawing from the character's part file and the
-//! shared kit (see [`parts`](super::parts)), hung on the bones of [`rig`](super::rig).
+//! torso, sleeves, hands, the mouth chart) is a drawing from the character's part file and
+//! their style's kit (see [`parts`](super::parts)), hung on the bones of [`rig`](super::rig).
+//! The style pack ([`pack`](super::pack)) sets the finish, the face cylinder and the bodies.
 //!
 //! It takes the same [`FigureState`] as the parametric puppet, so stories, staging, lip-sync
 //! and video drive it unchanged:
@@ -43,6 +44,10 @@ use super::figure::Viseme;
 use super::fx;
 use super::lerp;
 use super::noise;
+use super::pack::Face as FaceRules;
+use super::pack::Finish;
+use super::pack::KitInks;
+use super::pack::StylePack;
 use super::palette;
 use super::parts::Level;
 use super::parts::Parts;
@@ -60,7 +65,8 @@ use super::shape::Shape;
 /// A character's own torso, sleeves, legwear and shoes are drawn to their body; the kit's
 /// hands are scaled to it. The kit's body extras (satchel, apron) are drawn for a kid, so a
 /// grown-up who wears one redraws it in their own file.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Proportions {
 	/// Bone lengths, in figure units with the soles at y = 0.
 	pub limbs: Limbs,
@@ -86,94 +92,23 @@ pub struct Proportions {
 	pub reach: Pt,
 }
 
-/// A kid: about 500 units tall with the hair, the head over 40% of it.
-pub const KID: Proportions = Proportions {
-	limbs: Limbs {
-		pelvis_y: -126.0,
-		ankle_y: -24.0,
-		hip_spread: 21.0,
-		thigh: 52.0,
-		shin: 52.0,
-		upper_arm: 50.0,
-		forearm: 46.0,
-	},
-	neck: pt(0.0, -226.0),
-	head_above_neck: 96.0,
-	shoulder_y: -206.0,
-	shoulder_half: 40.0,
-	shoulders_turned: (-36.0, 27.0),
-	hips_turned: (-14.0, 20.0),
-	hem_y: -125.0,
-	body_radius: 64.0,
-	leg_width: (15.5, 12.5),
-	forearm_width: (12.0, 10.5),
-	hand_scale: 1.08,
-	// Short arms on a narrow body: hands hang close to the sides and still reach above the
-	// head.
-	reach: pt(50.0, 80.0),
-};
-
-/// A grown-up: about 800 units tall, the same head on a long body and long legs.
-pub const GROWN_UP: Proportions = Proportions {
-	limbs: Limbs {
-		pelvis_y: -330.0,
-		ankle_y: -24.0,
-		hip_spread: 30.0,
-		thigh: 156.0,
-		shin: 156.0,
-		upper_arm: 118.0,
-		forearm: 108.0,
-	},
-	neck: pt(0.0, -560.0),
-	head_above_neck: 96.0,
-	shoulder_y: -536.0,
-	shoulder_half: 56.0,
-	shoulders_turned: (-50.0, 38.0),
-	hips_turned: (-20.0, 28.0),
-	hem_y: -330.0,
-	body_radius: 82.0,
-	leg_width: (24.0, 17.0),
-	forearm_width: (16.0, 13.0),
-	hand_scale: 1.32,
-	reach: pt(64.0, 175.0),
-};
-
-impl Proportions {
-	pub fn of(build: Build) -> &'static Proportions {
-		match build {
-			Build::Kid => &KID,
-			Build::Grownup => &GROWN_UP,
-		}
-	}
-}
-
-/// How far a three-quarter view turns the face, and the radius of the face cylinder.
-const FACE_TURN: f32 = 0.42;
-const FACE_RADIUS: f32 = 114.0;
 /// The `facing` the stage gives a figure turned towards the middle of the page. An authored
 /// puppet shows its full three-quarter drawing there.
 const STAGED_FACING: f32 = 0.35;
-/// How far the face slides sideways per unit of `facing`, so hands that reach for the nose or
-/// mouth find them.
-pub const FACE_SLIDE: f32 = 133.0;
-/// Line weights in figure units. Silhouettes are heavier than interior detail, the way an
-/// inker presses harder on the outside edge.
-const LINE: f32 = 4.2;
-const DETAIL: f32 = 2.6;
-/// Light comes from the top left; shadows fall bottom right.
-const LIGHT: Pt = pt(-9.0, -8.0);
 
-/// A character's authored puppet: their part file over the shared kit, read and checked once.
+/// A character's authored puppet: their part file over their style's kit, read and checked once.
 #[derive(Clone, Debug)]
 pub struct Authored {
 	pub file: PathBuf,
 	pub parts: Arc<Parts>,
+	/// The style the parts are drawn in: its finish, face rules and bodies.
+	pub style: Arc<StylePack>,
 }
 
 impl Authored {
-	/// Reads a part file and its kit, refusing parts that can't draw a figure.
-	pub fn load(file: &FilePath) -> Result<Authored> {
-		let parts = Parts::load_puppet(file)?;
+	/// Reads a part file over its style's kit, refusing parts that can't draw a figure.
+	pub fn load(file: &FilePath, style: &Arc<StylePack>) -> Result<Authored> {
+		let parts = Parts::load_puppet(file, &style.kit)?;
 		let errors: Vec<String> = parts
 			.check()
 			.iter()
@@ -190,6 +125,7 @@ impl Authored {
 		Ok(Authored {
 			file: file.to_path_buf(),
 			parts: Arc::new(parts),
+			style: Arc::clone(style),
 		})
 	}
 
@@ -221,9 +157,12 @@ impl Authored {
 	}
 }
 
-/// A character's inks: their cast colours plus the kit's shared ones.
+/// A character's inks: their cast colours, plus their style's finish and the kit's shared inks.
 #[derive(Clone, Copy, Debug)]
 struct Inks {
+	finish: Finish,
+	face: FaceRules,
+	kit: KitInks,
 	line: Color,
 	skin: Color,
 	nose: Color,
@@ -239,48 +178,29 @@ struct Inks {
 	teeth: Color,
 }
 
-const BLUSH: Color = Color(0xEE_6A_5A);
-const EYE: Color = Color(0xFF_FC_F5);
-const MAW: Color = Color(0x6A_20_34);
-const TONGUE: Color = Color(0xE9_74_7C);
-const SOCK: Color = Color(0xF8_F1_E4);
-const SOLE: Color = Color(0xF2_E4_C8);
-const CLEAN_TEETH: Color = Color(0xFF_F5_DA);
-const JAM: Color = Color(0xB8_32_3A);
-const CREAM: Color = Color(0xF6_EA_CF);
-const BRUSH: Color = Color(0x4F_B3_A9);
-const BRISTLES: Color = Color(0xFF_FC_F5);
-const PASTE: Color = Color(0x9B_E3_CF);
-const KRAFT: Color = Color(0xC9_9A_6B);
-const STRING: Color = Color(0xC8_4A_3D);
-const LENS: Color = Color(0xE8_F4_F8);
-const BOGEY: Color = Color(0x8D_BF_4A);
-const CAP: Color = Color(0xC9_47_3D);
-const BADGE: Color = Color(0xF2_C2_4B);
-const SATCHEL: Color = Color(0xA8_5A_3C);
-const APRON: Color = Color(0xF8_F1_E4);
-const MUD: Color = Color(0x6E_4A_30);
-
 /// Cheeks: a warm blush on warm skin. Pink over teal or blue skin turns grey (they are
 /// opposite colours), so cool skin gets a soft plum shading instead.
-fn blush(skin: Color) -> Color {
+fn blush(skin: Color, warm: Color) -> Color {
 	let (r, _, b) = skin.rgb();
 
 	if r >= b {
-		BLUSH
+		warm
 	} else {
 		skin.mix(Color(0x8E_4A_7A), 0.35)
 	}
 }
 
 impl Inks {
-	fn of(look: &Look, teeth: Teeth) -> Inks {
+	fn of(look: &Look, style: &StylePack, teeth: Teeth) -> Inks {
 		Inks {
+			finish: style.finish,
+			face: style.face,
+			kit: style.inks,
 			line: Color(0x2B_1D_2E),
 			skin: look.skin,
 			nose: look.skin.mix(Color(0xE0_60_50), 0.18),
 			freckle: look.skin.mix(Color(0x8A_3A_20), 0.45),
-			blush: blush(look.skin),
+			blush: blush(look.skin, style.inks.blush),
 			hair: look.hair_color,
 			hair_light: look.hair_color.lighten(0.25),
 			top: look.top,
@@ -289,7 +209,7 @@ impl Inks {
 			shoes: look.shoes,
 			pupil: look.eyes.mix(Color(0x1E_12_18), 0.8),
 			teeth: match teeth {
-				Teeth::Clean | Teeth::Sparkly => CLEAN_TEETH,
+				Teeth::Clean | Teeth::Sparkly => style.inks.clean_teeth,
 				Teeth::Grotty => palette::GROT,
 			},
 		}
@@ -574,7 +494,10 @@ struct Posed {
 }
 
 impl Posed {
-	fn of(state: &FigureState, body: &Proportions) -> Posed {
+	fn of(state: &FigureState, style: &StylePack, build: Build) -> Posed {
+		let body = style.body(build);
+		// Hands are drawn for a kid; a grown-up's bigger hands need more room.
+		let hand_size = body.hand_scale / style.body(Build::Kid).hand_scale;
 		let shoulder_y = body.shoulder_y;
 		let turn = (state.facing / STAGED_FACING).clamp(-1.0, 1.0);
 		let mirrored = turn < 0.0;
@@ -597,7 +520,7 @@ impl Posed {
 		// Turned three-quarters, a far hand held up and out (a wave) would cross the face, so
 		// the near hand does it instead, the way an animator would stage it. A hand reaching for
 		// the face (brushing, holding the nose) is meant to be there and stays.
-		let face_x = t * FACE_SLIDE * STAGED_FACING;
+		let face_x = t * style.face.slide * STAGED_FACING;
 		let swapped = t > 0.5
 			&& far.y < shoulder_y - 30.0
 			&& far.x > 70.0
@@ -612,8 +535,8 @@ impl Posed {
 		let far_arm_behind =
 			t > 0.5 && far.x > -10.0 && (far.y > shoulder_y || (far.x - face_x).abs() >= 30.0);
 		(near, far) = (
-			clear_of_head(near, -1.0, face_x, shoulder_y, body.hand_scale),
-			clear_of_head(far, 1.0, face_x, shoulder_y, body.hand_scale),
+			clear_of_head(near, -1.0, face_x, shoulder_y, hand_size),
+			clear_of_head(far, 1.0, face_x, shoulder_y, hand_size),
 		);
 		let (near_foot, far_foot) = if mirrored {
 			(state.legs.feet.1, state.legs.feet.0)
@@ -684,10 +607,10 @@ impl Posed {
 /// A hand held up beside the head (a wave, a cheer) moves out past it, so it isn't mistaken for
 /// a hand scratching an ear. Hands meant for the face (nose, mouth), which sit near the face's
 /// middle at `face_x`, stay put. Bigger hands need more room.
-fn clear_of_head(target: Pt, side: f32, face_x: f32, shoulder_y: f32, hand_scale: f32) -> Pt {
+fn clear_of_head(target: Pt, side: f32, face_x: f32, shoulder_y: f32, hand_size: f32) -> Pt {
 	let out = target.x * side;
 	let at_face = (target.x - face_x).abs() < 30.0;
-	let clear = 115.0 * hand_scale / KID.hand_scale;
+	let clear = 115.0 * hand_size;
 
 	if target.y < shoulder_y - 30.0 && !at_face && (45.0..clear).contains(&out) {
 		pt(side * clear, target.y + 40.0)
@@ -823,10 +746,10 @@ fn figure_transform(look: &Look, posed: &Posed, state: &FigureState, head_r: f32
 /// Draws an authored figure with its soles at the current origin.
 pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
 	let frame = look.frame();
-	let body = Proportions::of(look.build);
-	let posed = Posed::of(state, body);
+	let body = puppet.style.body(look.build);
+	let posed = Posed::of(state, &puppet.style, look.build);
 	let solved = Solved::new(&posed, body);
-	let inks = Inks::of(look, state.teeth);
+	let inks = Inks::of(look, &puppet.style, state.teeth);
 	let t = solved.t;
 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
@@ -836,7 +759,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	let far_arm_behind = posed.far_arm_behind && !far_holds;
 
 	// What each hand holds, and where the mouth is (a toothbrush near it is brushing).
-	let mouth = mouth_on_body(&solved, &posed);
+	let mouth = mouth_on_body(&solved, &posed, inks.face);
 	let held = |side: f32| {
 		posed
 			.prop
@@ -846,7 +769,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 					prop,
 					mouth,
 					time: state.time,
-					scale: body.hand_scale / KID.hand_scale,
+					scale: body.hand_scale / puppet.style.body(Build::Kid).hand_scale,
 				}
 			})
 	};
@@ -898,9 +821,10 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 }
 
 /// A soft contact shadow under the feet, so the figure stands on the ground.
-pub fn shadow(svg: &mut Svg, look: &Look, state: &FigureState, lift: f32) {
+pub fn shadow(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState, lift: f32) {
 	let fade = (1.0 - lift / 120.0).clamp(0.35, 1.0);
-	let size = Proportions::of(look.build).limbs.hip_spread / KID.limbs.hip_spread;
+	let size = puppet.style.body(look.build).limbs.hip_spread
+		/ puppet.style.body(Build::Kid).limbs.hip_spread;
 	let turn = (state.facing / STAGED_FACING).clamp(-1.0, 1.0);
 	let spread = 1.0 + state.lie * 1.8;
 	svg.fill_alpha(
@@ -915,10 +839,10 @@ pub fn shadow(svg: &mut Svg, look: &Look, state: &FigureState, lift: f32) {
 }
 
 /// Draws the rig's bones over an authored figure, for rig checks.
-pub fn draw_bones(svg: &mut Svg, look: &Look, state: &FigureState) {
+pub fn draw_bones(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
 	let frame = look.frame();
-	let body = Proportions::of(look.build);
-	let posed = Posed::of(state, body);
+	let body = puppet.style.body(look.build);
+	let posed = Posed::of(state, &puppet.style, look.build);
 	let solved = Solved::new(&posed, body);
 	let pelvis = solved.torso(solved.pivot);
 	let chest = solved.torso(pt(0.0, body.shoulder_y));
@@ -994,17 +918,13 @@ fn capsule(len: f32, w0: f32, w1: f32) -> Shape {
 }
 
 /// Pushes a colour back for limbs on the far side of the body.
-fn far(color: Color, is_far: bool) -> Color {
-	if is_far {
-		color.mix(Color(0x6E_5A_7E), 0.16)
-	} else {
-		color
-	}
+fn far(color: Color, is_far: bool, tint: Color) -> Color {
+	if is_far { color.mix(tint, 0.16) } else { color }
 }
 
 /// The cylinder warp that turns flat front-on drawings round a body of `radius`.
-fn wrap(p: Pt, t: f32, radius: f32) -> Pt {
-	let angle = (p.x / radius).clamp(-1.0, 1.0).asin() + t * FACE_TURN;
+fn wrap(p: Pt, t: f32, radius: f32, turn: f32) -> Pt {
+	let angle = (p.x / radius).clamp(-1.0, 1.0).asin() + t * turn;
 	pt(radius * angle.clamp(-FRAC_PI_2, FRAC_PI_2).sin(), p.y)
 }
 
@@ -1028,7 +948,14 @@ fn draw_leg(
 		solved.body.leg_width.0,
 		solved.body.leg_width.1,
 	);
-	svg.brushed_shaded(&leg, far(inks.skin, is_far), LIGHT, ink, LINE);
+	svg.brushed_shaded(
+		&leg,
+		far(inks.skin, is_far, inks.finish.far),
+		inks.finish.light,
+		inks.finish.cel_shadow,
+		ink,
+		inks.finish.line,
+	);
 
 	// Socks, unless trousers come down over them.
 	let trouser = puppet.part("legwear-shin", t);
@@ -1036,14 +963,21 @@ fn draw_leg(
 	if trouser.is_none() {
 		let angle = begin_bone(svg, knee, ankle);
 		let sock = capsule(18.0, 15.5, 15.0).shift(pt(0.0, shin - 16.0));
-		svg.brushed_shaded(&sock, far(SOCK, is_far), LIGHT.rotate(-angle), ink, LINE);
+		svg.brushed_shaded(
+			&sock,
+			far(inks.kit.sock, is_far, inks.finish.far),
+			inks.finish.light.rotate(-angle),
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
 		svg.begin_clip(&sock.path());
 		svg.fill(
 			&Path::rect(-12.0, shin - 14.0, 24.0, 4.5),
-			far(inks.top, is_far),
+			far(inks.top, is_far, inks.finish.far),
 		);
 		svg.end();
-		svg.brush_line(&sock.path(), ink, LINE);
+		svg.brush_line(&sock.path(), ink, inks.finish.line);
 		svg.end();
 	}
 
@@ -1064,25 +998,37 @@ fn draw_leg(
 			ankle.y,
 			if mirror { -1 } else { 1 }
 		));
-		svg.brush_fill(&shoe.path(), far(inks.shoes, is_far), ink, LINE);
-		svg.cel_shade(&shoe, pt(-6.0, -5.0));
+		svg.brush_fill(
+			&shoe.path(),
+			far(inks.shoes, is_far, inks.finish.far),
+			ink,
+			inks.finish.line,
+		);
+		svg.cel_shade(&shoe, pt(-6.0, -5.0), inks.finish.cel_shadow);
 		svg.begin_clip(&shoe.path());
 		// The sole runs under the whole shoe, however big it is drawn.
 		let (lo, hi) = shoe.bounds();
 		let (heel, toe) = ((lo.x - 2.0).min(-30.0), (hi.x + 2.0).max(50.0));
-		svg.fill(&Path::rect(heel, 17.0, toe - heel, 12.0), far(SOLE, is_far));
+		svg.fill(
+			&Path::rect(heel, 17.0, toe - heel, 12.0),
+			far(inks.kit.sole, is_far, inks.finish.far),
+		);
 		svg.brush_line(
 			&Path::new().move_to(pt(heel, 17.0)).line_to(pt(toe, 17.0)),
 			ink,
-			DETAIL,
+			inks.finish.detail,
 		);
 		svg.end();
 
 		if let Some(lace) = puppet.view("shoe-lace", three_quarter) {
-			svg.brush_line(&lace.path(), far(SOLE, is_far), 3.4);
+			svg.brush_line(
+				&lace.path(),
+				far(inks.kit.sole, is_far, inks.finish.far),
+				3.4,
+			);
 		}
 
-		svg.brush_line(&shoe.path(), ink, LINE);
+		svg.brush_line(&shoe.path(), ink, inks.finish.line);
 		svg.end();
 	}
 
@@ -1091,14 +1037,19 @@ fn draw_leg(
 		let angle = begin_bone(svg, knee, ankle);
 		svg.brushed_shaded(
 			&trouser,
-			far(inks.bottom, is_far),
-			LIGHT.rotate(-angle),
+			far(inks.bottom, is_far, inks.finish.far),
+			inks.finish.light.rotate(-angle),
+			inks.finish.cel_shadow,
 			ink,
-			LINE,
+			inks.finish.line,
 		);
 
 		if let Some(cuff) = puppet.part("legwear-shin-cuff", t) {
-			svg.brush_line(&cuff.path(), far(inks.bottom, is_far).darken(0.25), DETAIL);
+			svg.brush_line(
+				&cuff.path(),
+				far(inks.bottom, is_far, inks.finish.far).darken(0.25),
+				inks.finish.detail,
+			);
 		}
 
 		svg.end();
@@ -1109,14 +1060,19 @@ fn draw_leg(
 		let angle = begin_bone(svg, hip, knee);
 		svg.brushed_shaded(
 			&cover,
-			far(inks.bottom, is_far),
-			LIGHT.rotate(-angle),
+			far(inks.bottom, is_far, inks.finish.far),
+			inks.finish.light.rotate(-angle),
+			inks.finish.cel_shadow,
 			ink,
-			LINE,
+			inks.finish.line,
 		);
 
 		if let Some(hem) = puppet.part("legwear-leg-hem", t) {
-			svg.brush_line(&hem.path(), far(inks.bottom, is_far).darken(0.25), DETAIL);
+			svg.brush_line(
+				&hem.path(),
+				far(inks.bottom, is_far, inks.finish.far).darken(0.25),
+				inks.finish.detail,
+			);
 		}
 
 		svg.end();
@@ -1125,21 +1081,32 @@ fn draw_leg(
 
 fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32) {
 	let ink = inks.line;
-	let proportions = Proportions::of(look.build);
+	let proportions = puppet.style.body(look.build);
 	let (neck_y, hem_y) = (proportions.neck.y, proportions.hem_y);
 	// Patterns are laid across a little more than the body, and clipped to it.
 	let half = proportions.body_radius * 1.25;
-	let body = |p: Pt| wrap(p, t, proportions.body_radius);
+	let body = |p: Pt| wrap(p, t, proportions.body_radius, inks.face.turn);
 	let legwear = puppet.required("legwear", t);
-	svg.brushed_shaded(&legwear, inks.bottom, LIGHT, ink, LINE);
+	svg.brushed_shaded(
+		&legwear,
+		inks.bottom,
+		inks.finish.light,
+		inks.finish.cel_shadow,
+		ink,
+		inks.finish.line,
+	);
 
 	if let Some(waist) = puppet.part("legwear-waist", t) {
-		svg.brush_line(&waist.map(body).path(), inks.bottom.darken(0.25), DETAIL);
+		svg.brush_line(
+			&waist.map(body).path(),
+			inks.bottom.darken(0.25),
+			inks.finish.detail,
+		);
 	}
 
 	let torso = puppet.required("torso", t);
 	let path = torso.path();
-	svg.brush_fill(&path, inks.top, ink, LINE * 1.1);
+	svg.brush_fill(&path, inks.top, ink, inks.finish.line * 1.1);
 	svg.begin_clip(&path);
 
 	// Patterns wrap round the body with it: stripes are bands, dots and stars repeat the kit's
@@ -1169,7 +1136,7 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32
 			.required("pattern-star", t)
 			.shift(pt(0.0, neck_y + 50.0));
 		let star = star.map(body);
-		svg.brushed(&star.path(), inks.stripe, ink, DETAIL);
+		svg.brushed(&star.path(), inks.stripe, ink, inks.finish.detail);
 	}
 
 	if look.pattern == Pattern::Stripes {
@@ -1209,44 +1176,77 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32
 	// An apron over the top, inside its outline so the shadow falls across both.
 	if look.has(Extra::Apron) {
 		if let Some(apron) = puppet.part("apron", t) {
-			svg.brushed(&apron.path(), APRON, ink, DETAIL);
+			svg.brushed(&apron.path(), inks.kit.apron, ink, inks.finish.detail);
 		}
 
 		if let Some(pocket) = puppet.part("apron-pocket", t) {
-			svg.brushed(&pocket.map(body).path(), APRON.darken(0.06), ink, DETAIL);
+			svg.brushed(
+				&pocket.map(body).path(),
+				inks.kit.apron.darken(0.06),
+				ink,
+				inks.finish.detail,
+			);
 		}
 	}
 
 	svg.end();
-	svg.cel_shade(&torso, LIGHT);
+	svg.cel_shade(&torso, inks.finish.light, inks.finish.cel_shadow);
 
 	if let Some(hem) = puppet.part("torso-hem", t) {
-		svg.brush_line(&hem.map(body).path(), ink, DETAIL);
+		svg.brush_line(&hem.map(body).path(), ink, inks.finish.detail);
 	}
 
-	svg.brush_line(&path, ink, LINE * 1.1);
+	svg.brush_line(&path, ink, inks.finish.line * 1.1);
 
 	// The neck, then the collar over it.
 	let neck = capsule(30.0, 30.0, 30.0).shift(pt(lerp(0.0, 6.0, t), neck_y - 24.0));
-	svg.brushed_shaded(&neck, inks.skin, LIGHT, ink, LINE);
+	svg.brushed_shaded(
+		&neck,
+		inks.skin,
+		inks.finish.light,
+		inks.finish.cel_shadow,
+		ink,
+		inks.finish.line,
+	);
 
 	if let Some(collar) = puppet.part("collar", t) {
-		svg.brushed_shaded(&collar, inks.stripe, LIGHT, ink, LINE);
+		svg.brushed_shaded(
+			&collar,
+			inks.stripe,
+			inks.finish.light,
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
 	}
 
 	// A satchel: the strap across the body, the bag at the hip.
 	if look.has(Extra::Satchel) {
 		if let Some(strap) = puppet.part("satchel-strap", t) {
 			svg.brush_line(&strap.path(), ink, 11.0);
-			svg.brush_line(&strap.path(), SATCHEL.darken(0.15), 7.0);
+			svg.brush_line(&strap.path(), inks.kit.satchel.darken(0.15), 7.0);
 		}
 
 		if let Some(bag) = puppet.part("satchel", t) {
-			svg.brushed_shaded(&bag, SATCHEL, LIGHT, ink, LINE);
+			svg.brushed_shaded(
+				&bag,
+				inks.kit.satchel,
+				inks.finish.light,
+				inks.finish.cel_shadow,
+				ink,
+				inks.finish.line,
+			);
 		}
 
 		if let Some(flap) = puppet.part("satchel-flap", t) {
-			svg.brushed_shaded(&flap, SATCHEL.darken(0.12), LIGHT, ink, LINE);
+			svg.brushed_shaded(
+				&flap,
+				inks.kit.satchel.darken(0.12),
+				inks.finish.light,
+				inks.finish.cel_shadow,
+				ink,
+				inks.finish.line,
+			);
 		}
 	}
 }
@@ -1263,8 +1263,9 @@ struct Held {
 }
 
 /// Where the middle of the mouth is in figure units, after the head and body have moved.
-fn mouth_on_body(solved: &Solved, posed: &Posed) -> Pt {
-	let local = wrap(pt(0.0, 58.0), posed.t, FACE_RADIUS) + pt(0.0, -solved.body.head_above_neck);
+fn mouth_on_body(solved: &Solved, posed: &Posed, face: FaceRules) -> Pt {
+	let local = wrap(pt(0.0, 58.0), posed.t, face.radius, face.turn)
+		+ pt(0.0, -solved.body.head_above_neck);
 	solved.torso(solved.body.neck + local.rotate(posed.head_tilt))
 }
 
@@ -1290,7 +1291,10 @@ impl Arm<'_> {
 		};
 		// Mud never washed off: the hands are caked and it creeps up the forearms.
 		let (hand_skin, arm_skin) = if self.look.has(Extra::MuddyHands) {
-			(inks.skin.mix(MUD, 0.92), inks.skin.mix(MUD, 0.4))
+			(
+				inks.skin.mix(inks.kit.mud, 0.92),
+				inks.skin.mix(inks.kit.mud, 0.4),
+			)
 		} else {
 			(inks.skin, inks.skin)
 		};
@@ -1300,24 +1304,26 @@ impl Arm<'_> {
 		let forearm = capsule(solved.limbs.forearm, elbow_width, wrist_width);
 		svg.brushed_shaded(
 			&forearm,
-			far(arm_skin, is_far),
-			LIGHT.rotate(-angle),
+			far(arm_skin, is_far, inks.finish.far),
+			inks.finish.light.rotate(-angle),
+			inks.finish.cel_shadow,
 			ink,
-			LINE,
+			inks.finish.line,
 		);
 
 		// A long sleeve carries on down the forearm.
 		if let Some(lower) = puppet.part("forearm-sleeve", t) {
 			svg.brushed_shaded(
 				&lower,
-				far(inks.top, is_far),
-				LIGHT.rotate(-angle),
+				far(inks.top, is_far, inks.finish.far),
+				inks.finish.light.rotate(-angle),
+				inks.finish.cel_shadow,
 				ink,
-				LINE,
+				inks.finish.line,
 			);
 
 			if let Some(cuff) = puppet.part("forearm-sleeve-cuff", t) {
-				svg.brush_line(&cuff.path(), ink, DETAIL);
+				svg.brush_line(&cuff.path(), ink, inks.finish.detail);
 			}
 		}
 
@@ -1326,7 +1332,12 @@ impl Arm<'_> {
 		let angle = begin_bone(svg, shoulder, elbow);
 		let sleeve = puppet.required("sleeve", t);
 		let path = sleeve.path();
-		svg.brush_fill(&path, far(inks.top, is_far), ink, LINE);
+		svg.brush_fill(
+			&path,
+			far(inks.top, is_far, inks.finish.far),
+			ink,
+			inks.finish.line,
+		);
 		svg.begin_clip(&path);
 
 		// The pattern runs down the sleeve to its cuff, a band at the end of the upper arm.
@@ -1337,7 +1348,10 @@ impl Arm<'_> {
 				let mut y = 6.0;
 
 				while y <= cuff_y - 4.0 {
-					svg.fill(&Path::rect(-20.0, y, 40.0, 10.0), far(inks.stripe, is_far));
+					svg.fill(
+						&Path::rect(-20.0, y, 40.0, 10.0),
+						far(inks.stripe, is_far, inks.finish.far),
+					);
 					y += 18.0;
 				}
 			}
@@ -1348,7 +1362,10 @@ impl Arm<'_> {
 				while 6.0 + step <= cuff_y - 4.0 {
 					for (x, y) in [(-6.0, 6.0), (7.0, 16.0), (-5.0, 27.0)] {
 						if y + step <= cuff_y {
-							svg.fill(&dot.shift(pt(x, y + step)).path(), far(inks.stripe, is_far));
+							svg.fill(
+								&dot.shift(pt(x, y + step)).path(),
+								far(inks.stripe, is_far, inks.finish.far),
+							);
 						}
 					}
 
@@ -1360,16 +1377,20 @@ impl Arm<'_> {
 
 		svg.fill(
 			&Path::rect(-20.0, cuff_y, 40.0, 16.0),
-			far(inks.top.darken(0.12), is_far),
+			far(inks.top.darken(0.12), is_far, inks.finish.far),
 		);
 		svg.end();
-		svg.cel_shade(&sleeve, LIGHT.rotate(-angle));
+		svg.cel_shade(
+			&sleeve,
+			inks.finish.light.rotate(-angle),
+			inks.finish.cel_shadow,
+		);
 
 		if let Some(cuff) = puppet.part("sleeve-cuff", t) {
-			svg.brush_line(&cuff.path(), ink, DETAIL);
+			svg.brush_line(&cuff.path(), ink, inks.finish.detail);
 		}
 
-		svg.brush_line(&path, ink, LINE);
+		svg.brush_line(&path, ink, inks.finish.line);
 		svg.end();
 
 		// Held things sit in the fist, under the fingers.
@@ -1391,9 +1412,16 @@ impl Arm<'_> {
 			if mirror { -1 } else { 1 },
 			solved.body.hand_scale
 		));
-		let light = LIGHT.rotate(-angle);
+		let light = inks.finish.light.rotate(-angle);
 		let light = if mirror { pt(-light.x, light.y) } else { light };
-		draw_hand(svg, puppet, hand, far(hand_skin, is_far), ink, light);
+		draw_hand(
+			svg,
+			puppet,
+			hand,
+			far(hand_skin, is_far, inks.finish.far),
+			ink,
+			light,
+		);
 		svg.end();
 	}
 }
@@ -1409,6 +1437,7 @@ fn draw_prop(
 	along: Pt,
 	side: f32,
 ) {
+	let (finish, kit) = (puppet.style.finish, puppet.style.inks);
 	let fixed = |name: &str| puppet.part(name, 0.0);
 	let light = pt(-5.0, -5.0);
 
@@ -1419,10 +1448,10 @@ fn draw_prop(
 				fist.x, fist.y, held.scale
 			));
 			let jar = puppet.required("prop-jam", 0.0);
-			svg.brushed_shaded(&jar, JAM, light, ink, LINE);
+			svg.brushed_shaded(&jar, kit.jam, light, finish.cel_shadow, ink, finish.line);
 
 			if let Some(label) = fixed("prop-jam-label") {
-				svg.brushed(&label.path(), CREAM, ink, DETAIL);
+				svg.brushed(&label.path(), kit.cream, ink, finish.detail);
 			}
 
 			if let Some(shine) = fixed("prop-jam-shine") {
@@ -1430,7 +1459,7 @@ fn draw_prop(
 			}
 
 			if let Some(lid) = fixed("prop-jam-lid") {
-				svg.brushed_shaded(&lid, CREAM, light, ink, LINE);
+				svg.brushed_shaded(&lid, kit.cream, light, finish.cel_shadow, ink, finish.line);
 			}
 
 			svg.end();
@@ -1444,17 +1473,17 @@ fn draw_prop(
 			));
 
 			for (name, color) in [
-				("prop-parcel-side", KRAFT.darken(0.15)),
-				("prop-parcel-top", KRAFT.lighten(0.12)),
-				("prop-parcel", KRAFT),
+				("prop-parcel-side", kit.kraft.darken(0.15)),
+				("prop-parcel-top", kit.kraft.lighten(0.12)),
+				("prop-parcel", kit.kraft),
 			] {
 				if let Some(face) = fixed(name) {
-					svg.brushed(&face.path(), color, ink, LINE);
+					svg.brushed(&face.path(), color, ink, finish.line);
 				}
 			}
 
 			for string in puppet.copies("prop-parcel-string", 0.0) {
-				svg.brush_line(&string.path(), STRING, 6.0);
+				svg.brush_line(&string.path(), kit.string, 6.0);
 			}
 
 			svg.end();
@@ -1478,18 +1507,25 @@ fn draw_prop(
 				flip * held.scale
 			));
 			let handle = puppet.required("prop-toothbrush", 0.0);
-			svg.brushed_shaded(&handle, BRUSH, light, ink, LINE);
+			svg.brushed_shaded(
+				&handle,
+				kit.brush,
+				light,
+				finish.cel_shadow,
+				ink,
+				finish.line,
+			);
 
 			if let Some(bristles) = fixed("prop-toothbrush-bristles") {
-				svg.brushed(&bristles.path(), BRISTLES, ink, DETAIL);
+				svg.brushed(&bristles.path(), kit.bristles, ink, finish.detail);
 			}
 
 			for line in puppet.copies("prop-toothbrush-bristle-line", 0.0) {
-				svg.brush_line(&line.path(), BRISTLES.darken(0.15), 1.6);
+				svg.brush_line(&line.path(), kit.bristles.darken(0.15), 1.6);
 			}
 
 			if let Some(paste) = fixed("prop-toothpaste") {
-				svg.brushed(&paste.path(), PASTE, ink, DETAIL);
+				svg.brushed(&paste.path(), kit.paste, ink, finish.detail);
 			}
 
 			svg.end();
@@ -1501,7 +1537,7 @@ fn draw_prop(
 						+ pt(noise(77, i) * 34.0, 6.0 + noise(78, i) * 16.0)
 						+ pt(0.0, (held.time * 6.0 + i as f32).sin() * 2.0);
 					let r = 5.0 + noise(79, i).abs() * 5.0;
-					svg.brushed(&Path::circle(at, r), BRISTLES, ink, 1.6);
+					svg.brushed(&Path::circle(at, r), kit.bristles, ink, 1.6);
 				}
 			}
 		}
@@ -1515,16 +1551,17 @@ fn draw_hand(svg: &mut Svg, puppet: &Authored, hand: Hand, skin: Color, ink: Col
 		Hand::Fist => "hand-fist",
 		Hand::Point => "hand-point",
 	};
+	let finish = puppet.style.finish;
 	let shape = puppet.required(name, 0.0);
 	let path = shape.path();
-	svg.brush_fill(&path, skin, ink, LINE * 0.9);
-	svg.cel_shade(&shape, light * 0.6);
+	svg.brush_fill(&path, skin, ink, finish.line * 0.9);
+	svg.cel_shade(&shape, light * 0.6, finish.cel_shadow);
 
 	for line in puppet.copies(&format!("{name}-line"), 0.0) {
-		svg.brush_line(&line.path(), ink, DETAIL * 0.9);
+		svg.brush_line(&line.path(), ink, finish.detail * 0.9);
 	}
 
-	svg.brush_line(&path, ink, LINE * 0.9);
+	svg.brush_line(&path, ink, finish.line * 0.9);
 }
 
 fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: &Posed, time: f32) {
@@ -1534,7 +1571,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 	let head = puppet.required("head", t);
 	let head_path = head.path();
 	let hair = puppet.required("hair", t);
-	let warp = |p: Pt| wrap(p, t, FACE_RADIUS);
+	let warp = |p: Pt| wrap(p, t, inks.face.radius, inks.face.turn);
 
 	// The far ear tucks away as the head turns; the near ear slides onto the side of the head.
 	let ear = puppet.required("ear", t);
@@ -1546,10 +1583,17 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			at.y,
 			if mirror { -squash } else { squash }
 		));
-		svg.brushed_shaded(&ear, inks.skin, pt(-5.0, -4.0), ink, LINE);
+		svg.brushed_shaded(
+			&ear,
+			inks.skin,
+			pt(-5.0, -4.0),
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
 
 		if let Some(curl) = &curl {
-			svg.brush_line(&curl.path(), ink, DETAIL);
+			svg.brush_line(&curl.path(), ink, inks.finish.detail);
 		}
 
 		svg.end();
@@ -1589,23 +1633,30 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			root.x,
 			root.y
 		));
-		svg.brushed_shaded(lock, inks.hair, LIGHT, ink, LINE);
+		svg.brushed_shaded(
+			lock,
+			inks.hair,
+			inks.finish.light,
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
 
 		if let Some(tie) = ties.get(index) {
-			svg.brushed(&tie.path(), inks.stripe, ink, DETAIL);
+			svg.brushed(&tie.path(), inks.stripe, ink, inks.finish.detail);
 		}
 
 		svg.end();
 	}
 
-	svg.brush_fill(&head_path, inks.skin, ink, LINE * 1.15);
+	svg.brush_fill(&head_path, inks.skin, ink, inks.finish.line * 1.15);
 	svg.begin_clip(&head_path);
 	// The hair casts a soft band of shadow on the forehead.
 	svg.begin("translate(0 9)");
 	svg.fill_alpha(&hair.path(), Color(0xC0_5A_3E), 0.35);
 	svg.end();
 	svg.end();
-	svg.cel_shade(&head, LIGHT);
+	svg.cel_shade(&head, inks.finish.light, inks.finish.cel_shadow);
 
 	// A bald head shines.
 	let shines = puppet.copies("head-shine", t);
@@ -1629,7 +1680,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			for (x, y) in [(52.0, 24.0), (62.0, 18.0), (64.0, 29.0)] {
 				let at = pt(side * x, y);
 
-				if (at.x / FACE_RADIUS).asin() + t * FACE_TURN < 1.25 {
+				if (at.x / inks.face.radius).asin() + t * inks.face.turn < 1.25 {
 					svg.fill(&Path::circle(warp(at), 2.6), inks.freckle);
 				}
 			}
@@ -1646,7 +1697,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		&& let Some(bogey) = puppet.part("bogey", t)
 	{
 		let drip = bogey.map(warp).shift(pt(9.0 * t, 0.0));
-		svg.brushed(&drip.path(), BOGEY, ink, DETAIL);
+		svg.brushed(&drip.path(), inks.kit.bogey, ink, inks.finish.detail);
 	}
 
 	draw_mouth(svg, puppet, inks, posed, time);
@@ -1655,9 +1706,9 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		&& let Some(moustache) = puppet.part("moustache", t)
 	{
 		let moustache = moustache.map(warp);
-		svg.brush_fill(&moustache.path(), inks.hair, ink, DETAIL * 1.2);
-		svg.cel_shade(&moustache, pt(-3.0, -3.0));
-		svg.brush_line(&moustache.path(), ink, DETAIL * 1.2);
+		svg.brush_fill(&moustache.path(), inks.hair, ink, inks.finish.detail * 1.2);
+		svg.cel_shade(&moustache, pt(-3.0, -3.0), inks.finish.cel_shadow);
+		svg.brush_line(&moustache.path(), ink, inks.finish.detail * 1.2);
 	}
 
 	if look.has(Extra::Lashes) {
@@ -1677,7 +1728,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		if let Some(lens) = puppet.part("glasses-lens", t) {
 			for side in [-1.0_f32, 1.0] {
 				let ring = lens.shift(pt(side * 34.0, -6.0)).map(warp);
-				svg.fill_alpha(&ring.path(), LENS, 0.3);
+				svg.fill_alpha(&ring.path(), inks.kit.lens, 0.3);
 				svg.brush_line(&ring.path(), ink, 4.5);
 			}
 		}
@@ -1687,7 +1738,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		}
 	}
 
-	svg.brush_line(&head_path, ink, LINE * 1.15);
+	svg.brush_line(&head_path, ink, inks.finish.line * 1.15);
 
 	// Hair over everything on the head, brows on top of the hair. Loose hair follows through
 	// after a move.
@@ -1698,7 +1749,14 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			posed.follow,
 			lerp(-12.0, -26.0, t)
 		));
-		svg.brushed_shaded(&tuft, inks.hair, LIGHT, ink, LINE);
+		svg.brushed_shaded(
+			&tuft,
+			inks.hair,
+			inks.finish.light,
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
 
 		if let Some(shine) = puppet.part("tuft-shine", t) {
 			svg.begin_clip(&tuft.path());
@@ -1709,7 +1767,14 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		svg.end();
 	}
 
-	svg.brushed_shaded(&hair, inks.hair, LIGHT, ink, LINE);
+	svg.brushed_shaded(
+		&hair,
+		inks.hair,
+		inks.finish.light,
+		inks.finish.cel_shadow,
+		ink,
+		inks.finish.line,
+	);
 
 	let shines = puppet.copies("hair-shine", t);
 
@@ -1724,7 +1789,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 	}
 
 	for strand in puppet.copies("hair-strand", t) {
-		svg.brush_line(&strand.path(), ink, DETAIL * 0.8);
+		svg.brush_line(&strand.path(), ink, inks.finish.detail * 0.8);
 	}
 
 	// In three-quarter view the near ear sits on the side of the head, over the hair behind it,
@@ -1744,10 +1809,22 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			knot.x,
 			knot.y
 		));
-		svg.brushed_shaded(&bow, inks.stripe, pt(-4.0, -4.0), ink, LINE);
+		svg.brushed_shaded(
+			&bow,
+			inks.stripe,
+			pt(-4.0, -4.0),
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
 
 		if let Some(tie) = puppet.part("bow-knot", t) {
-			svg.brushed(&tie.path(), inks.stripe.darken(0.12), ink, DETAIL);
+			svg.brushed(
+				&tie.path(),
+				inks.stripe.darken(0.12),
+				ink,
+				inks.finish.detail,
+			);
 		}
 
 		svg.end();
@@ -1756,15 +1833,34 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 	// A post cap sits over the hair.
 	if look.has(Extra::PostCap) {
 		if let Some(cap) = puppet.part("cap", t) {
-			svg.brushed_shaded(&cap, CAP, LIGHT, ink, LINE);
+			svg.brushed_shaded(
+				&cap,
+				inks.kit.cap,
+				inks.finish.light,
+				inks.finish.cel_shadow,
+				ink,
+				inks.finish.line,
+			);
 		}
 
 		if let Some(brim) = puppet.part("cap-brim", t) {
-			svg.brushed_shaded(&brim, CAP.darken(0.18), LIGHT, ink, LINE);
+			svg.brushed_shaded(
+				&brim,
+				inks.kit.cap.darken(0.18),
+				inks.finish.light,
+				inks.finish.cel_shadow,
+				ink,
+				inks.finish.line,
+			);
 		}
 
 		if let Some(badge) = puppet.part("cap-badge", t) {
-			svg.brushed(&badge.map(warp).path(), BADGE, ink, DETAIL);
+			svg.brushed(
+				&badge.map(warp).path(),
+				inks.kit.badge,
+				ink,
+				inks.finish.detail,
+			);
 		}
 	}
 
@@ -1787,7 +1883,7 @@ fn covers_ears(hair: &Shape) -> bool {
 fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time: f32) {
 	let t = posed.t;
 	let ink = inks.line;
-	let warp = |p: Pt| wrap(p, t, FACE_RADIUS);
+	let warp = |p: Pt| wrap(p, t, inks.face.radius, inks.face.turn);
 	let centre = pt(side * 34.0, -6.0);
 	let (rx, ry) = (20.0, 27.0);
 	let line = |points: &[Pt]| Shape::taper(points, 5.5, 5.5);
@@ -1816,7 +1912,7 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 		}
 		Eye::Spiral => {
 			let white = Shape::ellipse(centre, rx, ry).map(warp);
-			svg.fill(&white.path(), EYE);
+			svg.fill(&white.path(), inks.kit.eye);
 			let spin = time * 4.0 * side;
 			let turns: Vec<Pt> = (0..28)
 				.map(|i| {
@@ -1825,7 +1921,7 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 				})
 				.collect();
 			svg.brush_line(&Path::spline(&turns), ink, 3.0);
-			svg.brush_line(&white.path(), ink, DETAIL);
+			svg.brush_line(&white.path(), ink, inks.finish.detail);
 			return;
 		}
 	};
@@ -1834,7 +1930,7 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 	let white_path = white.path();
 	let tilt = -side * tilt;
 
-	svg.fill(&white_path, EYE);
+	svg.fill(&white_path, inks.kit.eye);
 	svg.begin_clip(&white_path);
 	let look = centre + pt(posed.gaze.x * 8.0, posed.gaze.y * 7.0 + 2.0);
 	let size = posed.face.pupil;
@@ -1846,14 +1942,14 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 	);
 	svg.fill(
 		&Path::circle(warp(look + pt(-3.5, -5.5) * size), 3.8 * size),
-		EYE,
+		inks.kit.eye,
 	);
 	svg.fill(
 		&Path::circle(warp(look + pt(3.5, 5.0) * size), 1.6 * size),
-		EYE,
+		inks.kit.eye,
 	);
 	svg.end();
-	svg.brush_line(&white_path, ink, DETAIL);
+	svg.brush_line(&white_path, ink, inks.finish.detail);
 
 	// Lids paint over the eye's own outline, so the lash line becomes the top edge.
 	let lid_clip = Shape::ellipse(centre, rx + 3.0, ry + 3.0).map(warp);
@@ -1912,7 +2008,7 @@ fn closed_over(points: &[Pt; 4], reach: f32) -> Shape {
 }
 
 fn draw_nose(svg: &mut Svg, puppet: &Authored, inks: &Inks, t: f32, wrinkle: bool) {
-	let warp = |p: Pt| wrap(p, t, FACE_RADIUS);
+	let warp = |p: Pt| wrap(p, t, inks.face.radius, inks.face.turn);
 	// The nose stands proud of the face, so it travels a little further than the cylinder.
 	let poke = pt(9.0 * t, 0.0);
 	let nose = puppet
@@ -1920,9 +2016,9 @@ fn draw_nose(svg: &mut Svg, puppet: &Authored, inks: &Inks, t: f32, wrinkle: boo
 		.shift(pt(0.0, 22.0))
 		.map(warp)
 		.shift(poke);
-	svg.brush_fill(&nose.path(), inks.nose, inks.line, DETAIL * 1.1);
-	svg.cel_shade(&nose, pt(-4.0, -4.0));
-	svg.brush_line(&nose.path(), inks.line, DETAIL * 1.1);
+	svg.brush_fill(&nose.path(), inks.nose, inks.line, inks.finish.detail * 1.1);
+	svg.cel_shade(&nose, pt(-4.0, -4.0), inks.finish.cel_shadow);
+	svg.brush_line(&nose.path(), inks.line, inks.finish.detail * 1.1);
 	svg.fill_alpha(
 		&Path::circle(warp(pt(-4.0, 18.0)) + poke, 2.6),
 		Color(0xFF_FF_FF),
@@ -1931,7 +2027,7 @@ fn draw_nose(svg: &mut Svg, puppet: &Authored, inks: &Inks, t: f32, wrinkle: boo
 
 	if wrinkle {
 		for line in puppet.copies("nose-wrinkle", t) {
-			svg.brush_line(&line.map(warp).path(), inks.line, DETAIL);
+			svg.brush_line(&line.map(warp).path(), inks.line, inks.finish.detail);
 		}
 	}
 }
@@ -1946,7 +2042,8 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 	let curl = face.curl;
 	// Mouths keep the mood: corners curl up or down a little.
 	let curled = |p: Pt| pt(p.x, p.y - curl * 6.0 * (p.x / 30.0).powi(2));
-	let place = |shape: &Shape| shape.map(|p| wrap(p + centre, t, FACE_RADIUS));
+	let place =
+		|shape: &Shape| shape.map(|p| wrap(p + centre, t, inks.face.radius, inks.face.turn));
 	let mouth = |shape: &Shape| place(&shape.map(curled));
 	let drawn = |name: &str| puppet.required(name, t);
 	let ellipse = |c: Pt, rx: f32, ry: f32| place(&Shape::ellipse(c, rx, ry));
@@ -1974,7 +2071,7 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 				None,
 				Some(&ellipse(pt(4.0, 28.0), 17.0, 11.0)),
 			);
-			dimples(svg, ink, &place, 36.0, -6.0, -6.0);
+			dimples(svg, ink, inks.finish.detail, &place, 36.0, -6.0, -6.0);
 		}
 		(None, MouthShape::Grin) => {
 			// A grin opens downwards when it talks or shouts, keeping its teeth on show.
@@ -1991,7 +2088,7 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 				svg.brush_line(&place(&gap).path(), inks.teeth.darken(0.25), 1.8);
 			}
 
-			dimples(svg, ink, &place, 48.0, -4.0, -16.0);
+			dimples(svg, ink, inks.finish.detail, &place, 48.0, -4.0, -16.0);
 		}
 		(None, MouthShape::Laugh) => {
 			let big = |p: Pt| pt(p.x * 1.15, p.y * 1.2);
@@ -2008,7 +2105,11 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 		(None, MouthShape::Pout) => {
 			let by = |shape: Shape| shape.shift(pt(8.0, -2.0));
 			svg.fill(&mouth(&by(drawn("mouth-pout"))).path(), ink);
-			svg.brush_line(&mouth(&by(drawn("mouth-pout-lip"))).path(), ink, DETAIL);
+			svg.brush_line(
+				&mouth(&by(drawn("mouth-pout-lip"))).path(),
+				ink,
+				inks.finish.detail,
+			);
 		}
 		(None, MouthShape::Clench) => {
 			open(
@@ -2036,13 +2137,18 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 			let tilt = |p: Pt| (p + pt(-4.0, 0.0)).rotate(-8.0);
 			open(svg, &place(&drawn("mouth-bleh").map(tilt)), None, None);
 			let tongue = place(&drawn("mouth-bleh-tongue").map(tilt));
-			svg.brushed(&tongue.path(), TONGUE, ink, DETAIL * 1.2);
+			svg.brushed(
+				&tongue.path(),
+				inks.kit.tongue,
+				ink,
+				inks.finish.detail * 1.2,
+			);
 
 			if let Some(groove) = puppet.part("mouth-bleh-groove", t) {
 				svg.brush_line(
 					&place(&groove.map(tilt)).path(),
-					TONGUE.darken(0.3),
-					DETAIL * 0.8,
+					inks.kit.tongue.darken(0.3),
+					inks.finish.detail * 0.8,
 				);
 			}
 		}
@@ -2052,7 +2158,11 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 		}
 		(Some(Viseme::Mbp), _) => {
 			svg.fill(&mouth(&drawn("mouth-mbp")).path(), ink);
-			svg.brush_line(&mouth(&drawn("mouth-mbp-lip")).path(), ink, DETAIL);
+			svg.brush_line(
+				&mouth(&drawn("mouth-mbp-lip")).path(),
+				ink,
+				inks.finish.detail,
+			);
 		}
 		(Some(Viseme::Teeth), _) => {
 			open(
@@ -2094,7 +2204,11 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 				Some(&mouth(&teeth_band(-6.0, 6.0))),
 				None,
 			);
-			svg.brush_line(&mouth(&drawn("mouth-fv-lip")).path(), ink, DETAIL);
+			svg.brush_line(
+				&mouth(&drawn("mouth-fv-lip")).path(),
+				ink,
+				inks.finish.detail,
+			);
 		}
 		(Some(Viseme::Tongue), _) => {
 			open(
@@ -2114,7 +2228,12 @@ fn draw_mouth(svg: &mut Svg, puppet: &Authored, inks: &Inks, posed: &Posed, time
 		);
 
 	if posed.teeth == Teeth::Sparkly && teeth_show {
-		let corner = wrap(centre + pt(30.0, -10.0), t, FACE_RADIUS);
+		let corner = wrap(
+			centre + pt(30.0, -10.0),
+			t,
+			inks.face.radius,
+			inks.face.turn,
+		);
 		fx::sparkle(svg, corner, 16.0, palette::WHITE, time);
 	}
 }
@@ -2153,11 +2272,11 @@ fn open_mouth(
 	tongue: Option<&Shape>,
 ) {
 	let path = outer.path();
-	svg.brush_fill(&path, MAW, inks.line, DETAIL * 1.4);
+	svg.brush_fill(&path, inks.kit.maw, inks.line, inks.finish.detail * 1.4);
 	svg.begin_clip(&path);
 
 	if let Some(tongue) = tongue {
-		svg.fill(&tongue.path(), TONGUE);
+		svg.fill(&tongue.path(), inks.kit.tongue);
 	}
 
 	if let Some(teeth) = teeth {
@@ -2165,13 +2284,14 @@ fn open_mouth(
 	}
 
 	svg.end();
-	svg.brush_line(&path, inks.line, DETAIL * 1.4);
+	svg.brush_line(&path, inks.line, inks.finish.detail * 1.4);
 }
 
 /// Little tucks at the corners of a smile.
 fn dimples(
 	svg: &mut Svg,
 	ink: Color,
+	weight: f32,
 	place: &dyn Fn(&Shape) -> Shape,
 	half: f32,
 	left_y: f32,
@@ -2188,7 +2308,7 @@ fn dimples(
 			false,
 		)
 		.unwrap_or_else(|| unreachable!("one whole curve"));
-		svg.brush_line(&place(&tuck).path(), ink, DETAIL);
+		svg.brush_line(&place(&tuck).path(), ink, weight);
 	}
 }
 
@@ -2200,26 +2320,39 @@ mod tests {
 	use crate::art::figure::Pose;
 	use crate::art::parts::Turn;
 
+	fn cartoon() -> Arc<StylePack> {
+		StylePack::default_pack()
+	}
+
+	fn kid() -> Proportions {
+		*cartoon().body(Build::Kid)
+	}
+
+	/// The cartoon face cylinder's warp.
+	fn warp(p: Pt, t: f32) -> Pt {
+		let face = cartoon().face;
+		wrap(p, t, face.radius, face.turn)
+	}
+
 	#[test]
 	fn the_front_view_is_unwarped_and_turning_moves_the_face_right() {
-		assert!((wrap(pt(30.0, 5.0), 0.0, FACE_RADIUS) - pt(30.0, 5.0)).len() < 1e-3);
-		assert!(wrap(pt(0.0, 0.0), 1.0, FACE_RADIUS).x > 40.0);
+		assert!((warp(pt(30.0, 5.0), 0.0) - pt(30.0, 5.0)).len() < 1e-3);
+		assert!(warp(pt(0.0, 0.0), 1.0).x > 40.0);
 		// The far side foreshortens: equal steps on the face shrink towards the edge.
-		let near =
-			wrap(pt(-20.0, 0.0), 1.0, FACE_RADIUS).x - wrap(pt(-40.0, 0.0), 1.0, FACE_RADIUS).x;
-		let far = wrap(pt(40.0, 0.0), 1.0, FACE_RADIUS).x - wrap(pt(20.0, 0.0), 1.0, FACE_RADIUS).x;
+		let near = warp(pt(-20.0, 0.0), 1.0).x - warp(pt(-40.0, 0.0), 1.0).x;
+		let far = warp(pt(40.0, 0.0), 1.0).x - warp(pt(20.0, 0.0), 1.0).x;
 		assert!(far < near);
 	}
 
 	#[test]
 	fn the_face_slides_as_far_as_the_warp_moves_it() {
-		let warped = wrap(pt(0.0, 0.0), 1.0, FACE_RADIUS).x;
-		assert!((FACE_SLIDE * STAGED_FACING - warped).abs() < 1.0);
+		let warped = warp(pt(0.0, 0.0), 1.0).x;
+		assert!((cartoon().face.slide * STAGED_FACING - warped).abs() < 1.0);
 	}
 
 	#[test]
 	fn hands_reach_their_targets_through_the_rig() {
-		let frame = Frame::authored(&KID);
+		let frame = Frame::authored(&cartoon(), Build::Kid);
 
 		// Poses whose hands land on a spot (not stretched to full reach, like a cheer).
 		for pose in [
@@ -2231,8 +2364,8 @@ mod tests {
 		] {
 			let mut state = FigureState::new(&frame);
 			state.hands = frame.hands(pose, 0.0);
-			let posed = Posed::of(&state, &KID);
-			let solved = Solved::new(&posed, &KID);
+			let posed = Posed::of(&state, &cartoon(), Build::Kid);
+			let solved = Solved::new(&posed, &kid());
 
 			for side in [-1.0, 1.0] {
 				let (shoulder, elbow, wrist) = solved.arm(&posed, side);
@@ -2241,7 +2374,7 @@ mod tests {
 				} else {
 					posed.hands.1
 				};
-				assert!(((elbow - shoulder).len() - KID.limbs.upper_arm).abs() < 0.01);
+				assert!(((elbow - shoulder).len() - kid().limbs.upper_arm).abs() < 0.01);
 				assert!(
 					(wrist - solved.torso(target)).len() < 0.5,
 					"{pose:?}, side {side}"
@@ -2252,12 +2385,12 @@ mod tests {
 
 	#[test]
 	fn facing_left_mirrors_the_figure_and_swaps_the_near_hand() {
-		let frame = Frame::authored(&KID);
+		let frame = Frame::authored(&cartoon(), Build::Kid);
 		let mut state = FigureState::new(&frame);
 		state.hands = frame.hands(Pose::Point, -STAGED_FACING);
 		state.hand_shapes = Pose::Point.hand_shapes();
 		state.facing = -STAGED_FACING;
-		let posed = Posed::of(&state, &KID);
+		let posed = Posed::of(&state, &cartoon(), Build::Kid);
 		assert!(posed.mirrored);
 		assert!((posed.t - 1.0).abs() < 1e-6);
 		// The pointing hand is the page-right one, which is the far hand when facing left.
@@ -2270,18 +2403,18 @@ mod tests {
 
 	#[test]
 	fn raised_hands_clear_the_head_but_hands_on_the_face_stay() {
-		let frame = Frame::authored(&KID);
+		let frame = Frame::authored(&cartoon(), Build::Kid);
 
 		for facing in [0.0, STAGED_FACING] {
 			let mut state = FigureState::new(&frame);
 			state.facing = facing;
 			state.hands = frame.hands(Pose::HoldNose, facing);
-			let nose = Posed::of(&state, &KID).hands.1;
-			let face_x = facing / STAGED_FACING * FACE_SLIDE * STAGED_FACING;
+			let nose = Posed::of(&state, &cartoon(), Build::Kid).hands.1;
+			let face_x = facing / STAGED_FACING * cartoon().face.slide * STAGED_FACING;
 			assert!((nose.x - face_x).abs() < 30.0, "facing {facing}: {nose:?}");
 
 			state.hands = frame.hands(Pose::Wave, facing);
-			let posed = Posed::of(&state, &KID);
+			let posed = Posed::of(&state, &cartoon(), Build::Kid);
 			let waving = if posed.hands.0.y < posed.hands.1.y {
 				posed.hands.0
 			} else {
@@ -2294,6 +2427,7 @@ mod tests {
 	fn stinky() -> Look {
 		let cast = crate::cast::Cast::load(
 			&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/cast.toml"),
+			&cartoon(),
 		)
 		.unwrap();
 		let Ok(crate::cast::Kind::Figure(look)) = cast.resolve("stinky") else {
@@ -2312,7 +2446,7 @@ mod tests {
 	fn extras_are_drawn_only_when_the_cast_lists_them() {
 		let mut look = stinky();
 		let state = FigureState::new(&look.frame());
-		let lens = format!("fill=\"{LENS}\"");
+		let lens = format!("fill=\"{}\"", cartoon().inks.lens);
 		assert!(!drawn(&look, &state).contains(&lens));
 
 		look.extras.push(Extra::Glasses);
@@ -2327,24 +2461,24 @@ mod tests {
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Hold, STAGED_FACING);
 		state.prop = Some(Prop::Jam);
-		let posed = Posed::of(&state, &KID);
+		let posed = Posed::of(&state, &cartoon(), Build::Kid);
 		// The jam is in the page-right hand, which is the far hand when facing right.
 		assert_eq!(posed.prop, Some((Prop::Jam, true)));
-		assert!(drawn(&look, &state).contains(&format!("fill=\"{JAM}\"")));
+		assert!(drawn(&look, &state).contains(&format!("fill=\"{}\"", cartoon().inks.jam)));
 	}
 
 	#[test]
 	fn brushing_keeps_the_toothbrush_hand_at_the_mouth_when_turned() {
-		let frame = Frame::authored(&KID);
+		let frame = Frame::authored(&cartoon(), Build::Kid);
 		let mut state = FigureState::new(&frame);
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Brush, STAGED_FACING);
 		state.prop = Some(Prop::Toothbrush);
-		let posed = Posed::of(&state, &KID);
+		let posed = Posed::of(&state, &cartoon(), Build::Kid);
 		assert_eq!(posed.prop, Some((Prop::Toothbrush, true)), "no wave swap");
-		let solved = Solved::new(&posed, &KID);
+		let solved = Solved::new(&posed, &kid());
 		let (_, _, wrist) = solved.arm(&posed, 1.0);
-		assert!((wrist - mouth_on_body(&solved, &posed)).len() < 70.0);
+		assert!((wrist - mouth_on_body(&solved, &posed, cartoon().face)).len() < 70.0);
 	}
 
 	#[test]
@@ -2353,7 +2487,7 @@ mod tests {
 			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 
 		for name in ["stinky", "bogey", "grubby", "shouty", "fibby"] {
-			let puppet = Authored::load(&world.join(format!("{name}.svg")))
+			let puppet = Authored::load(&world.join(format!("{name}.svg")), &cartoon())
 				.unwrap_or_else(|error| panic!("{name}: {error:#}"));
 
 			for turning in ["head", "hair", "torso", "legwear"] {
@@ -2370,7 +2504,7 @@ mod tests {
 		let world =
 			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 		let hair = |name: &str| {
-			Authored::load(&world.join(format!("{name}.svg")))
+			Authored::load(&world.join(format!("{name}.svg")), &cartoon())
 				.unwrap()
 				.required("hair", 1.0)
 		};
@@ -2397,18 +2531,19 @@ mod tests {
 
 	#[test]
 	fn cool_skin_gets_shading_instead_of_a_pink_blush() {
-		assert_eq!(blush(Color(0xF4_A2_6B)), BLUSH);
-		assert_ne!(blush(Color(0x62_B9_AD)), BLUSH);
+		let warm = cartoon().inks.blush;
+		assert_eq!(blush(Color(0xF4_A2_6B), warm), warm);
+		assert_ne!(blush(Color(0x62_B9_AD), warm), warm);
 	}
 
 	#[test]
 	fn turned_far_arms_cheer_behind_the_head_but_reach_the_face_in_front() {
-		let frame = Frame::authored(&KID);
+		let frame = Frame::authored(&cartoon(), Build::Kid);
 		let behind = |pose: Pose| {
 			let mut state = FigureState::new(&frame);
 			state.facing = STAGED_FACING;
 			state.hands = frame.hands(pose, STAGED_FACING);
-			Posed::of(&state, &KID).far_arm_behind
+			Posed::of(&state, &cartoon(), Build::Kid).far_arm_behind
 		};
 		assert!(behind(Pose::Idle));
 		assert!(
@@ -2421,12 +2556,12 @@ mod tests {
 
 	#[test]
 	fn every_mood_has_a_face_and_hanging_open_hands_relax() {
-		let frame = Frame::authored(&KID);
+		let frame = Frame::authored(&cartoon(), Build::Kid);
 
 		for (_, mood) in Mood::ALL {
 			let mut state = FigureState::new(&frame);
 			state.mood = mood;
-			let posed = Posed::of(&state, &KID);
+			let posed = Posed::of(&state, &cartoon(), Build::Kid);
 			assert_eq!(
 				posed.hand_shapes,
 				(Hand::Relaxed, Hand::Relaxed),

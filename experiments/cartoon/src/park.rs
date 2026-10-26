@@ -12,8 +12,14 @@ use fables::art::Path;
 use fables::art::Pt;
 use fables::art::Svg;
 use fables::art::noise;
+use fables::art::pack::StylePack;
 use fables::art::pt;
 use fables::art::shape::Shape;
+
+/// The cartoon style's one tone of cel shadow.
+fn cel_shadow() -> Color {
+	StylePack::default_pack().finish.cel_shadow
+}
 
 pub const SIZE: f32 = 2400.0;
 /// Where the land meets the sky.
@@ -329,7 +335,7 @@ fn tree(c: &mut Svg, base: Pt, scale: f32, depth: f32, line: f32) {
 		base.y,
 	));
 	c.fill(&trunk.path(), haze(BARK, depth));
-	c.cel_shade(&trunk, pt(-8.0 * scale, 0.0));
+	c.cel_shade(&trunk, pt(-8.0 * scale, 0.0), cel_shadow());
 
 	if line > 0.0 {
 		c.stroke(&trunk.path(), ink, line);
@@ -413,7 +419,7 @@ fn mid_trees(c: &mut Svg) {
 		 1820 1595 1720 1590 C1705 1588 1700 1575 1700 1560 Z",
 	);
 	c.fill(&hedge.path(), haze(LEAF, 0.15));
-	c.cel_shade(&hedge, pt(-10.0, -12.0));
+	c.cel_shade(&hedge, pt(-10.0, -12.0), cel_shadow());
 	c.stroke(&hedge.path(), LEAF_DARK.darken(0.3), 3.0);
 }
 
@@ -580,7 +586,7 @@ pub fn wormsley(c: &mut Svg, at: Pt, s: f32) {
 		at.y,
 	));
 	c.brush_fill(&body.path(), pink, INK, 2.5);
-	c.cel_shade(&body, pt(-4.0 * s, -3.0 * s));
+	c.cel_shade(&body, pt(-4.0 * s, -3.0 * s), cel_shadow());
 	c.brush_line(&body.path(), INK, 2.5);
 
 	for side in [-1.0, 1.0] {

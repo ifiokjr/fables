@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! worlds/kerfuffle/
-//!   world.toml      the world's name and series defaults (the narrator, the book's matter)
+//!   world.toml      the world's name, its drawing style and series defaults (the narrator,
+//!                   the book's matter)
 //!   cast.toml       who lives there and what they look like
 //!   puppets/        their authored puppets' part files
 //!   recipe.md       the template `fables new` starts a book from
@@ -15,12 +16,15 @@
 
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use serde::Deserialize;
 
+use crate::art::pack;
+use crate::art::pack::StylePack;
 use crate::cast::Cast;
 use crate::story::Story;
 use crate::video::voice::Voice;
@@ -34,6 +38,8 @@ pub struct World {
 	/// The folder the world lives in.
 	pub dir: PathBuf,
 	pub name: String,
+	/// The style pack its puppets are drawn in (see [`StylePack`]).
+	pub style: String,
 	/// Who reads the books aloud, unless a script names its own `[voice]`.
 	pub narrator: Option<Voice>,
 	pub matter: Matter,
@@ -65,10 +71,16 @@ impl Default for Matter {
 #[serde(deny_unknown_fields)]
 struct Entry {
 	name: String,
+	#[serde(default = "default_style")]
+	style: String,
 	#[serde(default)]
 	narrator: Option<Voice>,
 	#[serde(default)]
 	book: Matter,
+}
+
+fn default_style() -> String {
+	pack::DEFAULT.to_owned()
 }
 
 impl World {
@@ -91,9 +103,13 @@ impl World {
 				.with_context(|| format!("the narrator in {}", path.display()))?;
 		}
 
+		StylePack::named(&entry.style)
+			.with_context(|| format!("the style in {}", path.display()))?;
+
 		Ok(World {
 			dir: dir.to_path_buf(),
 			name: entry.name,
+			style: entry.style,
 			narrator: entry.narrator,
 			matter: entry.book,
 		})
@@ -164,9 +180,14 @@ impl World {
 		self.dir.join("cast.toml")
 	}
 
-	/// The world's cast.
+	/// The style pack the world's puppets are drawn in.
+	pub fn style(&self) -> Result<Arc<StylePack>> {
+		StylePack::named(&self.style)
+	}
+
+	/// The world's cast, drawn in its style.
 	pub fn cast(&self) -> Result<Cast> {
-		Cast::load(&self.cast_file())
+		Cast::load(&self.cast_file(), &self.style()?)
 	}
 
 	/// Where the world's books live.
@@ -221,6 +242,17 @@ mod tests {
 		world(&dir.path().join("worlds"), "two", "");
 		let error = format!("{:#}", World::find(dir.path()).unwrap_err());
 		assert!(error.contains("several worlds"), "{error}");
+	}
+
+	#[test]
+	fn a_world_draws_in_the_default_style_unless_it_names_one() {
+		let dir = tempfile::tempdir().unwrap();
+		let plain = World::load(&world(dir.path(), "plain", "")).unwrap();
+		assert_eq!(plain.style, pack::DEFAULT);
+
+		let odd = world(dir.path(), "odd", "style = \"vaporwave\"\n");
+		let error = format!("{:#}", World::load(&odd).unwrap_err());
+		assert!(error.contains("unknown drawing style"), "{error}");
 	}
 
 	#[test]

@@ -56,6 +56,18 @@ impl Color {
 	}
 }
 
+/// Colours in data files are palette names or hex codes, as in [`Color::parse`].
+impl<'de> serde::Deserialize<'de> for Color {
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Color, D::Error> {
+		let value = String::deserialize(deserializer)?;
+		Color::parse(&value).ok_or_else(|| {
+			serde::de::Error::custom(format!(
+				"`{value}` is not a colour; use a palette name or a hex code like #ff8a3d"
+			))
+		})
+	}
+}
+
 impl fmt::Display for Color {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "#{:06x}", self.0)
@@ -96,11 +108,6 @@ pub const CREAM: Color = Color(0xFF_EC_C8);
 pub const MAW: Color = Color(0x6B_1E_3C);
 /// Teeth that have not met a brush in weeks.
 pub const GROT: Color = Color(0xC9_C2_5A);
-
-/// The shadow tone of the brushed finish, multiplied over local colour. A cool lilac keeps
-/// shadows on every colour in one family, instead of each part getting a muddy darker version
-/// of itself.
-pub const CEL_SHADOW: Color = Color(0xD4_BE_D8);
 
 /// Every palette colour a cast or story file may name.
 pub const NAMED: &[(&str, Color)] = &[

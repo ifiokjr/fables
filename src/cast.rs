@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -24,6 +25,7 @@ use crate::art::figure::Legwear;
 use crate::art::figure::Look;
 use crate::art::figure::Nose;
 use crate::art::figure::Pattern;
+use crate::art::pack::StylePack;
 use crate::art::palette;
 use crate::art::puppet::Authored;
 use crate::art::seed_of;
@@ -123,28 +125,30 @@ fn default_kind() -> String {
 }
 
 impl Cast {
-	/// Loads a cast file. Puppet part files are found relative to it.
-	pub fn load(path: &Path) -> Result<Cast> {
+	/// Loads a cast file whose puppets are drawn in `style`. Puppet part files are found
+	/// relative to it.
+	pub fn load(path: &Path, style: &Arc<StylePack>) -> Result<Cast> {
 		let source = std::fs::read_to_string(path)
 			.with_context(|| format!("could not read cast file {}", path.display()))?;
-		Self::parse_in(&source, path.parent().unwrap_or(Path::new("")))
+		Self::parse_in(&source, path.parent().unwrap_or(Path::new("")), style)
 			.with_context(|| format!("in {}", path.display()))
 	}
 
-	/// Parses a cast file whose puppet part files are relative to the current directory.
+	/// Parses a cast file in the default style whose puppet part files are relative to the
+	/// current directory.
 	pub fn parse(source: &str) -> Result<Cast> {
-		Self::parse_in(source, Path::new(""))
+		Self::parse_in(source, Path::new(""), &StylePack::default_pack())
 	}
 
-	/// Parses a cast file whose puppet part files are relative to `dir`.
-	pub fn parse_in(source: &str, dir: &Path) -> Result<Cast> {
+	/// Parses a cast file whose puppets are drawn in `style` from part files relative to `dir`.
+	pub fn parse_in(source: &str, dir: &Path, style: &Arc<StylePack>) -> Result<Cast> {
 		let entries: BTreeMap<String, Entry> =
 			toml::from_str(source).context("cast file is not valid TOML")?;
 		let mut members = BTreeMap::new();
 
 		for (id, entry) in entries {
-			let kind =
-				build_kind(&id, &entry, dir).with_context(|| format!("cast member `{id}`"))?;
+			let kind = build_kind(&id, &entry, dir, style)
+				.with_context(|| format!("cast member `{id}`"))?;
 
 			if let Some(voice) = &entry.voice {
 				voice
@@ -217,11 +221,11 @@ fn color(field: &str, value: Option<&String>, fallback: Color) -> Result<Color> 
 	}
 }
 
-fn build_kind(id: &str, entry: &Entry, dir: &Path) -> Result<Kind> {
+fn build_kind(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Result<Kind> {
 	let tint = |fallback| color("colour", entry.colour.as_ref(), fallback);
 
 	match entry.kind.as_str() {
-		"kid" | "grown-up" => Ok(Kind::Figure(build_look(id, entry, dir)?)),
+		"kid" | "grown-up" => Ok(Kind::Figure(build_look(id, entry, dir, style)?)),
 		"bird" => Ok(Kind::Bird(tint(palette::CORNFLOWER)?)),
 		"dog" => Ok(Kind::Dog(tint(palette::TOFFEE)?)),
 		"worm" => Ok(Kind::Worm),
@@ -246,7 +250,7 @@ fn build_kind(id: &str, entry: &Entry, dir: &Path) -> Result<Kind> {
 	}
 }
 
-fn build_look(id: &str, entry: &Entry, dir: &Path) -> Result<Look> {
+fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Result<Look> {
 	let build = if entry.kind == "grown-up" {
 		Build::Grownup
 	} else {
@@ -323,7 +327,7 @@ fn build_look(id: &str, entry: &Entry, dir: &Path) -> Result<Look> {
 		.collect::<Result<Vec<_>>>()?;
 
 	let puppet = match &entry.puppet {
-		Some(file) => Some(Authored::load(&dir.join(file))?),
+		Some(file) => Some(Authored::load(&dir.join(file), style)?),
 		None => None,
 	};
 
@@ -424,16 +428,18 @@ colour = "#c9865a"
 		std::fs::create_dir(dir.path().join("puppets")).unwrap();
 		let world = Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 
-		for file in ["kit.svg", "stinky.svg"] {
-			std::fs::copy(world.join(file), dir.path().join("puppets").join(file)).unwrap();
-		}
+		std::fs::copy(
+			world.join("stinky.svg"),
+			dir.path().join("puppets/stinky.svg"),
+		)
+		.unwrap();
 
 		std::fs::write(
 			&path,
 			"[kid]\nname = \"Kid\"\npuppet = \"puppets/stinky.svg\"\n",
 		)
 		.unwrap();
-		let cast = Cast::load(&path).unwrap();
+		let cast = Cast::load(&path, &StylePack::default_pack()).unwrap();
 		let Kind::Figure(look) = cast.resolve("kid").unwrap() else {
 			panic!("kid is a person");
 		};

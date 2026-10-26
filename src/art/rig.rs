@@ -88,7 +88,8 @@ pub struct Legs {
 }
 
 /// Limb measurements for a build.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Limbs {
 	/// Pelvis height at rest (negative is up, feet are at 0).
 	pub pelvis_y: f32,
