@@ -20,6 +20,7 @@ use crate::art::figure::Teeth;
 use crate::art::pack::StylePack;
 use crate::art::rig::Gait;
 use crate::art::rig::Stance;
+use crate::art::settings::Library;
 use crate::art::settings::Setting;
 use crate::art::settings::Weather;
 use crate::cast::Cast;
@@ -181,10 +182,14 @@ pub struct Scene {
 }
 
 impl Scene {
-	/// An empty scene for a page, with the page heading's options applied.
-	pub fn for_page(page: &Page) -> Result<Scene> {
+	/// An empty scene for a page, with its setting found in `settings` and the page heading's
+	/// options applied.
+	pub fn for_page(page: &Page, settings: &Library) -> Result<Scene> {
+		let setting = settings
+			.find(&page.setting)
+			.map_err(|error| anyhow::anyhow!("line {}: {error}", page.line))?;
 		let mut scene = Scene {
-			setting: page.setting,
+			setting,
 			weather: Weather::default(),
 			actors: Vec::new(),
 			camera: Camera::default(),
@@ -561,7 +566,7 @@ pub fn rehearse(story: &Story, cast: &Cast) -> Result<Vec<Rehearsal>> {
 	let mut out = Vec::with_capacity(story.pages.len());
 
 	for (index, page) in story.pages.iter().enumerate() {
-		let mut scene = Scene::for_page(page)?;
+		let mut scene = Scene::for_page(page, &story.settings)?;
 		hide_wormsley(&mut scene, page, cast, index);
 		let opening = scene.clone();
 		let mut after = Vec::with_capacity(page.beats.len());
@@ -648,6 +653,14 @@ mod tests {
 	}
 
 	#[test]
+	fn unknown_settings_are_reported_with_line_numbers() {
+		let error = run("# moon\n").unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 5"), "{message}");
+		assert!(message.contains("unknown setting `moon`"), "{message}");
+	}
+
+	#[test]
 	fn a_kid_stands_as_tall_in_every_style() {
 		let staged = |style: &str, build: Build| {
 			let look =
@@ -669,7 +682,7 @@ mod tests {
 			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n{script}"
 		))?;
 		let page = &story.pages[0];
-		let mut scene = Scene::for_page(page)?;
+		let mut scene = Scene::for_page(page, &story.settings)?;
 		let mut memory = HashMap::new();
 
 		for beat in &page.beats {
@@ -741,7 +754,7 @@ mod tests {
 		let mut last = None;
 
 		for page in &story.pages {
-			let mut scene = Scene::for_page(page).unwrap();
+			let mut scene = Scene::for_page(page, &story.settings).unwrap();
 
 			for beat in &page.beats {
 				if let Beat::Direct(directive) = beat {

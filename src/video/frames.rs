@@ -239,7 +239,7 @@ impl Renderer<'_> {
 		let mut weather = scene.weather;
 		weather.time = time;
 		svg.begin_layer();
-		settings::backdrop_layer(&mut svg, scene.setting, &weather, Layer::Far);
+		settings::backdrop_layer(&mut svg, &scene.setting, &weather, Layer::Far);
 		svg.end();
 		svg.end();
 

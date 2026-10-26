@@ -16,13 +16,14 @@
 
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use serde::Deserialize;
 
-use crate::art::settings::Setting;
+use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::art::style::StyleName;
 pub use crate::video::voice::Voice;
@@ -167,7 +168,8 @@ pub enum Beat {
 
 #[derive(Clone, Debug)]
 pub struct Page {
-	pub setting: Setting,
+	/// The setting's name, found in the story's [`Library`] when the page is staged.
+	pub setting: String,
 	pub options: Vec<Token>,
 	pub beats: Vec<Beat>,
 	pub line: usize,
@@ -229,6 +231,8 @@ pub struct Story {
 	pub matter: crate::world::Matter,
 	/// How its world's drawing style prints and moves.
 	pub drawing: Drawing,
+	/// The settings its pages can use: the built-in ones and its world's.
+	pub settings: Arc<Library>,
 }
 
 /// How a world's drawing style prints and moves (see [`StylePack`](crate::art::pack::StylePack)).
@@ -297,6 +301,7 @@ pub fn parse(source: &str) -> Result<Story> {
 		slug,
 		matter: crate::world::Matter::default(),
 		drawing: Drawing::default(),
+		settings: Library::built_in(),
 	})
 }
 
@@ -397,18 +402,10 @@ fn parse_heading(heading: &str, line: usize) -> Result<Page> {
 		bail!("line {line}: a page heading needs a setting, e.g. `# park`");
 	};
 
-	let Some(setting) = Setting::parse(name) else {
-		let known: Vec<&str> = Setting::ALL.iter().map(|(key, _)| *key).collect();
-		bail!(
-			"line {line}: unknown setting `{name}`; try one of: {}",
-			known.join(", ")
-		);
-	};
-
 	let options = words.map(parse_token).collect();
 
 	Ok(Page {
-		setting,
+		setting: name.to_owned(),
 		options,
 		beats: Vec::new(),
 		line,
@@ -590,7 +587,7 @@ Hello.
 		assert_eq!(story.pages.len(), 2);
 
 		let page = &story.pages[0];
-		assert_eq!(page.setting, Setting::Bathroom);
+		assert_eq!(page.setting, "bathroom");
 		assert_eq!(page.text_place(), TextPlace::Bottom);
 		assert!(page.flag("night"));
 		assert_eq!(page.beats.len(), 7);
@@ -617,14 +614,6 @@ Hello.
 		);
 		assert!(matches!(&page.beats[6], Beat::Sfx { name, .. } if name == "boing"));
 		assert_eq!(page.book_text().len(), 2);
-	}
-
-	#[test]
-	fn reports_unknown_settings_with_line_numbers() {
-		let error = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# moon\n").unwrap_err();
-		let message = format!("{error:#}");
-		assert!(message.contains("line 5"), "{message}");
-		assert!(message.contains("unknown setting `moon`"), "{message}");
 	}
 
 	#[test]

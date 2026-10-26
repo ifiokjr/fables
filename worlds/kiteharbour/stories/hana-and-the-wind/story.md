@@ -14,12 +14,12 @@ pose = "x=0.5 happy wave"
 
 // A test script for the anime style, not a finished book.
 
-# park
+# harbour
 @hana x=0.35 happy wave
 In Kiteharbour, children send messages by kite.
 @hana talk
 "The wind always knows who a message is for," said Hana.
 
-# park
+# harbour
 @hana x=0.6 shocked cheer
 Then the wind pulled, and Hana held on tight!

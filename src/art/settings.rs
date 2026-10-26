@@ -1,8 +1,47 @@
-//! Places in Kerfuffle.
+//! Settings: the places stories happen, painted as part files.
 //!
-//! Every setting is drawn on the square stage with generous overdraw past the edges (for print
-//! bleed and camera moves). The top third is kept calm so story text can sit there, and the
-//! ground line is where actors stand by default.
+//! A setting is an SVG file of named parts, drawn on the square stage (2400 units, with 160 of
+//! overdraw past every edge for print bleed and camera moves). Each part's `id` starts with its
+//! layer, which is how video gets parallax and actors get something to stand in front of:
+//!
+//! - `far-…` the sky, sun, clouds and distant hills, which move least as the camera travels;
+//! - `near-…` everything else behind the actors;
+//! - `front-…` what sits in front of the actors, framing the page.
+//!
+//! A part is drawn through the page's art style, so the same file is a riso print, a cartoon
+//! or crayon. Colours are palette names or hex codes, and a part says how it reacts to the
+//! scene:
+//!
+//! | Attribute | Meaning |
+//! | --- | --- |
+//! | `fill` | The colour; `tint` is the scene's tint (the `plain` blob); `none` for a line. |
+//! | `stroke`, `stroke-width` | A line's colour and weight; `data-noodle` makes it a thick inked tube. |
+//! | `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
+//! | `data-night` | The colour at night. Parts without one are dimmed. |
+//! | `data-wilt` | The colour it turns as the scene wilts. |
+//! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). |
+//! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line. |
+//! | `data-dots` | A riso dot screen over it: `colour spacing radius opacity`. |
+//! | `data-drift` | Units a second it drifts sideways, wrapping (clouds). |
+//! | `data-swing` | `x y`: the pivot it swings from (a swing seat and its ropes). |
+//!
+//! Two kinds of part are not drawings: `<circle data-sparkle="size colour">` twinkles, and
+//! `<circle data-critter="flower|tree" r="height" data-colour data-seed>` places one of the
+//! living plants from [`critters`], which have faces and wilt. The root `<svg>` sets
+//! `data-ground`, where actors' feet rest.
+//!
+//! The built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`)
+//! are compiled in from `settings/`; a world adds or replaces them with its own `settings/`.
+
+use std::collections::BTreeMap;
+use std::path::Path as FilePath;
+use std::sync::Arc;
+use std::sync::LazyLock;
+
+use anyhow::Context;
+use anyhow::Result;
+use anyhow::bail;
+use anyhow::ensure;
 
 use super::Color;
 use super::Path;
@@ -12,50 +51,619 @@ use super::Svg;
 use super::critters;
 use super::critters::CritterState;
 use super::critters::FlowerKind;
-use super::noise;
 use super::palette;
 use super::pt;
 
 /// How far drawings extend past the stage edge.
-const OVER: f32 = 160.0;
+pub const OVER: f32 = 160.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Setting {
-	Plain,
-	Town,
-	Street,
-	Garden,
-	Park,
-	Bathroom,
-	Bedroom,
+/// The settings compiled into fables, by name.
+const BUILT_IN: [(&str, &str); 7] = [
+	("plain", include_str!("../../settings/plain.svg")),
+	("town", include_str!("../../settings/town.svg")),
+	("street", include_str!("../../settings/street.svg")),
+	("garden", include_str!("../../settings/garden.svg")),
+	("park", include_str!("../../settings/park.svg")),
+	("bathroom", include_str!("../../settings/bathroom.svg")),
+	("bedroom", include_str!("../../settings/bedroom.svg")),
+];
+
+/// A built-in setting's part file, by name.
+pub fn built_in_source(name: &str) -> Option<&'static str> {
+	BUILT_IN
+		.iter()
+		.find(|(key, _)| *key == name)
+		.map(|(_, source)| *source)
+}
+
+/// A setting file as an editor sees it: its ground, its title, and each part's id and markup,
+/// in drawing order.
+#[derive(Clone, Debug)]
+pub struct SettingFile {
+	pub ground: f32,
+	pub title: String,
+	pub parts: Vec<(String, String)>,
+}
+
+impl SettingFile {
+	/// Reads a setting file's text. Elements without a layered id are left out.
+	pub fn read(source: &str) -> Result<SettingFile> {
+		let document = roxmltree::Document::parse(source).context("not a valid SVG file")?;
+		let root = document.root_element();
+		let ground = root
+			.attribute("data-ground")
+			.context("the <svg> needs data-ground")?
+			.parse()
+			.context("data-ground is not a number")?;
+		let title = root
+			.children()
+			.find(|node| node.has_tag_name("title"))
+			.and_then(|node| node.text())
+			.unwrap_or_default()
+			.to_owned();
+		let parts = root
+			.descendants()
+			.filter_map(|node| {
+				let id = node.attribute("id")?;
+				Layer::of(id)?;
+				Some((id.to_owned(), source[node.range()].to_owned()))
+			})
+			.collect();
+		Ok(SettingFile {
+			ground,
+			title,
+			parts,
+		})
+	}
+
+	/// The file's text.
+	pub fn write(&self) -> String {
+		let (ground, title) = (self.ground, &self.title);
+		let body: Vec<&str> = self
+			.parts
+			.iter()
+			.map(|(_, markup)| markup.as_str())
+			.collect();
+		format!(
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" \
+			 data-ground=\"{ground}\">\n  <title>{}</title>\n  {}\n</svg>\n",
+			-OVER,
+			-OVER,
+			STAGE + OVER * 2.0,
+			STAGE + OVER * 2.0,
+			super::escape(title),
+			body.join("\n  ")
+		)
+	}
+}
+
+/// A painted setting, shared by every page that uses it.
+#[derive(Clone, Debug)]
+pub struct Setting(Arc<Painted>);
+
+impl PartialEq for Setting {
+	fn eq(&self, other: &Setting) -> bool {
+		Arc::ptr_eq(&self.0, &other.0) || self.0.name == other.0.name
+	}
+}
+
+/// A setting's parts.
+#[derive(Debug)]
+pub struct Painted {
+	pub name: String,
+	/// A line on what the place is, from the file's `<title>`.
+	pub about: String,
+	/// Stage y where actors' feet rest.
+	pub ground: f32,
+	parts: Vec<Part>,
 }
 
 impl Setting {
-	pub const ALL: [(&'static str, Setting); 7] = [
-		("plain", Setting::Plain),
-		("town", Setting::Town),
-		("street", Setting::Street),
-		("garden", Setting::Garden),
-		("park", Setting::Park),
-		("bathroom", Setting::Bathroom),
-		("bedroom", Setting::Bedroom),
-	];
+	pub fn name(&self) -> &str {
+		&self.0.name
+	}
 
-	pub fn parse(name: &str) -> Option<Setting> {
-		Self::ALL
-			.iter()
-			.find(|(key, _)| *key == name)
-			.map(|(_, setting)| *setting)
+	pub fn about(&self) -> &str {
+		&self.0.about
 	}
 
 	/// Stage y where actors' feet rest.
-	pub fn ground(self) -> f32 {
-		match self {
-			Setting::Plain => 2080.0,
-			Setting::Town => 2090.0,
-			Setting::Street | Setting::Garden | Setting::Park => 2060.0,
-			Setting::Bathroom | Setting::Bedroom => 2100.0,
+	pub fn ground(&self) -> f32 {
+		self.0.ground
+	}
+
+	/// The setting's part names, in drawing order.
+	pub fn part_names(&self) -> impl Iterator<Item = &str> {
+		self.0.parts.iter().map(|part| part.id.as_str())
+	}
+
+	/// Reads a setting from its part file's text.
+	pub fn parse(name: &str, source: &str) -> Result<Setting> {
+		let document = roxmltree::Document::parse(source).context("not a valid SVG file")?;
+		let root = document.root_element();
+		let ground = root
+			.attribute("data-ground")
+			.context("the <svg> needs data-ground, the y where actors stand")?
+			.parse::<f32>()
+			.context("data-ground is not a number")?;
+		let about = root
+			.children()
+			.find(|node| node.has_tag_name("title"))
+			.and_then(|node| node.text())
+			.unwrap_or_default()
+			.to_owned();
+		let mut parts = Vec::new();
+		let mut problems = Vec::new();
+
+		for node in root.descendants() {
+			let Some(id) = node.attribute("id") else {
+				continue;
+			};
+
+			match Part::read(id, node) {
+				Ok(Some(part)) => parts.push(part),
+				Ok(None) => {}
+				Err(error) => problems.push(format!("`{id}`: {error:#}")),
+			}
 		}
+
+		ensure!(
+			problems.is_empty(),
+			"unreadable parts:\n  {}",
+			problems.join("\n  ")
+		);
+		ensure!(
+			!parts.is_empty(),
+			"it has no parts (ids starting far-, near- or front-)"
+		);
+
+		Ok(Setting(Arc::new(Painted {
+			name: name.to_owned(),
+			about,
+			ground,
+			parts,
+		})))
+	}
+}
+
+/// A setting's depth layer. Video moves the far layer less than the near one as the camera
+/// travels (parallax), which gives flat art real depth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layer {
+	/// Sky, sun, clouds and distant hills.
+	Far,
+	/// Everything else behind the actors.
+	Near,
+	/// In front of the actors.
+	Front,
+}
+
+impl Layer {
+	fn of(id: &str) -> Option<Layer> {
+		let (prefix, _) = id.split_once('-')?;
+
+		match prefix {
+			"far" => Some(Layer::Far),
+			"near" => Some(Layer::Near),
+			"front" => Some(Layer::Front),
+			_ => None,
+		}
+	}
+}
+
+/// A colour, or the scene's tint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Paint {
+	Color(Color),
+	Tint,
+}
+
+impl Paint {
+	fn read(value: &str) -> Result<Paint> {
+		if value == "tint" {
+			return Ok(Paint::Tint);
+		}
+
+		Color::parse(value)
+			.map(Paint::Color)
+			.with_context(|| format!("`{value}` is not a colour"))
+	}
+
+	fn resolve(self, weather: &Weather) -> Color {
+		match self {
+			Paint::Color(color) => color,
+			Paint::Tint => weather.tint,
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+enum Mark {
+	/// A filled shape, outlined by the art style unless `outline` is off.
+	Shape {
+		path: Path,
+		fill: Paint,
+		outline: bool,
+	},
+	/// A line: plain, or a thick inked tube.
+	Line {
+		path: Path,
+		color: Paint,
+		width: f32,
+		noodle: bool,
+	},
+	Sparkle {
+		at: Pt,
+		size: f32,
+		color: Paint,
+	},
+	Critter {
+		kind: Critter,
+		at: Pt,
+		height: f32,
+		color: Color,
+		seed: u64,
+	},
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Critter {
+	Flower,
+	Tree,
+}
+
+/// A riso dot screen: colour, spacing, dot radius and opacity.
+#[derive(Clone, Copy, Debug)]
+struct Dots {
+	color: Paint,
+	spacing: f32,
+	radius: f32,
+	opacity: f32,
+}
+
+#[derive(Clone, Debug)]
+struct Part {
+	id: String,
+	layer: Layer,
+	mark: Mark,
+	/// Only drawn by day (`Some(false)`) or by night (`Some(true)`).
+	night_only: Option<bool>,
+	night: Option<Paint>,
+	wilt: Option<Color>,
+	depth: f32,
+	dots: Option<Dots>,
+	drift: f32,
+	swing: Option<Pt>,
+}
+
+impl Part {
+	/// A part from an element with an id, or `None` for elements that aren't parts.
+	fn read(id: &str, node: roxmltree::Node<'_, '_>) -> Result<Option<Part>> {
+		let Some(layer) = Layer::of(id) else {
+			return Ok(None);
+		};
+		let number = |name: &str| -> Result<Option<f32>> {
+			node.attribute(name)
+				.map(|value| {
+					value
+						.trim()
+						.parse::<f32>()
+						.with_context(|| format!("{name} is not a number"))
+				})
+				.transpose()
+		};
+		let paint = |name: &str| node.attribute(name).map(Paint::read).transpose();
+		let at = || -> Result<Pt> {
+			Ok(pt(
+				number("cx")?.context("needs cx")?,
+				number("cy")?.context("needs cy")?,
+			))
+		};
+
+		let mark = if let Some(kind) = node.attribute("data-critter") {
+			Mark::Critter {
+				kind: match kind {
+					"flower" => Critter::Flower,
+					"tree" => Critter::Tree,
+					other => bail!("unknown critter `{other}`; use flower or tree"),
+				},
+				at: at()?,
+				height: number("r")?.context("needs r, the plant's height")?,
+				color: node
+					.attribute("data-colour")
+					.and_then(Color::parse)
+					.context("needs data-colour")?,
+				seed: node
+					.attribute("data-seed")
+					.unwrap_or("0")
+					.parse()
+					.context("data-seed is not a whole number")?,
+			}
+		} else if let Some(sparkle) = node.attribute("data-sparkle") {
+			let (size, color) = sparkle
+				.split_once(' ')
+				.context("data-sparkle is `size colour`")?;
+			Mark::Sparkle {
+				at: at()?,
+				size: size.parse().context("the sparkle's size is not a number")?,
+				color: Paint::read(color.trim())?,
+			}
+		} else {
+			let path = Path::from_data(node.attribute("d").context("a part needs path data, d")?);
+
+			match node.attribute("fill") {
+				Some("none") => {
+					Mark::Line {
+						path,
+						color: paint("stroke")?.context("a line (fill=\"none\") needs a stroke")?,
+						width: number("stroke-width")?.unwrap_or(7.0),
+						noodle: node.attribute("data-noodle").is_some(),
+					}
+				}
+				Some(fill) => {
+					Mark::Shape {
+						path,
+						fill: Paint::read(fill)?,
+						outline: node.attribute("data-line") != Some("none"),
+					}
+				}
+				None => bail!("a part needs a fill, or fill=\"none\" and a stroke for a line"),
+			}
+		};
+		let dots = node
+			.attribute("data-dots")
+			.map(|value| -> Result<Dots> {
+				let words: Vec<&str> = value.split_whitespace().collect();
+				let [color, spacing, radius, opacity] = words[..] else {
+					bail!("data-dots is `colour spacing radius opacity`");
+				};
+				Ok(Dots {
+					color: Paint::read(color)?,
+					spacing: spacing.parse()?,
+					radius: radius.parse()?,
+					opacity: opacity.parse()?,
+				})
+			})
+			.transpose()?;
+		let swing = node
+			.attribute("data-swing")
+			.map(|value| -> Result<Pt> {
+				let (x, y) = value
+					.split_once(' ')
+					.context("data-swing is `x y`, the pivot")?;
+				Ok(pt(x.trim().parse()?, y.trim().parse()?))
+			})
+			.transpose()?;
+
+		Ok(Some(Part {
+			id: id.to_owned(),
+			layer,
+			mark,
+			night_only: match node.attribute("data-time") {
+				None => None,
+				Some("day") => Some(false),
+				Some("night") => Some(true),
+				Some(other) => bail!("data-time is day or night, not `{other}`"),
+			},
+			night: paint("data-night")?,
+			wilt: node
+				.attribute("data-wilt")
+				.map(|value| {
+					Color::parse(value).with_context(|| format!("`{value}` is not a colour"))
+				})
+				.transpose()?,
+			depth: number("data-depth")?.unwrap_or(0.0).clamp(0.0, 1.0),
+			dots,
+			drift: number("data-drift")?.unwrap_or(0.0),
+			swing,
+		}))
+	}
+
+	/// The part's colour in this weather.
+	fn color(&self, paint: Paint, weather: &Weather) -> Color {
+		let mut color = paint.resolve(weather);
+
+		if let Some(wilted) = self.wilt {
+			color = color.mix(wilted, weather.wilt * 0.8);
+		}
+
+		if weather.night {
+			color = match self.night {
+				Some(night) => night.resolve(weather),
+				None => color.mix(palette::NIGHT, 0.35),
+			};
+		}
+
+		// Distance fades towards the sky.
+		let haze = if weather.night {
+			palette::NIGHT
+		} else {
+			palette::SKY.lighten(0.35)
+		};
+		color.mix(haze, self.depth * 0.45)
+	}
+
+	fn draw(&self, svg: &mut Svg, weather: &Weather) {
+		if self.night_only.is_some_and(|night| night != weather.night) {
+			return;
+		}
+
+		let moved = self.drift != 0.0 || self.swing.is_some();
+
+		if moved {
+			let drift = (weather.time * self.drift) % 400.0;
+			let swing = self.swing.map_or(String::new(), |pivot| {
+				format!(
+					" rotate({:.2} {:.1} {:.1})",
+					(weather.time * 1.4).sin() * 3.0,
+					pivot.x,
+					pivot.y
+				)
+			});
+			svg.begin(&format!("translate({drift:.1} 0){swing}"));
+		}
+
+		// Far things draw thinner lines, until the farthest have none.
+		let weight = svg.line * (1.0 - self.depth * 0.6);
+
+		match &self.mark {
+			Mark::Shape {
+				path,
+				fill,
+				outline,
+			} => {
+				let color = self.color(*fill, weather);
+
+				if *outline {
+					svg.inked_weight(path, color, weight);
+				} else {
+					svg.fill(path, color);
+				}
+
+				if let Some(dots) = self.dots {
+					let mut ink = self.color(dots.color, weather);
+
+					if dots.color == Paint::Tint {
+						ink = ink.darken(0.2);
+					}
+
+					let pattern = halftone(svg, ink, dots.spacing, dots.radius);
+					fill_pattern(svg, path, &pattern, dots.opacity);
+				}
+			}
+			Mark::Line {
+				path,
+				color,
+				width,
+				noodle,
+			} => {
+				let color = self.color(*color, weather);
+
+				if *noodle {
+					svg.inked_noodle(path, color, *width);
+				} else {
+					svg.stroke(path, color, *width * (1.0 - self.depth * 0.5));
+				}
+			}
+			Mark::Sparkle { at, size, color } => {
+				let color = color.resolve(weather);
+				super::fx::sparkle(svg, *at, *size, color, weather.time + at.x * 0.01);
+			}
+			Mark::Critter {
+				kind,
+				at,
+				height,
+				color,
+				seed,
+			} => {
+				let state = CritterState {
+					wilt: weather.wilt,
+					time: weather.time,
+					..CritterState::default()
+				};
+				svg.begin(&format!("translate({:.1} {:.1})", at.x, at.y));
+
+				match kind {
+					Critter::Flower => {
+						let kinds = [FlowerKind::Daisy, FlowerKind::Tulip, FlowerKind::Sunflower];
+						let kind = kinds[(*seed % 3) as usize];
+						critters::flower(svg, kind, *color, *height, state, *seed);
+					}
+					Critter::Tree => critters::tree(svg, *color, *height, state, *seed),
+				}
+
+				svg.end();
+			}
+		}
+
+		if moved {
+			svg.end();
+		}
+	}
+}
+
+/// The settings a story can use: the built-in ones, and its world's own.
+#[derive(Clone, Debug)]
+pub struct Library {
+	settings: BTreeMap<String, Setting>,
+}
+
+static BUILT_IN_LIBRARY: LazyLock<Arc<Library>> = LazyLock::new(|| {
+	let settings = BUILT_IN
+		.iter()
+		.map(|(name, source)| {
+			let setting = Setting::parse(name, source)
+				.unwrap_or_else(|error| panic!("the built-in {name} setting: {error:#}"));
+			((*name).to_owned(), setting)
+		})
+		.collect();
+	Arc::new(Library { settings })
+});
+
+impl Library {
+	/// The settings compiled into fables.
+	pub fn built_in() -> Arc<Library> {
+		Arc::clone(&BUILT_IN_LIBRARY)
+	}
+
+	/// The built-in settings, with a world's `settings/*.svg` added (or replacing them by
+	/// name).
+	pub fn for_world(dir: &FilePath) -> Result<Arc<Library>> {
+		let folder = dir.join("settings");
+
+		if !folder.is_dir() {
+			return Ok(Self::built_in());
+		}
+
+		let mut library = (*BUILT_IN_LIBRARY).as_ref().clone();
+
+		for entry in std::fs::read_dir(&folder)
+			.with_context(|| format!("could not read {}", folder.display()))?
+		{
+			let path = entry?.path();
+
+			if path
+				.extension()
+				.is_none_or(|ext| !ext.eq_ignore_ascii_case("svg"))
+			{
+				continue;
+			}
+
+			let name = path
+				.file_stem()
+				.and_then(|stem| stem.to_str())
+				.context("a setting file needs a name")?
+				.to_owned();
+			let source = std::fs::read_to_string(&path)
+				.with_context(|| format!("could not read {}", path.display()))?;
+			let setting =
+				Setting::parse(&name, &source).with_context(|| format!("in {}", path.display()))?;
+			library.settings.insert(name, setting);
+		}
+
+		Ok(Arc::new(library))
+	}
+
+	pub fn get(&self, name: &str) -> Option<Setting> {
+		self.settings.get(name).cloned()
+	}
+
+	/// A setting by name, or an error that lists the ones there are.
+	pub fn find(&self, name: &str) -> Result<Setting> {
+		self.get(name).with_context(|| {
+			format!(
+				"unknown setting `{name}`; try one of: {}",
+				self.names().collect::<Vec<_>>().join(", ")
+			)
+		})
+	}
+
+	pub fn names(&self) -> impl Iterator<Item = &str> {
+		self.settings.keys().map(String::as_str)
+	}
+
+	pub fn settings(&self) -> impl Iterator<Item = &Setting> {
+		self.settings.values()
 	}
 }
 
@@ -93,63 +701,26 @@ impl Default for Weather {
 	}
 }
 
-/// Depth layers of a setting. Video moves the far layer less than the near one as the camera
-/// travels (parallax), which gives flat art real depth.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Layer {
-	/// Sky, sun, clouds and distant hills (or the whole of a plain backdrop).
-	Far,
-	/// Everything else behind the actors.
-	Near,
-}
-
 /// Draws everything behind the actors.
-pub fn backdrop(svg: &mut Svg, setting: Setting, weather: &Weather) {
+pub fn backdrop(svg: &mut Svg, setting: &Setting, weather: &Weather) {
 	backdrop_layer(svg, setting, weather, Layer::Far);
 	backdrop_layer(svg, setting, weather, Layer::Near);
 }
 
 /// Draws one depth layer of a setting.
-pub fn backdrop_layer(svg: &mut Svg, setting: Setting, weather: &Weather, layer: Layer) {
+pub fn backdrop_layer(svg: &mut Svg, setting: &Setting, weather: &Weather, layer: Layer) {
 	if layer == Layer::Far {
 		svg.fill(&full_rect(-OVER, STAGE + OVER * 2.0), palette::PAPER);
 	}
 
-	let (horizon, hill_base) = match setting {
-		Setting::Town => (1500.0, 1560.0),
-		Setting::Street => (1400.0, 1500.0),
-		Setting::Garden => (1350.0, 1450.0),
-		Setting::Park => (1500.0, 1600.0),
-		Setting::Plain | Setting::Bathroom | Setting::Bedroom => (0.0, 0.0),
-	};
-
-	match (setting, layer) {
-		(Setting::Plain, Layer::Far) => plain(svg, weather),
-		(Setting::Bathroom, Layer::Near) => bathroom(svg, weather),
-		(Setting::Bedroom, Layer::Near) => bedroom(svg, weather),
-		(Setting::Town | Setting::Street | Setting::Garden | Setting::Park, Layer::Far) => {
-			sky(svg, weather, horizon);
-			hills(svg, hill_base, weather);
-		}
-		(Setting::Town, Layer::Near) => town(svg, weather),
-		(Setting::Street, Layer::Near) => street(svg, weather),
-		(Setting::Garden, Layer::Near) => garden(svg, weather),
-		(Setting::Park, Layer::Near) => park(svg, weather),
-		(Setting::Plain, Layer::Near) | (Setting::Bathroom | Setting::Bedroom, Layer::Far) => {}
+	for part in setting.0.parts.iter().filter(|part| part.layer == layer) {
+		part.draw(svg, weather);
 	}
 }
 
 /// Draws anything that sits in front of the actors, plus scene-wide air effects.
-pub fn foreground(svg: &mut Svg, setting: Setting, weather: &Weather) {
-	match setting {
-		Setting::Garden => {
-			for (i, x) in [-40.0, 260.0, 2160.0, 2440.0].iter().enumerate() {
-				flower_at(svg, pt(*x, 2420.0), i as u64 + 90, 560.0, weather);
-			}
-		}
-		Setting::Park | Setting::Town => grass_tufts(svg, setting.ground() + 150.0, weather),
-		_ => {}
-	}
+pub fn foreground(svg: &mut Svg, setting: &Setting, weather: &Weather) {
+	backdrop_layer(svg, setting, weather, Layer::Front);
 
 	let bounds = (-OVER, -OVER, STAGE + OVER * 2.0, STAGE + OVER * 2.0);
 	super::fx::haze(svg, weather.stink, palette::MOSS, bounds);
@@ -183,1077 +754,22 @@ fn fill_pattern(svg: &mut Svg, path: &Path, pattern: &str, opacity: f32) {
 	));
 }
 
-fn sky(svg: &mut Svg, weather: &Weather, horizon: f32) {
-	let top = if weather.night {
-		palette::NIGHT
-	} else {
-		palette::SKY
-	};
-	svg.fill(&full_rect(-OVER, horizon + OVER), top);
-
-	let band = full_rect(horizon - 520.0, 520.0);
-	let dots = halftone(
-		svg,
-		if weather.night {
-			palette::GRAPE
-		} else {
-			palette::WHITE
-		},
-		34.0,
-		7.0,
-	);
-	fill_pattern(svg, &band, &dots, 0.55);
-
-	if weather.night {
-		svg.inked(&Path::circle(pt(1980.0, 760.0), 120.0), palette::CREAM);
-		svg.fill(&Path::circle(pt(1930.0, 730.0), 110.0), palette::NIGHT);
-
-		for i in 0..18 {
-			let p = pt(
-				100.0 + (noise(5, i) + 1.0) * 1100.0,
-				120.0 + (noise(6, i) + 1.0) * 400.0,
-			);
-			super::fx::sparkle(
-				svg,
-				p,
-				18.0 + noise(7, i).abs() * 14.0,
-				palette::CREAM,
-				weather.time + i as f32,
-			);
-		}
-
-		return;
-	}
-
-	let sun = pt(2080.0, horizon - 260.0);
-	svg.inked(
-		&Path::wobbly_ellipse(sun, 150.0, 150.0, 0.03, svg.seed(3)),
-		palette::SUNFLOWER,
-	);
-
-	for (i, x) in [260.0, 1120.0].iter().enumerate() {
-		let drift = (weather.time * 6.0) % 400.0;
-		cloud(
-			svg,
-			pt(*x + drift, horizon - 380.0 + i as f32 * 90.0),
-			1.0 - i as f32 * 0.25,
-			i as u64,
-		);
-	}
-}
-
-fn cloud(svg: &mut Svg, c: Pt, scale: f32, seed: u64) {
-	let puffs = [
-		(-110.0, 20.0, 80.0),
-		(-20.0, -30.0, 110.0),
-		(100.0, 10.0, 85.0),
-		(10.0, 40.0, 90.0),
-	];
-	let mut shape = Path::new();
-
-	for (i, (dx, dy, r)) in puffs.iter().enumerate() {
-		shape = shape.append(&Path::wobbly_ellipse(
-			c + pt(*dx, *dy) * scale,
-			r * scale,
-			r * scale * 0.8,
-			0.06,
-			seed * 10 + i as u64,
-		));
-	}
-
-	svg.fill(&shape, palette::WHITE);
-}
-
-fn hills(svg: &mut Svg, base: f32, weather: &Weather) {
-	let back = palette::MEADOW.mix(palette::MOSS, weather.wilt * 0.8);
-	let front = palette::LEAF.mix(palette::MOSS, weather.wilt * 0.8);
-	let far = Path::spline(&[
-		pt(-OVER, base - 120.0),
-		pt(400.0, base - 300.0),
-		pt(900.0, base - 180.0),
-		pt(1500.0, base - 340.0),
-		pt(2100.0, base - 200.0),
-		pt(STAGE + OVER, base - 260.0),
-	])
-	.line_to(pt(STAGE + OVER, STAGE + OVER))
-	.line_to(pt(-OVER, STAGE + OVER))
-	.close();
-	svg.fill(&far, back);
-
-	let near = Path::spline(&[
-		pt(-OVER, base - 40.0),
-		pt(700.0, base - 140.0),
-		pt(1600.0, base - 20.0),
-		pt(STAGE + OVER, base - 110.0),
-	])
-	.line_to(pt(STAGE + OVER, STAGE + OVER))
-	.line_to(pt(-OVER, STAGE + OVER))
-	.close();
-	svg.fill(&near, front);
-
-	let dots = halftone(svg, front.darken(0.25), 30.0, 6.0);
-	fill_pattern(svg, &near, &dots, 0.35);
-}
-
-fn grass_tufts(svg: &mut Svg, y: f32, weather: &Weather) {
-	let color = palette::LEAF.mix(palette::MOSS, weather.wilt).darken(0.15);
-
-	for i in 0..14 {
-		let x = -60.0 + i as f32 * 190.0 + noise(31, i) * 50.0;
-		let base = pt(x, y + noise(32, i) * 60.0);
-		let tuft = Path::new()
-			.move_to(base + pt(-24.0, 0.0))
-			.quad_to(base + pt(-30.0, -40.0), base + pt(-38.0, -62.0))
-			.move_to(base)
-			.quad_to(base + pt(4.0, -50.0), base + pt(2.0, -80.0))
-			.move_to(base + pt(22.0, 0.0))
-			.quad_to(base + pt(30.0, -40.0), base + pt(42.0, -58.0));
-		svg.stroke(&tuft, color, svg.line * 1.4);
-	}
-}
-
-fn flower_at(svg: &mut Svg, base: Pt, seed: u64, height: f32, weather: &Weather) {
-	let kinds = [FlowerKind::Daisy, FlowerKind::Tulip, FlowerKind::Sunflower];
-	let colors = [
-		palette::BUBBLEGUM,
-		palette::TOMATO,
-		palette::SUNFLOWER,
-		palette::LILAC,
-		palette::WHITE,
-	];
-	let kind = kinds[(seed % 3) as usize];
-	let color = colors[(seed % 5) as usize];
-	let state = CritterState {
-		wilt: weather.wilt,
-		time: weather.time,
-		..CritterState::default()
-	};
-
-	svg.begin(&format!("translate({:.1} {:.1})", base.x, base.y));
-	critters::flower(svg, kind, color, height, state, seed);
-	svg.end();
-}
-
-fn plain(svg: &mut Svg, weather: &Weather) {
-	svg.fill(&full_rect(-OVER, STAGE + OVER * 2.0), palette::PAPER);
-	let blob = Path::wobbly_ellipse(
-		pt(STAGE / 2.0, STAGE * 0.6),
-		STAGE * 0.42,
-		STAGE * 0.36,
-		0.06,
-		svg.seed(77),
-	);
-	svg.fill(&blob, weather.tint);
-	let dots = halftone(svg, weather.tint.darken(0.2), 36.0, 7.0);
-	fill_pattern(svg, &blob, &dots, 0.35);
-
-	for i in 0..10 {
-		let angle = i as f32 / 10.0 * std::f32::consts::TAU + 0.3;
-		let p = pt(STAGE / 2.0, STAGE * 0.6)
-			+ pt(angle.cos() * STAGE * 0.46, angle.sin() * STAGE * 0.4);
-		super::fx::sparkle(svg, p, 26.0, weather.tint, weather.time + i as f32);
-	}
-}
-
-/// A crooked Kerfuffle house. `base` is the middle of its front step.
-#[allow(clippy::too_many_arguments)]
-fn house(
-	svg: &mut Svg,
-	base: Pt,
-	w: f32,
-	h: f32,
-	wall: Color,
-	roof: Color,
-	lean: f32,
-	seed: u64,
-	night: bool,
-) {
-	let half = w / 2.0;
-	let top_shift = lean * h * 0.08;
-	let body = Path::wobbly_poly(
-		&[
-			base + pt(-half, 0.0),
-			base + pt(-half + top_shift, -h),
-			base + pt(half + top_shift, -h),
-			base + pt(half, 0.0),
-		],
-		10.0,
-		4.0,
-		svg.seed(seed),
-	);
-	svg.inked(&body, wall);
-
-	let roof_shape = Path::wobbly_poly(
-		&[
-			base + pt(-half - 40.0 + top_shift, -h + 10.0),
-			base + pt(top_shift * 1.6 + lean * 30.0, -h - w * 0.55),
-			base + pt(half + 40.0 + top_shift, -h + 10.0),
-		],
-		18.0,
-		5.0,
-		svg.seed(seed + 1),
-	);
-	let chimney = Path::wobbly_poly(
-		&[
-			base + pt(half * 0.45 + top_shift, -h - w * 0.2),
-			base + pt(half * 0.45 + top_shift, -h - w * 0.5),
-			base + pt(half * 0.75 + top_shift, -h - w * 0.5),
-			base + pt(half * 0.75 + top_shift, -h - w * 0.05),
-		],
-		6.0,
-		2.0,
-		svg.seed(seed + 2),
-	);
-	svg.inked(&chimney, palette::TOMATO.darken(0.1));
-	svg.inked(&roof_shape, roof);
-
-	let glass = if night {
-		palette::SUNFLOWER
-	} else {
-		palette::SKY.lighten(0.3)
-	};
-	let window_w = w * 0.22;
-
-	for (i, dx) in [-half * 0.5, half * 0.5].iter().enumerate() {
-		let c = base + pt(*dx + top_shift * 0.7, -h * 0.68);
-		let pane = Path::wobbly_poly(
-			&[
-				c + pt(-window_w / 2.0, -window_w * 0.6),
-				c + pt(window_w / 2.0, -window_w * 0.6),
-				c + pt(window_w / 2.0, window_w * 0.6),
-				c + pt(-window_w / 2.0, window_w * 0.6),
-			],
-			8.0,
-			2.0,
-			svg.seed(seed + 3 + i as u64),
-		);
-		svg.inked(&pane, glass);
-		svg.stroke(
-			&Path::new()
-				.move_to(c + pt(0.0, -window_w * 0.6))
-				.line_to(c + pt(0.0, window_w * 0.6)),
-			palette::INK,
-			svg.line * 0.8,
-		);
-	}
-
-	let door_w = w * 0.24;
-	let door = Path::wobbly_poly(
-		&[
-			base + pt(-door_w / 2.0, 0.0),
-			base + pt(-door_w / 2.0, -h * 0.38),
-			base + pt(0.0, -h * 0.38 - door_w * 0.35),
-			base + pt(door_w / 2.0, -h * 0.38),
-			base + pt(door_w / 2.0, 0.0),
-		],
-		12.0,
-		2.0,
-		svg.seed(seed + 6),
-	);
-	svg.inked(&door, roof.darken(0.15));
-	svg.fill(
-		&Path::circle(base + pt(door_w * 0.25, -h * 0.2), 7.0),
-		palette::SUNFLOWER,
-	);
-}
-
-fn town(svg: &mut Svg, weather: &Weather) {
-	let ground = Setting::Town.ground();
-
-	let tower_base = pt(1180.0, 1430.0);
-	let tower = Path::wobbly_poly(
-		&[
-			tower_base + pt(-90.0, 0.0),
-			tower_base + pt(-70.0, -720.0),
-			tower_base + pt(70.0, -740.0),
-			tower_base + pt(90.0, 0.0),
-		],
-		12.0,
-		4.0,
-		svg.seed(200),
-	);
-	svg.inked(&tower, palette::SAND);
-	let spire = Path::wobbly_poly(
-		&[
-			tower_base + pt(-110.0, -700.0),
-			tower_base + pt(20.0, -980.0),
-			tower_base + pt(110.0, -720.0),
-		],
-		14.0,
-		4.0,
-		svg.seed(201),
-	);
-	svg.inked(&spire, palette::GRAPE);
-	let clock_c = tower_base + pt(0.0, -560.0);
-	svg.inked(&Path::circle(clock_c, 62.0), palette::CREAM);
-	let hands = Path::new()
-		.move_to(clock_c + pt(0.0, -42.0))
-		.line_to(clock_c)
-		.line_to(clock_c + pt(30.0, 12.0));
-	svg.stroke(&hands, palette::INK, svg.line);
-
-	let row = [
-		(
-			130.0,
-			400.0,
-			470.0,
-			palette::BUBBLEGUM,
-			palette::NIGHT,
-			-1.0,
-		),
-		(
-			560.0,
-			380.0,
-			560.0,
-			palette::SUNFLOWER,
-			palette::TOMATO,
-			1.0,
-		),
-		(930.0, 330.0, 420.0, palette::TEAL, palette::PLUM, -1.0),
-		(1480.0, 370.0, 520.0, palette::LILAC, palette::TEAL, 1.0),
-		(
-			1880.0,
-			400.0,
-			450.0,
-			palette::TANGERINE,
-			palette::CORNFLOWER,
-			-1.0,
-		),
-		(2290.0, 380.0, 560.0, palette::MINT, palette::BUBBLEGUM, 1.0),
-	];
-
-	for (i, (x, w, h, wall, roof, lean)) in row.iter().enumerate() {
-		house(
-			svg,
-			pt(*x, 1660.0 + noise(9, i as u64) * 30.0),
-			*w,
-			*h,
-			*wall,
-			*roof,
-			*lean,
-			300 + i as u64 * 10,
-			weather.night,
-		);
-	}
-
-	let path = Path::spline(&[
-		pt(-OVER, ground + 40.0),
-		pt(800.0, ground - 40.0),
-		pt(1700.0, ground + 30.0),
-		pt(STAGE + OVER, ground - 20.0),
-	])
-	.line_to(pt(STAGE + OVER, ground + 220.0))
-	.line_to(pt(-OVER, ground + 240.0))
-	.close();
-	svg.fill(&path, palette::SAND);
-	let dots = halftone(svg, palette::TOFFEE, 26.0, 5.0);
-	fill_pattern(svg, &path, &dots, 0.4);
-}
-
-fn bunting(svg: &mut Svg, from: Pt, to: Pt, sag: f32) {
-	let mid = from.lerp(to, 0.5) + pt(0.0, sag);
-	let line = Path::new().move_to(from).quad_to(mid, to);
-	svg.stroke(&line, palette::INK, svg.line * 0.7);
-	let colors = [
-		palette::TOMATO,
-		palette::SUNFLOWER,
-		palette::TEAL,
-		palette::BUBBLEGUM,
-		palette::CORNFLOWER,
-	];
-	let flags = 16;
-
-	for i in 1..flags {
-		let t = i as f32 / flags as f32;
-		let a = from.lerp(mid, t);
-		let b = mid.lerp(to, t);
-		let p = a.lerp(b, t);
-		let flag = Path::new()
-			.move_to(p + pt(-34.0, 0.0))
-			.line_to(p + pt(34.0, 0.0))
-			.line_to(p + pt(0.0, 70.0))
-			.close();
-		svg.inked(&flag, colors[i % colors.len()]);
-	}
-}
-
-fn street(svg: &mut Svg, weather: &Weather) {
-	let ground = Setting::Street.ground();
-
-	let fronts = [
-		(
-			260.0,
-			760.0,
-			900.0,
-			palette::SUNFLOWER,
-			palette::TOMATO,
-			-1.0,
-		),
-		(1200.0, 700.0, 780.0, palette::LILAC, palette::NIGHT, 1.0),
-		(
-			2120.0,
-			740.0,
-			860.0,
-			palette::MINT,
-			palette::CORNFLOWER,
-			-1.0,
-		),
-	];
-
-	for (i, (x, w, h, wall, roof, lean)) in fronts.iter().enumerate() {
-		house(
-			svg,
-			pt(*x, ground - 330.0),
-			*w,
-			*h,
-			*wall,
-			*roof,
-			*lean,
-			400 + i as u64 * 10,
-			weather.night,
-		);
-	}
-
-	bunting(svg, pt(560.0, 1000.0), pt(1860.0, 1000.0), 160.0);
-
-	let pavement = full_rect(ground - 330.0, 600.0);
-	svg.fill(&pavement, palette::SAND);
-
-	for i in 0..9 {
-		let x = -100.0 + i as f32 * 320.0;
-		let crack = Path::new()
-			.move_to(pt(x, ground - 330.0))
-			.line_to(pt(x - 60.0, ground + 270.0));
-		svg.stroke(&crack, palette::TOFFEE, svg.line * 0.8);
-	}
-
-	let kerb = full_rect(ground + 250.0, 400.0);
-	svg.fill(&kerb, palette::SLATE);
-
-	let lamp_base = pt(1720.0, ground - 290.0);
-	let post = Path::new()
-		.move_to(lamp_base)
-		.line_to(lamp_base + pt(0.0, -980.0));
-	svg.inked_noodle(&post, palette::NIGHT, 26.0);
-	let lamp = Path::wobbly_poly(
-		&[
-			lamp_base + pt(-60.0, -1080.0),
-			lamp_base + pt(60.0, -1080.0),
-			lamp_base + pt(40.0, -980.0),
-			lamp_base + pt(-40.0, -980.0),
-		],
-		10.0,
-		2.0,
-		svg.seed(410),
-	);
-	svg.inked(
-		&lamp,
-		if weather.night {
-			palette::SUNFLOWER
-		} else {
-			palette::CREAM
-		},
-	);
-
-	let box_base = pt(700.0, ground - 300.0);
-	let postbox = Path::wobbly_poly(
-		&[
-			box_base + pt(-70.0, 0.0),
-			box_base + pt(-70.0, -300.0),
-			box_base + pt(70.0, -300.0),
-			box_base + pt(70.0, 0.0),
-		],
-		50.0,
-		2.0,
-		svg.seed(411),
-	);
-	svg.inked(&postbox, palette::TOMATO);
-	svg.inked(
-		&Path::rect(box_base.x - 45.0, box_base.y - 220.0, 90.0, 18.0),
-		palette::INK,
-	);
-
-	for (i, x) in [1000.0, 1440.0].iter().enumerate() {
-		hedge(svg, pt(*x, ground - 300.0), 200.0, weather, 420 + i as u64);
-	}
-}
-
-fn hedge(svg: &mut Svg, base: Pt, w: f32, weather: &Weather, seed: u64) {
-	let color = palette::LEAF
-		.mix(palette::MOSS, weather.wilt)
-		.mix(palette::TOFFEE, weather.wilt * 0.4);
-	let bush = Path::wobbly_ellipse(base + pt(0.0, -w * 0.45), w, w * 0.55, 0.12, svg.seed(seed));
-	svg.inked(&bush, color);
-}
-
-fn garden(svg: &mut Svg, weather: &Weather) {
-	let ground = Setting::Garden.ground();
-
-	let fence_top = ground - 640.0;
-	let rail_color = palette::TOFFEE;
-
-	for i in 0..14 {
-		let x = -100.0 + i as f32 * 190.0;
-		let picket = Path::wobbly_poly(
-			&[
-				pt(x - 48.0, ground - 200.0),
-				pt(x - 48.0, fence_top + 50.0),
-				pt(x, fence_top),
-				pt(x + 48.0, fence_top + 50.0),
-				pt(x + 48.0, ground - 200.0),
-			],
-			6.0,
-			3.0,
-			svg.seed(500 + i),
-		);
-		svg.inked(&picket, palette::CREAM);
-	}
-
-	for y in [fence_top + 120.0, ground - 330.0] {
-		svg.inked(&full_rect(y, 36.0), rail_color);
-	}
-
-	let lawn = full_rect(ground - 220.0, 700.0);
-	svg.fill(&lawn, palette::LEAF.mix(palette::MOSS, weather.wilt * 0.8));
-	let soil = Path::wobbly_poly(
-		&[
-			pt(-OVER, ground - 250.0),
-			pt(STAGE + OVER, ground - 250.0),
-			pt(STAGE + OVER, ground - 120.0),
-			pt(-OVER, ground - 120.0),
-		],
-		30.0,
-		8.0,
-		svg.seed(520),
-	);
-	svg.fill(&soil, palette::COCOA);
-
-	for i in 0..9 {
-		let x = 80.0 + i as f32 * 280.0 + noise(521, i) * 40.0;
-		let height = 420.0 + noise(522, i) * 90.0;
-		flower_at(svg, pt(x, ground - 170.0), 530 + i, height, weather);
-	}
-}
-
-fn park(svg: &mut Svg, weather: &Weather) {
-	let ground = Setting::Park.ground();
-
-	let tree_state = CritterState {
-		wilt: weather.wilt,
-		time: weather.time,
-		..CritterState::default()
-	};
-
-	for (i, (x, h, color)) in [
-		(120.0, 1100.0, palette::LEAF),
-		(560.0, 820.0, palette::TEAL),
-		(2280.0, 1050.0, palette::LEAF),
-	]
-	.iter()
-	.enumerate()
-	{
-		svg.begin(&format!("translate({x} {})", ground - 280.0));
-		critters::tree(svg, *color, *h, tree_state, 600 + i as u64);
-		svg.end();
-	}
-
-	slide(svg, pt(1780.0, ground - 260.0));
-	swing(svg, pt(980.0, ground - 260.0), weather.time);
-
-	let path = Path::spline(&[
-		pt(-OVER, ground + 180.0),
-		pt(900.0, ground + 80.0),
-		pt(1700.0, ground + 160.0),
-		pt(STAGE + OVER, ground + 60.0),
-	])
-	.line_to(pt(STAGE + OVER, ground + 300.0))
-	.line_to(pt(-OVER, ground + 320.0))
-	.close();
-	svg.fill(&path, palette::SAND);
-}
-
-fn slide(svg: &mut Svg, base: Pt) {
-	let ladder = Path::new()
-		.move_to(base + pt(150.0, 0.0))
-		.line_to(base + pt(150.0, -620.0));
-	svg.inked_noodle(&ladder, palette::CORNFLOWER, 24.0);
-	let ladder2 = Path::new()
-		.move_to(base + pt(270.0, 0.0))
-		.line_to(base + pt(270.0, -620.0));
-	svg.inked_noodle(&ladder2, palette::CORNFLOWER, 24.0);
-
-	for i in 1..6 {
-		let y = -i as f32 * 105.0;
-		svg.stroke(
-			&Path::new()
-				.move_to(base + pt(150.0, y))
-				.line_to(base + pt(270.0, y)),
-			palette::INK,
-			svg.line * 1.6,
-		);
-	}
-
-	let chute = Path::new()
-		.move_to(base + pt(150.0, -620.0))
-		.cubic_to(
-			base + pt(-40.0, -560.0),
-			base + pt(-150.0, -60.0),
-			base + pt(-330.0, -30.0),
-		)
-		.line_to(base + pt(-330.0, 30.0))
-		.cubic_to(
-			base + pt(-120.0, 10.0),
-			base + pt(0.0, -520.0),
-			base + pt(170.0, -560.0),
-		)
-		.close();
-	svg.inked(&chute, palette::TOMATO);
-	svg.inked(
-		&Path::rect(base.x + 120.0, base.y - 660.0, 180.0, 50.0),
-		palette::SUNFLOWER,
-	);
-}
-
-fn swing(svg: &mut Svg, base: Pt, time: f32) {
-	let frame = Path::new()
-		.move_to(base + pt(-260.0, 0.0))
-		.line_to(base + pt(-200.0, -760.0))
-		.line_to(base + pt(200.0, -760.0))
-		.line_to(base + pt(260.0, 0.0));
-	svg.stroke(&frame, palette::INK, 36.0);
-	svg.stroke(&frame, palette::SUNFLOWER, 22.0);
-
-	let sway = (time * 1.4).sin() * 40.0;
-
-	for dx in [-60.0, 60.0] {
-		let rope = Path::new()
-			.move_to(base + pt(dx, -760.0))
-			.line_to(base + pt(dx + sway, -250.0));
-		svg.stroke(&rope, palette::INK, svg.line);
-	}
-
-	let seat = Path::wobbly_poly(
-		&[
-			base + pt(-95.0 + sway, -265.0),
-			base + pt(95.0 + sway, -265.0),
-			base + pt(95.0 + sway, -225.0),
-			base + pt(-95.0 + sway, -225.0),
-		],
-		8.0,
-		2.0,
-		svg.seed(620),
-	);
-	svg.inked(&seat, palette::TEAL);
-}
-
-fn tiles(svg: &mut Svg, top: f32, bottom: f32, size: f32, grout: Color) {
-	let mut y = top;
-
-	while y < bottom {
-		svg.stroke(
-			&Path::new()
-				.move_to(pt(-OVER, y))
-				.line_to(pt(STAGE + OVER, y)),
-			grout,
-			5.0,
-		);
-		y += size;
-	}
-
-	let mut x = -OVER;
-
-	while x < STAGE + OVER {
-		svg.stroke(
-			&Path::new().move_to(pt(x, top)).line_to(pt(x, bottom)),
-			grout,
-			5.0,
-		);
-		x += size;
-	}
-}
-
-fn bathroom(svg: &mut Svg, weather: &Weather) {
-	let ground = Setting::Bathroom.ground();
-	let wall = if weather.night {
-		palette::SKY.darken(0.25)
-	} else {
-		palette::ICE
-	};
-	svg.fill(&full_rect(-OVER, ground + OVER), wall);
-	tiles(svg, 1150.0, ground - 120.0, 150.0, palette::SKY);
-	svg.inked(&full_rect(1120.0, 40.0), palette::TEAL);
-
-	let floor = full_rect(ground - 120.0, 800.0);
-	svg.fill(&floor, palette::CORNFLOWER);
-	let dots = halftone(svg, palette::WHITE, 40.0, 8.0);
-	fill_pattern(svg, &floor, &dots, 0.35);
-
-	let tub = Path::wobbly_poly(
-		&[
-			pt(-OVER, 1480.0),
-			pt(780.0, 1480.0),
-			pt(740.0, 1960.0),
-			pt(-OVER, 1960.0),
-		],
-		90.0,
-		4.0,
-		svg.seed(700),
-	);
-	svg.inked(&tub, palette::WHITE);
-
-	for i in 0..8 {
-		let p = pt(
-			40.0 + i as f32 * 90.0 + noise(701, i) * 30.0,
-			1430.0 + noise(702, i) * 40.0,
-		);
-		svg.inked(
-			&Path::circle(p, 40.0 + noise(703, i).abs() * 30.0),
-			palette::WHITE,
-		);
-	}
-
-	duck(svg, pt(560.0, 1380.0));
-
-	let mirror_c = pt(1700.0, 760.0);
-	svg.inked(
-		&Path::wobbly_ellipse(mirror_c, 290.0, 330.0, 0.02, svg.seed(710)),
-		palette::SUNFLOWER,
-	);
-	svg.inked(
-		&Path::wobbly_ellipse(mirror_c, 245.0, 285.0, 0.02, svg.seed(711)),
-		palette::ICE.mix(palette::SKY, 0.3),
-	);
-	let shine = Path::new()
-		.move_to(mirror_c + pt(-150.0, -120.0))
-		.line_to(mirror_c + pt(-60.0, -210.0));
-	svg.stroke(&shine, palette::WHITE, 22.0);
-
-	let sink_top = 1340.0;
-	let pedestal = Path::wobbly_poly(
-		&[
-			pt(1630.0, sink_top),
-			pt(1770.0, sink_top),
-			pt(1740.0, ground - 120.0),
-			pt(1660.0, ground - 120.0),
-		],
-		12.0,
-		3.0,
-		svg.seed(712),
-	);
-	svg.inked(&pedestal, palette::WHITE);
-	let basin = Path::wobbly_poly(
-		&[
-			pt(1420.0, sink_top - 120.0),
-			pt(1980.0, sink_top - 120.0),
-			pt(1900.0, sink_top + 40.0),
-			pt(1500.0, sink_top + 40.0),
-		],
-		50.0,
-		3.0,
-		svg.seed(713),
-	);
-	svg.inked(&basin, palette::WHITE);
-	let tap = Path::new()
-		.move_to(pt(1700.0, sink_top - 120.0))
-		.line_to(pt(1700.0, sink_top - 200.0))
-		.line_to(pt(1760.0, sink_top - 200.0));
-	svg.inked_noodle(&tap, palette::SLATE, 22.0);
-
-	let cup_base = pt(1910.0, sink_top - 120.0);
-	let cup = Path::wobbly_poly(
-		&[
-			cup_base + pt(-45.0, 0.0),
-			cup_base + pt(-52.0, -130.0),
-			cup_base + pt(52.0, -130.0),
-			cup_base + pt(45.0, 0.0),
-		],
-		10.0,
-		2.0,
-		svg.seed(714),
-	);
-	let brush = Path::new()
-		.move_to(cup_base + pt(-10.0, -60.0))
-		.line_to(cup_base + pt(-40.0, -250.0));
-	svg.inked_noodle(&brush, palette::BUBBLEGUM, 14.0);
-	let brush2 = Path::new()
-		.move_to(cup_base + pt(10.0, -60.0))
-		.line_to(cup_base + pt(30.0, -240.0));
-	svg.inked_noodle(&brush2, palette::SUNFLOWER, 14.0);
-	svg.inked(&cup, palette::BUBBLEGUM);
-
-	let mat = Path::wobbly_poly(
-		&[
-			pt(1180.0, ground - 40.0),
-			pt(1980.0, ground - 40.0),
-			pt(2060.0, ground + 120.0),
-			pt(1100.0, ground + 120.0),
-		],
-		30.0,
-		4.0,
-		svg.seed(715),
-	);
-	svg.inked(&mat, palette::BUBBLEGUM);
-	let mat_dots = halftone(svg, palette::WHITE, 30.0, 6.0);
-	fill_pattern(svg, &mat, &mat_dots, 0.6);
-}
-
-fn duck(svg: &mut Svg, c: Pt) {
-	let body = Path::wobbly_ellipse(c, 70.0, 46.0, 0.05, 720);
-	let head = Path::wobbly_ellipse(c + pt(46.0, -56.0), 38.0, 36.0, 0.05, 721);
-	svg.inked(&body, palette::SUNFLOWER);
-	svg.inked(&head, palette::SUNFLOWER);
-	let beak = Path::new()
-		.move_to(c + pt(76.0, -64.0))
-		.line_to(c + pt(118.0, -52.0))
-		.line_to(c + pt(76.0, -44.0))
-		.close();
-	svg.inked(&beak, palette::TANGERINE);
-	svg.fill(&Path::circle(c + pt(56.0, -64.0), 7.0), palette::INK);
-}
-
-fn bedroom(svg: &mut Svg, weather: &Weather) {
-	let ground = Setting::Bedroom.ground();
-	let wall = if weather.night {
-		palette::GRAPE.darken(0.35)
-	} else {
-		palette::LILAC
-	};
-	svg.fill(&full_rect(-OVER, ground + OVER), wall);
-
-	let stripe = if weather.night {
-		palette::GRAPE.darken(0.2)
-	} else {
-		palette::LILAC.lighten(0.3)
-	};
-	let mut x = -OVER;
-
-	while x < STAGE + OVER {
-		svg.fill(&Path::rect(x, -OVER, 60.0, ground + OVER), stripe);
-		x += 180.0;
-	}
-
-	window(svg, pt(1720.0, 820.0), weather);
-
-	let floor = full_rect(ground - 140.0, 800.0);
-	svg.fill(&floor, palette::TOFFEE);
-
-	for i in 0..6 {
-		let y = ground - 140.0 + i as f32 * 110.0;
-		svg.stroke(
-			&Path::new()
-				.move_to(pt(-OVER, y))
-				.line_to(pt(STAGE + OVER, y)),
-			palette::COCOA,
-			5.0,
-		);
-	}
-
-	let rug = Path::wobbly_ellipse(pt(1250.0, ground + 40.0), 620.0, 130.0, 0.03, svg.seed(800));
-	svg.inked(&rug, palette::TEAL);
-	svg.stroke(
-		&Path::wobbly_ellipse(pt(1250.0, ground + 40.0), 520.0, 90.0, 0.03, svg.seed(801)),
-		palette::CREAM,
-		14.0,
-	);
-
-	let bed_top = 1500.0;
-	let headboard = Path::wobbly_poly(
-		&[
-			pt(-OVER, ground - 120.0),
-			pt(-OVER, bed_top - 360.0),
-			pt(120.0, bed_top - 420.0),
-			pt(160.0, ground - 120.0),
-		],
-		30.0,
-		4.0,
-		svg.seed(802),
-	);
-	svg.inked(&headboard, palette::CORNFLOWER);
-	let mattress = Path::wobbly_poly(
-		&[
-			pt(-OVER, bed_top),
-			pt(820.0, bed_top),
-			pt(820.0, ground - 160.0),
-			pt(-OVER, ground - 160.0),
-		],
-		40.0,
-		4.0,
-		svg.seed(803),
-	);
-	svg.inked(&mattress, palette::WHITE);
-	let duvet = Path::wobbly_poly(
-		&[
-			pt(160.0, bed_top - 30.0),
-			pt(860.0, bed_top - 10.0),
-			pt(880.0, ground - 120.0),
-			pt(140.0, ground - 120.0),
-		],
-		60.0,
-		6.0,
-		svg.seed(804),
-	);
-	svg.inked(&duvet, palette::SUNFLOWER);
-	let duvet_dots = halftone(svg, palette::TANGERINE, 46.0, 10.0);
-	fill_pattern(svg, &duvet, &duvet_dots, 0.7);
-	let pillow = Path::wobbly_ellipse(pt(30.0, bed_top - 50.0), 150.0, 70.0, 0.06, svg.seed(805));
-	svg.inked(&pillow, palette::WHITE);
-
-	let lamp_base = pt(1020.0, 1640.0);
-	let table = Path::wobbly_poly(
-		&[
-			lamp_base + pt(-110.0, 0.0),
-			lamp_base + pt(110.0, 0.0),
-			lamp_base + pt(100.0, 320.0),
-			lamp_base + pt(-100.0, 320.0),
-		],
-		12.0,
-		3.0,
-		svg.seed(806),
-	);
-	svg.inked(&table, palette::TOMATO);
-	let stem = Path::new()
-		.move_to(lamp_base)
-		.line_to(lamp_base + pt(0.0, -190.0));
-	svg.inked_noodle(&stem, palette::INK, 14.0);
-	let shade = Path::wobbly_poly(
-		&[
-			lamp_base + pt(-90.0, -180.0),
-			lamp_base + pt(90.0, -180.0),
-			lamp_base + pt(55.0, -320.0),
-			lamp_base + pt(-55.0, -320.0),
-		],
-		10.0,
-		2.0,
-		svg.seed(807),
-	);
-	svg.inked(
-		&shade,
-		if weather.night {
-			palette::SUNFLOWER
-		} else {
-			palette::MINT
-		},
-	);
-
-	let shelf_y = 1180.0;
-	svg.inked(&Path::rect(2050.0, shelf_y, 420.0, 34.0), palette::COCOA);
-	let rocket = Path::wobbly_poly(
-		&[
-			pt(2120.0, shelf_y),
-			pt(2120.0, shelf_y - 140.0),
-			pt(2160.0, shelf_y - 220.0),
-			pt(2200.0, shelf_y - 140.0),
-			pt(2200.0, shelf_y),
-		],
-		10.0,
-		2.0,
-		svg.seed(808),
-	);
-	svg.inked(&rocket, palette::TOMATO);
-	svg.inked(
-		&Path::circle(pt(2340.0, shelf_y - 70.0), 70.0),
-		palette::CORNFLOWER,
-	);
-	svg.fill(
-		&super::figure::star_path(pt(2340.0, shelf_y - 70.0), 40.0, 18.0, 5),
-		palette::SUNFLOWER,
-	);
-}
-
-fn window(svg: &mut Svg, c: Pt, weather: &Weather) {
-	let w = 360.0;
-	let h = 420.0;
-	let frame = Path::wobbly_poly(
-		&[c + pt(-w, -h), c + pt(w, -h), c + pt(w, h), c + pt(-w, h)],
-		20.0,
-		3.0,
-		svg.seed(820),
-	);
-	svg.inked(&frame, palette::CREAM);
-	let glass_color = if weather.night {
-		palette::NIGHT
-	} else {
-		palette::SKY
-	};
-	let glass = Path::rect(
-		c.x - w + 40.0,
-		c.y - h + 40.0,
-		w * 2.0 - 80.0,
-		h * 2.0 - 80.0,
-	);
-	svg.fill(&glass, glass_color);
-
-	if weather.night {
-		svg.inked(&Path::circle(c + pt(120.0, -150.0), 90.0), palette::CREAM);
-		svg.fill(&Path::circle(c + pt(85.0, -175.0), 80.0), glass_color);
-
-		for i in 0..6 {
-			let p = c + pt(noise(821, i) * w * 0.8, noise(822, i) * h * 0.8);
-			super::fx::sparkle(svg, p, 20.0, palette::CREAM, weather.time + i as f32);
-		}
-	} else {
-		cloud(svg, c + pt(-60.0, -120.0), 0.7, 8);
-		svg.inked(
-			&Path::circle(c + pt(170.0, 190.0), 70.0),
-			palette::SUNFLOWER,
-		);
-	}
-
-	svg.stroke(
-		&Path::new()
-			.move_to(c + pt(0.0, -h + 40.0))
-			.line_to(c + pt(0.0, h - 40.0)),
-		palette::CREAM,
-		34.0,
-	);
-	svg.stroke(
-		&Path::new()
-			.move_to(c + pt(-w + 40.0, 0.0))
-			.line_to(c + pt(w - 40.0, 0.0)),
-		palette::CREAM,
-		34.0,
-	);
-
-	for side in [-1.0, 1.0] {
-		let curtain = Path::wobbly_poly(
-			&[
-				c + pt(side * (w + 80.0), -h - 60.0),
-				c + pt(side * (w - 120.0), -h - 60.0),
-				c + pt(side * (w - 40.0), h + 60.0),
-				c + pt(side * (w + 120.0), h + 120.0),
-			],
-			30.0,
-			5.0,
-			svg.seed(830 + side as u64),
-		);
-		svg.inked(&curtain, palette::BUBBLEGUM);
-	}
-
-	svg.inked(
-		&Path::rect(c.x - w - 140.0, c.y - h - 90.0, w * 2.0 + 280.0, 40.0),
-		palette::COCOA,
-	);
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	#[test]
-	fn settings_round_trip_by_name() {
-		for (name, setting) in Setting::ALL {
-			assert_eq!(Setting::parse(name), Some(setting));
-		}
-	}
+	fn every_built_in_setting_renders_by_day_and_night() {
+		let library = Library::built_in();
+		assert_eq!(library.names().count(), BUILT_IN.len());
 
-	#[test]
-	fn every_setting_renders() {
-		for (_, setting) in Setting::ALL {
+		for setting in library.settings() {
 			for night in [false, true] {
 				let mut svg = Svg::new();
 				let weather = Weather {
 					night,
 					wilt: 0.5,
+					time: 1.0,
 					..Weather::default()
 				};
 				backdrop(&mut svg, setting, &weather);
@@ -1262,5 +778,73 @@ mod tests {
 				crate::raster::render(&doc).unwrap();
 			}
 		}
+	}
+
+	#[test]
+	fn a_part_reacts_to_the_weather() {
+		let setting = Setting::parse(
+			"test",
+			r#"<svg data-ground="2000"><path id="near-hedge" d="M0 0 L10 0 L10 10 Z" fill="leaf" data-wilt="toffee" data-night="night"/><circle id="far-moon" cx="5" cy="5" data-sparkle="20 cream" data-time="night"/></svg>"#,
+		)
+		.unwrap();
+		let hedge = &setting.0.parts[0];
+		let Mark::Shape { fill, .. } = hedge.mark else {
+			panic!("the hedge is a shape");
+		};
+		let day = hedge.color(fill, &Weather::default());
+		let wilted = hedge.color(
+			fill,
+			&Weather {
+				wilt: 1.0,
+				..Weather::default()
+			},
+		);
+		assert_eq!(day, palette::LEAF);
+		assert_ne!(wilted, day);
+		assert_eq!(
+			hedge.color(
+				fill,
+				&Weather {
+					night: true,
+					..Weather::default()
+				}
+			),
+			palette::NIGHT
+		);
+		assert_eq!(setting.0.parts[1].night_only, Some(true));
+		assert_eq!(setting.ground(), 2000.0);
+	}
+
+	#[test]
+	fn a_bad_part_says_which_and_why() {
+		let error = Setting::parse(
+			"test",
+			r#"<svg data-ground="2000"><path id="near-wall" d="M0 0 L1 1" fill="chartreuse-ish"/></svg>"#,
+		)
+		.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(
+			message.contains("near-wall") && message.contains("not a colour"),
+			"{message}"
+		);
+	}
+
+	#[test]
+	fn a_world_adds_its_own_settings() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join("settings")).unwrap();
+		std::fs::write(
+			dir.path().join("settings/harbour.svg"),
+			r#"<svg data-ground="2050"><title>The harbour wall</title><path id="far-sea" d="M0 0 L10 0 L10 10 Z" fill="cornflower" data-line="none"/></svg>"#,
+		)
+		.unwrap();
+		let library = Library::for_world(dir.path()).unwrap();
+		assert_eq!(library.find("harbour").unwrap().about(), "The harbour wall");
+		assert!(library.find("park").is_ok(), "the built-in settings stay");
+		let error = format!("{:#}", library.find("moon").unwrap_err());
+		assert!(
+			error.contains("harbour") && error.contains("park"),
+			"{error}"
+		);
 	}
 }

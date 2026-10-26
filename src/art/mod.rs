@@ -159,6 +159,12 @@ impl Path {
 		Self::default()
 	}
 
+	/// Path data written elsewhere, such as a part file's `d`.
+	#[must_use]
+	pub fn from_data(data: &str) -> Self {
+		Self(data.trim().to_owned())
+	}
+
 	#[must_use]
 	pub fn move_to(mut self, p: Pt) -> Self {
 		let _ = write!(self.0, "M{:.1} {:.1}", p.x, p.y);

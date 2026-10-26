@@ -28,7 +28,7 @@ use crate::art::parts::Views;
 use crate::art::pt;
 use crate::art::rig::Stance;
 use crate::art::settings;
-use crate::art::settings::Setting;
+use crate::art::settings::Library;
 use crate::art::settings::Weather;
 use crate::art::shape::Shape;
 use crate::art::style::Style;
@@ -373,13 +373,14 @@ pub fn model_sheet(title: &str, look: &Look, px: u32) -> Result<Pixmap> {
 	raster::render(&svg.finish((0.0, 0.0, width, height), px, px_height))
 }
 
-/// Every setting, by day and with wilted plants, labelled with its script name.
-pub fn places_sheet(style: Style) -> Result<Pixmap> {
+/// Every setting in `settings`, by day, plus a few in other weather, labelled with their
+/// script names.
+pub fn places_sheet(settings: &Library, style: Style) -> Result<Pixmap> {
 	let cell = 600.0;
 	let columns = 4;
 	let mut list: Vec<(&str, Weather)> = Vec::new();
 
-	for (name, _) in Setting::ALL {
+	for name in settings.names() {
 		list.push((name, Weather::default()));
 	}
 
@@ -420,7 +421,9 @@ pub fn places_sheet(style: Style) -> Result<Pixmap> {
 
 	for (index, (label, weather)) in list.iter().enumerate() {
 		let name = label.split_whitespace().next().unwrap_or_default();
-		let setting = Setting::parse(name).unwrap_or(Setting::Plain);
+		let Some(setting) = settings.get(name) else {
+			continue;
+		};
 		let x = (index % columns) as f32 * cell;
 		let y = (index / columns) as f32 * (cell + 90.0);
 		let clip = svg.next_id("place");
@@ -435,8 +438,8 @@ pub fn places_sheet(style: Style) -> Result<Pixmap> {
 		));
 		svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
 		svg.begin_layer();
-		settings::backdrop(&mut svg, setting, weather);
-		settings::foreground(&mut svg, setting, weather);
+		settings::backdrop(&mut svg, &setting, weather);
+		settings::foreground(&mut svg, &setting, weather);
 		svg.end();
 		svg.raw("</g>");
 		svg.end();

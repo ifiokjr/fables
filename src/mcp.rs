@@ -28,6 +28,8 @@ use crate::studio::CharacterBrief;
 use crate::studio::Image;
 use crate::studio::Output;
 use crate::studio::PartData;
+use crate::studio::SettingPart;
+use crate::studio::SettingWeather;
 use crate::studio::SheetKind;
 use crate::studio::Studio;
 use crate::studio::VideoShape;
@@ -173,6 +175,44 @@ pub struct VideoParams {
 	/// Half size at 15 frames a second, for checking timing quickly.
 	#[serde(default)]
 	pub preview: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SettingParams {
+	pub world: String,
+	/// The setting's name, as a page heading uses it (`# park`).
+	pub setting: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateSettingParams {
+	pub world: String,
+	/// The new setting's name: lowercase words joined by hyphens.
+	pub setting: String,
+	/// A line on what the place is.
+	pub about: String,
+	/// A setting to start from (to repaint it); leave out for a sky over the ground.
+	pub from: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetSettingPartsParams {
+	pub world: String,
+	pub setting: String,
+	/// Parts to write or replace, each one SVG element.
+	#[serde(default)]
+	pub parts: Vec<SettingPart>,
+	/// Part ids to remove.
+	#[serde(default)]
+	pub remove: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RenderSettingParams {
+	pub world: String,
+	pub setting: String,
+	#[serde(default, flatten)]
+	pub weather: SettingWeather,
 }
 
 #[derive(Serialize)]
@@ -404,6 +444,66 @@ impl StudioServer {
 		)
 	}
 
+	#[tool(description = "List the settings a world's books can use, built-in and its own.")]
+	fn setting_list(&self, Parameters(params): Parameters<WorldParams>) -> CallToolResult {
+		json(self.studio.settings(&params.world))
+	}
+
+	#[tool(
+		description = "Start a world's own setting: a copy of one it can use (to repaint it), or \
+		               a sky over the ground. Settings are SVG part files on a 2400-unit stage; \
+		               setting_parts shows the format."
+	)]
+	fn setting_create(
+		&self,
+		Parameters(params): Parameters<CreateSettingParams>,
+	) -> CallToolResult {
+		json(self.studio.create_setting(
+			&params.world,
+			&params.setting,
+			&params.about,
+			params.from.as_deref(),
+		))
+	}
+
+	#[tool(
+		description = "Read a setting's parts as SVG elements. Ids start far- (sky, moves least), \
+		               near- (behind the actors) or front- (in front). Fills are palette names; \
+		               data-night, data-wilt, data-depth, data-time, data-drift and data-swing \
+		               say how a part reacts to the scene."
+	)]
+	fn setting_parts(&self, Parameters(params): Parameters<SettingParams>) -> CallToolResult {
+		json(self.studio.setting_parts(&params.world, &params.setting))
+	}
+
+	#[tool(
+		description = "Write or replace parts of a world's own setting, each one SVG element, or \
+		               remove parts. A file that wouldn't read is not written."
+	)]
+	fn setting_set_parts(
+		&self,
+		Parameters(params): Parameters<SetSettingPartsParams>,
+	) -> CallToolResult {
+		json(self.studio.set_setting_parts(
+			&params.world,
+			&params.setting,
+			&params.parts,
+			&params.remove,
+		))
+	}
+
+	#[tool(description = "Show a setting as an image, by day or night, wilted or not.")]
+	fn setting_render(
+		&self,
+		Parameters(params): Parameters<RenderSettingParams>,
+	) -> CallToolResult {
+		images(
+			self.studio
+				.render_setting(&params.world, &params.setting, params.weather)
+				.map(|image| vec![image]),
+		)
+	}
+
 	#[tool(
 		description = "Write a book's script (the whole story.md) into a world and check it \
 		               against the cast. A script that doesn't parse or rehearse is not kept; the \
@@ -554,6 +654,11 @@ mod tests {
 			"book_render",
 			"page_render",
 			"video_render",
+			"setting_list",
+			"setting_create",
+			"setting_parts",
+			"setting_set_parts",
+			"setting_render",
 		] {
 			assert!(
 				names.iter().any(|listed| listed == name),

@@ -25,6 +25,7 @@ use serde::Deserialize;
 
 use crate::art::pack;
 use crate::art::pack::StylePack;
+use crate::art::settings::Library;
 use crate::cast::Cast;
 use crate::story::Drawing;
 use crate::story::Story;
@@ -191,6 +192,11 @@ impl World {
 		StylePack::named(&self.style)
 	}
 
+	/// The settings the world's books can use: the built-in ones, and its own `settings/`.
+	pub fn settings(&self) -> Result<Arc<Library>> {
+		Library::for_world(&self.dir)
+	}
+
 	/// The world's cast, drawn in its style.
 	pub fn cast(&self) -> Result<Cast> {
 		Cast::load(&self.cast_file(), &self.style()?)
@@ -211,6 +217,7 @@ impl World {
 	pub fn furnish(&self, story: &mut Story) -> Result<()> {
 		let style = self.style()?;
 		story.matter.clone_from(&self.matter);
+		story.settings = self.settings()?;
 		story.drawing = Drawing {
 			screentone: style.finish.screentone,
 			on_twos: style.motion.on_twos,

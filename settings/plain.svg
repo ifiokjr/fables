@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2080">
+  <title>Plain: a blob of the scene&apos;s tint on paper, for covers and quiet moments</title>
+  <path id="far-paper" d="M-160 -160 L2560 -160 L2560 2560 L-160 2560 Z" fill="paper" data-line="none"/>
+  <path id="far-blob" d="M2218.3 1440 C2215.1 1559.4 2121.1 1679.7 2057.9 1794.1 C1994.7 1908.6 1945.5 2048.7 1839 2126.8 C1732.5 2204.8 1561.2 2242.7 1419 2262.4 C1276.8 2282 1123.2 2273.1 985.8 2244.5 C848.4 2215.9 709.3 2162.8 594.5 2090.8 C479.7 2018.8 366.3 1921.1 297.1 1812.7 C228 1704.2 178.4 1563.7 179.6 1440 C180.9 1316.3 239.2 1183 304.4 1070.3 C369.7 957.7 460.5 847.9 571.1 764 C681.6 680.1 824.8 596.9 967.6 567.2 C1110.3 537.4 1285.3 551.4 1427.5 585.7 C1569.7 619.9 1712.4 690.8 1820.7 772.9 C1928.9 854.9 2010.9 966.8 2077.1 1077.9 C2143.4 1189.1 2221.5 1320.6 2218.3 1440 Z" fill="tint" data-line="none" data-night="tint" data-dots="tint 36 7 0.35"/>
+  <circle id="far-sparkle-1" cx="2254.7" cy="1723.7" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-2" cx="1861.5" cy="2208.6" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-3" cx="1215.6" cy="2399.9" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-4" cx="563.8" cy="2224.6" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-5" cx="155" cy="1749.6" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-6" cx="145.3" cy="1156.3" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-7" cx="538.5" cy="671.4" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-8" cx="1184.4" cy="480.1" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-9" cx="1836.2" cy="655.4" data-sparkle="26 tint"/>
+  <circle id="far-sparkle-10" cx="2245" cy="1130.4" data-sparkle="26 tint"/>
+</svg>

@@ -36,6 +36,8 @@ use crate::art::parts::Level;
 use crate::art::parts::Need;
 use crate::art::parts::Parts;
 use crate::art::parts::Views;
+use crate::art::settings;
+use crate::art::settings::Setting;
 use crate::cast::Kind;
 use crate::cast::Member;
 use crate::press::sheets;
@@ -360,6 +362,35 @@ pub enum VideoShape {
 #[derive(Clone, Debug, Serialize)]
 pub struct Rendered {
 	pub files: Vec<String>,
+}
+
+/// A world's setting in brief.
+#[derive(Clone, Debug, Serialize)]
+pub struct SettingSummary {
+	pub name: String,
+	pub about: String,
+	/// `world` for the world's own, `built-in` for fables' own.
+	pub from: &'static str,
+}
+
+/// One part of a setting, as SVG markup.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SettingPart {
+	/// The part's id: `far-…`, `near-…` or `front-…`.
+	pub id: String,
+	/// One SVG element with that id, e.g. `<path id="near-hedge" d="…" fill="leaf"
+	/// data-wilt="moss"/>`.
+	pub markup: String,
+}
+
+/// The weather to show a setting in.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema)]
+pub struct SettingWeather {
+	#[serde(default)]
+	pub night: bool,
+	/// 0 to 1.
+	#[serde(default)]
+	pub wilt: f32,
 }
 
 impl Studio {
@@ -899,6 +930,192 @@ impl Studio {
 				})
 				.collect(),
 		}
+	}
+
+	/// The settings a world's books can use.
+	pub fn settings(&self, folder: &str) -> Result<Vec<SettingSummary>> {
+		let world = self.world(folder)?;
+		let own = world.dir.join("settings");
+
+		Ok(world
+			.settings()?
+			.settings()
+			.map(|setting| {
+				SettingSummary {
+					name: setting.name().to_owned(),
+					about: setting.about().to_owned(),
+					from: if own.join(format!("{}.svg", setting.name())).is_file() {
+						"world"
+					} else {
+						"built-in"
+					},
+				}
+			})
+			.collect())
+	}
+
+	/// Starts a world's own setting: a copy of a setting it can already use (to repaint it), or
+	/// a sky over the ground.
+	pub fn create_setting(
+		&self,
+		folder: &str,
+		name: &str,
+		about: &str,
+		from: Option<&str>,
+	) -> Result<SettingSummary> {
+		let world = self.world(folder)?;
+		check_slug("setting", name)?;
+		let file = world.dir.join("settings").join(format!("{name}.svg"));
+		ensure!(
+			!file.exists(),
+			"{} already has its own `{name}`",
+			world.name
+		);
+		let source = match from {
+			Some(base) => {
+				let own = world.dir.join("settings").join(format!("{base}.svg"));
+
+				if own.is_file() {
+					std::fs::read_to_string(&own)?
+				} else {
+					settings::built_in_source(base)
+						.with_context(|| format!("there is no setting `{base}` to start from"))?
+						.to_owned()
+				}
+			}
+			None => {
+				settings::SettingFile {
+					ground: 2060.0,
+					title: about.to_owned(),
+					parts: vec![
+					(
+						"far-sky".into(),
+						r#"<path id="far-sky" d="M-160 -160 L2560 -160 L2560 1660 L-160 1660 Z" fill="sky" data-night="night" data-line="none"/>"#.into(),
+					),
+					(
+						"near-ground".into(),
+						r#"<path id="near-ground" d="M-160 1600 L2560 1600 L2560 2560 L-160 2560 Z" fill="meadow" data-wilt="moss" data-line="none"/>"#.into(),
+					),
+				],
+				}
+				.write()
+			}
+		};
+		let mut setting_file = settings::SettingFile::read(&source)?;
+		about.clone_into(&mut setting_file.title);
+		let text = setting_file.write();
+		Setting::parse(name, &text)?;
+		std::fs::create_dir_all(world.dir.join("settings"))?;
+		std::fs::write(&file, text)?;
+
+		Ok(SettingSummary {
+			name: name.to_owned(),
+			about: about.to_owned(),
+			from: "world",
+		})
+	}
+
+	/// A setting's parts as markup.
+	pub fn setting_parts(&self, folder: &str, name: &str) -> Result<Vec<SettingPart>> {
+		let world = self.world(folder)?;
+		check_slug("setting", name)?;
+		let own = world.dir.join("settings").join(format!("{name}.svg"));
+		let source = if own.is_file() {
+			std::fs::read_to_string(&own)?
+		} else {
+			settings::built_in_source(name)
+				.with_context(|| format!("there is no setting `{name}`"))?
+				.to_owned()
+		};
+		Ok(settings::SettingFile::read(&source)?
+			.parts
+			.into_iter()
+			.map(|(id, markup)| SettingPart { id, markup })
+			.collect())
+	}
+
+	/// Writes or replaces parts of a world's own setting (new parts go on top of their layer's
+	/// last part) and removes others. A file that wouldn't read is not written.
+	pub fn set_setting_parts(
+		&self,
+		folder: &str,
+		name: &str,
+		parts: &[SettingPart],
+		remove: &[String],
+	) -> Result<SettingSummary> {
+		let world = self.world(folder)?;
+		check_slug("setting", name)?;
+		let file = world.dir.join("settings").join(format!("{name}.svg"));
+		ensure!(
+			file.is_file(),
+			"{} has no setting `{name}` of its own; setting_create it first (from a built-in to \
+			 repaint one)",
+			world.name
+		);
+		let mut edited = settings::SettingFile::read(&std::fs::read_to_string(&file)?)?;
+		let current = &mut edited.parts;
+
+		for id in remove {
+			let before = current.len();
+			current.retain(|(part, _)| part != id);
+			ensure!(current.len() < before, "`{name}` has no part `{id}`");
+		}
+
+		for part in parts {
+			ensure!(
+				part.markup.contains(&format!("id=\"{}\"", part.id)),
+				"`{}`'s markup must carry id=\"{}\"",
+				part.id,
+				part.id
+			);
+
+			if let Some(slot) = current.iter_mut().find(|(id, _)| *id == part.id) {
+				slot.1.clone_from(&part.markup);
+			} else {
+				let layer = part.id.split('-').next().unwrap_or_default();
+				let at = current
+					.iter()
+					.rposition(|(id, _)| id.split('-').next() == Some(layer))
+					.map_or(current.len(), |index| index + 1);
+				current.insert(at, (part.id.clone(), part.markup.clone()));
+			}
+		}
+
+		let text = edited.write();
+		let setting = Setting::parse(name, &text).context("nothing was written")?;
+		std::fs::write(&file, text)?;
+
+		Ok(SettingSummary {
+			name: name.to_owned(),
+			about: setting.about().to_owned(),
+			from: "world",
+		})
+	}
+
+	/// A setting as an image, in some weather.
+	pub fn render_setting(
+		&self,
+		folder: &str,
+		name: &str,
+		weather: SettingWeather,
+	) -> Result<Image> {
+		let world = self.world(folder)?;
+		let setting = world.settings()?.find(name)?;
+		let mut svg = crate::art::Svg::new();
+		let weather = settings::Weather {
+			night: weather.night,
+			wilt: weather.wilt.clamp(0.0, 1.0),
+			..settings::Weather::default()
+		};
+		settings::backdrop(&mut svg, &setting, &weather);
+		settings::foreground(&mut svg, &setting, &weather);
+		let stage = crate::art::STAGE;
+		let pixmap = raster::render(&svg.finish((0.0, 0.0, stage, stage), SHEET_PX, SHEET_PX))?;
+
+		Ok(Image {
+			label: format!("{name}: {}", setting.about()),
+			png: raster::png(&pixmap)?,
+		})
 	}
 
 	/// The built-in styles, with a sentence on each.
@@ -1543,6 +1760,67 @@ mod tests {
 		assert!(
 			studio.read_story("nibbleton", "who").is_err(),
 			"nothing is left behind"
+		);
+	}
+
+	#[test]
+	fn a_setting_is_started_repainted_and_rendered() {
+		let (_dir, studio) = studio();
+		let blank = studio
+			.create_setting("nibbleton", "harbour", "The harbour wall", None)
+			.unwrap();
+		assert_eq!(blank.from, "world");
+		studio
+			.set_setting_parts(
+				"nibbleton",
+				"harbour",
+				&[SettingPart {
+					id: "near-wall".into(),
+					markup: r#"<path id="near-wall" d="M0 1500 L2400 1500 L2400 1700 L0 1700 Z" fill="slate"/>"#.into(),
+				}],
+				&[],
+			)
+			.unwrap();
+		let parts = studio.setting_parts("nibbleton", "harbour").unwrap();
+		assert_eq!(
+			parts
+				.iter()
+				.map(|part| part.id.as_str())
+				.collect::<Vec<_>>(),
+			["far-sky", "near-ground", "near-wall"]
+		);
+		let image = studio
+			.render_setting(
+				"nibbleton",
+				"harbour",
+				SettingWeather {
+					night: true,
+					wilt: 0.0,
+				},
+			)
+			.unwrap();
+		assert!(image.png.starts_with(b"\x89PNG"));
+
+		// A repaint starts from a built-in; a broken part is refused.
+		studio
+			.create_setting("nibbleton", "park", "Our park", Some("park"))
+			.unwrap();
+		let broken = studio.set_setting_parts(
+			"nibbleton",
+			"park",
+			&[SettingPart {
+				id: "near-bench".into(),
+				markup: r#"<path id="near-bench" d="M0 0 L1 1" fill="not-a-colour"/>"#.into(),
+			}],
+			&[],
+		);
+		assert!(broken.is_err());
+		assert!(
+			studio
+				.settings("nibbleton")
+				.unwrap()
+				.iter()
+				.any(|setting| setting.name == "park" && setting.from == "world")
 		);
 	}
 

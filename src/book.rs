@@ -13,7 +13,7 @@ use crate::art::STAGE;
 use crate::art::Svg;
 use crate::art::palette;
 use crate::art::pt;
-use crate::art::settings::Setting;
+use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::cast::Cast;
 use crate::compose;
@@ -169,11 +169,7 @@ pub fn star_scene(
 	memory: &mut HashMap<String, Traits>,
 ) -> Result<Scene> {
 	let cover = story.meta.cover.clone().unwrap_or_default();
-	let setting = cover
-		.setting
-		.as_deref()
-		.and_then(Setting::parse)
-		.unwrap_or(Setting::Plain);
+	let setting = cover.setting.clone().unwrap_or_else(|| "plain".into());
 	let options = cover
 		.tint
 		.iter()
@@ -190,7 +186,7 @@ pub fn star_scene(
 		beats: Vec::new(),
 		line: 0,
 	};
-	let mut scene = Scene::for_page(&page)?;
+	let mut scene = Scene::for_page(&page, &story.settings)?;
 
 	if let Some(star) = &story.meta.star {
 		let directive = Directive {
@@ -400,12 +396,12 @@ fn title_page(story: &Story, cast: &Cast) -> Result<BookPage> {
 
 fn plain_scene(tint: crate::art::Color) -> Scene {
 	let page = crate::story::Page {
-		setting: Setting::Plain,
+		setting: "plain".into(),
 		options: Vec::new(),
 		beats: Vec::new(),
 		line: 0,
 	};
-	let mut scene = Scene::for_page(&page)
+	let mut scene = Scene::for_page(&page, &Library::built_in())
 		.unwrap_or_else(|error| unreachable!("a bare plain page always builds: {error}"));
 	scene.weather.tint = tint;
 	scene
@@ -478,8 +474,7 @@ fn copyright_page(story: &Story) -> BookPage {
 		70.0,
 		Anchor::Top,
 	);
-	let mut scene = plain_scene(palette::PAPER);
-	scene.setting = Setting::Plain;
+	let scene = plain_scene(palette::PAPER);
 
 	BookPage {
 		label: "copyright".into(),
@@ -631,10 +626,7 @@ fn drawing_page(story: &Story, number: usize) -> BookPage {
 
 /// Plain-language description of a scene for alt text.
 pub fn describe(scene: &Scene, cast: &Cast) -> String {
-	let place = Setting::ALL
-		.iter()
-		.find(|(_, setting)| *setting == scene.setting)
-		.map_or("Kerfuffle", |(name, _)| *name);
+	let place = scene.setting.name();
 	let mut who = Vec::new();
 
 	for (actor, _) in scene.placed() {

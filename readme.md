@@ -83,6 +83,24 @@ A style can set `screentone = true` under `[finish]` and `on-twos = true` under 
 
 The built-in styles are compiled into fables, so a world anywhere on disk can name one. They are separate from the `--style` skins (riso, tv, bold…), which restyle the older parametric puppet and the settings.
 
+## Settings
+
+A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page's art style, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene:
+
+| Attribute | Meaning |
+| --- | --- |
+| `fill` | A palette name or hex code; `tint` is the scene's tint; `none` for a line, with `stroke` and `stroke-width` (`data-noodle` for a thick inked tube). |
+| `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
+| `data-night`, `data-wilt` | The colour at night, and the colour it turns as the scene wilts. Parts without a night colour dim. |
+| `data-time` | `day` or `night`: only drawn then (the sun, the moon). |
+| `data-depth` | 0 to 1: far things fade into the sky and lose line. |
+| `data-dots` | A riso dot screen: `colour spacing radius opacity`. |
+| `data-drift`, `data-swing` | Clouds drift sideways; a swing swings from its pivot (`x y`). |
+
+`<circle data-sparkle="size colour">` twinkles, and `<circle data-critter="flower|tree" r="height" data-colour data-seed>` places one of the living plants, which have faces and wilt. The root `<svg>` sets `data-ground`, where actors stand.
+
+The seven built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`) live in [`settings/`](settings) and every world can use them. A world adds its own, or repaints a built-in one by name, in its `settings/` folder; over MCP, `setting_create`, `setting_parts`, `setting_set_parts` and `setting_render` do the same.
+
 ## Designing characters with an agent (MCP)
 
 `fables mcp` serves the studio over the Model Context Protocol on stdio, so an agent can design characters the way every Kerfuffle character was drawn: start from the style's template, redraw parts as SVG path data, look at the model sheet, fix, repeat. Sheets come back as images, so the model sees what it drew. Register it with any MCP client, for example:
@@ -104,6 +122,8 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `story_write`, `story_read`, `story_check` | Write a book's script into a world, checked against the cast (a script that doesn't rehearse is refused, with the line to fix), or read and check one. |
 | `page_render`, `book_render` | One page as an image, or the proofs (with a contact sheet image), ePub and KDP print files under `<root>/out/`. |
 | `video_render` | The narrated, lip-synced MP4, 9:16 or 16:9, or a quick preview. |
+| `setting_list`, `setting_create` | A world's settings, built-in and its own; start one, blank or from a setting to repaint. |
+| `setting_parts`, `setting_set_parts`, `setting_render` | Read and redraw a setting's parts as SVG elements, and see it by day or night, wilted or not. |
 
 Worlds and characters are named by slugs, never paths, so the server only reads and writes under its root. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
 
@@ -186,7 +206,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 | Option | Meaning |
 | --- | --- |
-| Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom` or `bedroom`. |
+| Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, or one of the world's own (see Settings). |
 | `night`, `wilt=1`, `stink=0.5`, `mint=1`, `tint=sunflower` | Starting weather (`tint` colours the `plain` blob). |
 | `speed=1`, `impact=1` | Manga effects: focus lines rushing in towards the first person on stage, or a jagged burst behind them. They work in every style. |
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
@@ -361,7 +381,8 @@ src/
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, frame renderer, soundtrack, ffmpeg
-worlds/           one folder per series: world.toml, bible, cast, puppets, recipe and books
+worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe and books
+settings/         the built-in settings, as part files
 styles/           drawing styles: style.toml, kit and template per look
 docs/             voices and turning the books into a show
 assets/fonts/     Andika and Lilita One (SIL Open Font License)

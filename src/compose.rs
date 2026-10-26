@@ -261,7 +261,7 @@ pub fn draw_scene(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	let mut weather = scene.weather;
 	weather.time = time;
 
-	settings::backdrop(svg, scene.setting, &weather);
+	settings::backdrop(svg, &scene.setting, &weather);
 	draw_effects(svg, &weather, puppets);
 
 	for puppet in puppets {
@@ -272,7 +272,7 @@ pub fn draw_scene(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 		draw_breath(svg, puppet, time);
 	}
 
-	settings::foreground(svg, scene.setting, &weather);
+	settings::foreground(svg, &scene.setting, &weather);
 }
 
 /// Draws everything but the far backdrop layer, for video frames that move the far layer
@@ -281,7 +281,7 @@ pub fn draw_near(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	let mut weather = scene.weather;
 	weather.time = time;
 
-	settings::backdrop_layer(svg, scene.setting, &weather, settings::Layer::Near);
+	settings::backdrop_layer(svg, &scene.setting, &weather, settings::Layer::Near);
 	draw_effects(svg, &weather, puppets);
 
 	for puppet in puppets {
@@ -292,7 +292,7 @@ pub fn draw_near(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 		draw_breath(svg, puppet, time);
 	}
 
-	settings::foreground(svg, scene.setting, &weather);
+	settings::foreground(svg, &scene.setting, &weather);
 }
 
 /// Focus lines and impact bursts, aimed at the first person on stage (or the middle of it).

@@ -119,3 +119,15 @@ Authored-puppet layer 9 (Biscuit on a four-legged rig, Wormsley, Brushy and the 
 - **Vector anime and manga have a ceiling.** Hand-placed Béziers reach clean cel anime and inked manga, not painterly or highly rendered art. The styles aim at what vector does well: flat and cel colour, strong silhouettes, ink and screentone.
 - **LLM drawing quality varies.** The sheet loop and the part check catch broken shapes, not ugly ones. Human sign-off stays the gate, and each style's template parts give every new character a good starting point.
 - **Render time grows with style effects** (screentones, filters). Measure per-frame time when each style lands.
+
+## Status
+
+Every layer landed on 26 October 2026, as stacked local branches. Layer 14 went last, because 15 and 16 didn't depend on it.
+
+- **Worlds and styles (9, 10).** Kerfuffle lives in `worlds/kerfuffle/`, and the cartoon look is data in `styles/cartoon/`. Both refactors kept the book byte-identical.
+- **MCP (11, 16).** `fables mcp` serves the world, style, character, voice, story, book, page, video and setting tools.
+  - `worlds/mumbleton/` was written, voiced and rendered end to end by an agent.
+- **Anime and manga (12, 13).** `worlds/kiteharbour/` (Hana) and `worlds/hayate-street/` (Ren) were designed through MCP. Both model sheets are awaiting Ifiok's sign-off.
+- **Settings (14).** The seven Kerfuffle settings are part files in `settings/`, ported from their code with depth haze added. Worlds add their own, such as Kiteharbour's harbour.
+  - A fuller repaint to the [authored-puppet rules](authored-puppets.md#settings) (vanishing points, framing foregrounds) is now an art task on these files, not a code change.
+- **Voices (15).** Cartesia and Hume sit behind `Voice`. They are unit-tested on their request shapes but have not been run against the live services.

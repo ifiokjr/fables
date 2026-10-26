@@ -599,7 +599,10 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	done(&path, started);
 
 	let path = out.join(format!("{slug}-places.png"));
-	std::fs::write(&path, raster::png(&press::sheets::places_sheet(style)?)?)?;
+	std::fs::write(
+		&path,
+		raster::png(&press::sheets::places_sheet(&*world.settings()?, style)?)?,
+	)?;
 	done(&path, started);
 
 	if let Some(id) = moods {
