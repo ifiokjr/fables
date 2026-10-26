@@ -188,6 +188,8 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("hand-fist-line", Space::Hand).numbered().kit(),
 	part("hand-point", Space::Hand).kit(),
 	part("hand-point-line", Space::Hand).numbered().kit(),
+	// A glove's flared cuff, at the wrist (styles with gloves).
+	part("glove-cuff", Space::Hand).optional().kit(),
 	part("shoe", Space::Foot).turning().kit(),
 	part("shoe-lace", Space::Foot).turning().optional().kit(),
 	part("mouth-rest", Space::Feature).kit(),

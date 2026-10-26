@@ -45,7 +45,7 @@ use super::puppet::Proportions;
 pub const DEFAULT: &str = "cartoon";
 
 /// The packs compiled into fables: name, `style.toml`, `kit.svg` and `template.svg`.
-const BUILT_IN: [(&str, &str, &str, &str); 3] = [
+const BUILT_IN: [(&str, &str, &str, &str); 5] = [
 	(
 		"cartoon",
 		include_str!("../../styles/cartoon/style.toml"),
@@ -64,6 +64,19 @@ const BUILT_IN: [(&str, &str, &str, &str); 3] = [
 		include_str!("../../styles/manga/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
+	),
+	(
+		"rubber-hose",
+		include_str!("../../styles/rubber-hose/style.toml"),
+		include_str!("../../styles/rubber-hose/kit.svg"),
+		include_str!("../../styles/rubber-hose/template.svg"),
+	),
+	// The same characters in a 1930s print, so it shares the rubber-hose kit and template.
+	(
+		"rubber-hose-1930s",
+		include_str!("../../styles/rubber-hose-1930s/style.toml"),
+		include_str!("../../styles/rubber-hose/kit.svg"),
+		include_str!("../../styles/rubber-hose/template.svg"),
 	),
 ];
 
@@ -136,6 +149,12 @@ pub struct Features {
 	/// The middle of the mouth, and how big the kit's mouth chart is drawn.
 	pub mouth: Pt,
 	pub mouth_scale: f32,
+	/// The nose's colour, if not the skin's own (a rubber-hose button nose is black).
+	#[serde(default)]
+	pub nose_colour: Option<Color>,
+	/// Gloves: hands are this colour whatever the skin, with the kit's `glove-cuff`.
+	#[serde(default)]
+	pub gloves: Option<Color>,
 }
 
 /// How an eye is built: a white, an iris (with an optional darker band, pupil and rim),
@@ -167,6 +186,9 @@ pub struct Eyes {
 	/// Whether every character wears the kit's lash parts, not only those with the `lashes`
 	/// extra.
 	pub lashes: bool,
+	/// A wedge cut out of each pupil, the way early animated cartoons drew eyes.
+	#[serde(default)]
+	pub pie_cut: bool,
 }
 
 /// Inks the kit's parts share; a character's own colours come from the cast.

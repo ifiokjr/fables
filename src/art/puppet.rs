@@ -212,7 +212,10 @@ impl Inks {
 			kit: style.inks,
 			line: Color(0x2B_1D_2E),
 			skin: look.skin,
-			nose: look.skin.mix(Color(0xE0_60_50), 0.18),
+			nose: style
+				.features
+				.nose_colour
+				.unwrap_or_else(|| look.skin.mix(Color(0xE0_60_50), 0.18)),
 			freckle: look.skin.mix(Color(0x8A_3A_20), 0.45),
 			blush: blush(look.skin, style.inks.blush),
 			hair: look.hair_color,
@@ -1347,6 +1350,8 @@ impl Arm<'_> {
 		} else {
 			(inks.skin, inks.skin)
 		};
+		// Gloved hands are the gloves' colour, whatever the skin.
+		let hand_skin = inks.features.gloves.unwrap_or(hand_skin);
 
 		if puppet.style.motion.limbs == Joints::Hose {
 			// Rubber hose: one smooth tube from shoulder to wrist; the elbow only bends it.
@@ -1637,6 +1642,10 @@ fn draw_hand(svg: &mut Svg, puppet: &Authored, hand: Hand, skin: Color, ink: Col
 	}
 
 	svg.brush_line(&path, ink, finish.line * 0.9);
+
+	if let Some(cuff) = puppet.part("glove-cuff", 0.0) {
+		svg.brushed(&cuff.path(), skin, ink, finish.line * 0.9);
+	}
 }
 
 fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: &Posed, time: f32) {
@@ -2051,6 +2060,27 @@ fn draw_eye(svg: &mut Svg, inks: &Inks, posed: &Posed, eye: Eye, side: f32, time
 
 	if build.rim > 0.0 {
 		svg.brush_line(&iris.path(), inks.pupil.darken(0.6), build.rim);
+	}
+
+	// Pie-cut eyes: a wedge cut from the pupil towards the light, instead of round glints.
+	if build.pie_cut {
+		let pupil = if build.pupil.x > 0.0 {
+			build.pupil
+		} else {
+			build.iris
+		} * size;
+		let centre = look + pt(0.0, build.iris.y * size * 0.1);
+		let edge = |angle: f32| {
+			let angle = angle.to_radians();
+			warp(centre + pt(angle.cos() * pupil.x * 1.1, angle.sin() * pupil.y * 1.1))
+		};
+		let wedge = Path::new()
+			.move_to(warp(centre + pt(pupil.x * 0.1, -pupil.y * 0.05)))
+			.line_to(edge(-80.0))
+			.line_to(edge(-55.0))
+			.line_to(edge(-30.0))
+			.close();
+		svg.fill(&wedge, inks.kit.eye);
 	}
 
 	for [x, y, r] in build.shines {

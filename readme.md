@@ -76,8 +76,9 @@ styles/cartoon/
 | `cartoon` | Kerfuffle's look: round kids with big heads, brushed outlines that swell on the shadow side, one tone of cel shadow. |
 | `anime` | Slender kids and grown-ups with the head about a quarter of their height; big eyes with a shaded iris, a pupil, a rim and two highlights; a tiny nose and mouth; thin even lines; hard two-tone cel shading. |
 | `manga` | Anime anatomy (it shares the anime kit and template) printed in black ink on white paper: every colour becomes paper, a dot screentone or solid black, on every page, print file and video frame. A heavy tapered outer line and high-contrast eyes. Characters move on threes with modulation (fast moves on ones, long holds), trail speed lines on fast moves and flap their mouths, while the camera moves on every frame. |
+| `rubber-hose` | Early animated cartoons: round heads, pie-cut eyes, a button nose, white four-finger gloves, and arms and legs that are one bendy tube. A thick even black line, flat colour, no shading, big squash, stretch and overshoot, and an idle bounce on twos. `rubber-hose-1930s` is the same in soft blacks, greys and old paper white. |
 
-Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one; their stars, Hana and Ren, were designed entirely through the MCP tools below.
+Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, and [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one; their stars, Hana, Ren and Clem, were designed entirely through the MCP tools below.
 
 A style is four dials: its construction (bodies, features, eyes and kit), and three tables in `style.toml` whose defaults are the cartoon look:
 

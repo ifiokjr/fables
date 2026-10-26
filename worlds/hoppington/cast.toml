@@ -1,0 +1,16 @@
+# The folk of Hoppington. Every table is one character.
+
+[clem]
+name = "Clem Clatter"
+about = "A drummer who has never met a saucepan she could not play."
+habit = "Drums on everything, all day long."
+kind = "kid"
+puppet = "puppets/clem.svg"
+skin = "#f2d2b8"
+hair-colour = "#1d1a20"
+top = "tomato"
+trim = "#fff4e2"
+bottom = "#2d2a40"
+shoes = "#1d1a20"
+eyes = "#1d1a20"
+pattern = "dots"

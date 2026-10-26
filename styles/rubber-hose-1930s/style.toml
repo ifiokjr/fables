@@ -1,0 +1,143 @@
+# The rubber-hose style in a 1930s print: every colour snaps to soft blacks, greys and an old
+# paper white. It shares the rubber-hose kit and template.
+# The rubber-hose style: the look of early animated cartoons. Round heads, pie-cut eyes, a
+# button nose, puffy four-finger gloves, and arms and legs that are one bendy tube with no
+# elbows or knees. A uniform thick black line, flat colour, no shading, and lots of squash,
+# stretch and overshoot, with everyone bobbing to the beat on twos.
+name = "rubber-hose-1930s"
+description = "Rubber hose in a 1930s print: the same bendy, bouncy characters in soft blacks, greys and old paper white."
+
+[finish]
+line = 6.0              # one thick, even black line
+detail = 4.2
+light = [-8.0, -8.0]
+cel-shadow = "#cfc6d8"
+far = "#5a5470"
+
+[line]
+stroke = "uniform"
+colour = "ink"
+
+[shade]
+tones = 0               # flat colour, no shading
+fill = "palette"
+palette = ["#1d1a20", "#4a4548", "#7d7672", "#b4ada4", "#e3dccd", "#f6f1e3"]
+
+[motion]
+timing = "twos"
+anticipation = 1.8      # big wind-ups
+overshoot = 1.9         # and big overshoots
+squash = 2.2
+follow-through = 1.6
+limbs = "hose"
+blink-every = 2.5
+idle = "bounce"         # everyone standing bobs to the beat
+idle-amount = 1.0
+idle-tempo = 110.0
+
+[face]
+turn = 0.38
+radius = 106.0
+slide = 120.0
+
+# Tall eyes close together, a black button nose with a glint, a wide mouth.
+[features]
+eye = [24.0, -16.0]
+brow = [26.0, -58.0]
+brow-weight = 3.0
+blush = [56.0, 30.0]
+blush-size = [14.0, 8.0]
+nose = [0.0, 26.0]
+nose-scale = 1.0
+nose-shine = true
+nose-colour = "#1d1a20"
+mouth = [0.0, 60.0]
+mouth-scale = 1.1
+gloves = "#ffffff"
+
+# Pie-cut eyes: tall whites, black pupils with a wedge cut out, no glints.
+[eyes]
+size = [17.0, 31.0]
+iris = [11.0, 20.0]
+iris-dark = 1.0
+iris-band = 0.0
+pupil = [0.0, 0.0]
+rim = 0.0
+shines = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+gaze = [5.0, 8.0]
+lash = 6.0
+lower-lid = 4.0
+lower-lash = 0.0
+lashes = false
+pie-cut = true
+
+[inks]
+blush = "#ee6a5a"
+eye = "#ffffff"
+maw = "#6a2034"
+tongue = "#e9747c"
+sock = "#f8f1e4"
+sole = "#f2e4c8"
+clean-teeth = "#fff5da"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#fffcf5"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#c9473d"
+badge = "#f2c24b"
+satchel = "#a85a3c"
+apron = "#f8f1e4"
+mud = "#6e4a30"
+
+# A kid: a round head on a small pear-shaped body, with long bendy limbs and big gloves.
+[bodies.kid]
+neck = [0.0, -330.0]
+head-above-neck = 112.0
+shoulder-y = -312.0
+shoulder-half = 34.0
+shoulders-turned = [-30.0, 24.0]
+hips-turned = [-12.0, 16.0]
+hem-y = -196.0
+body-radius = 56.0
+leg-width = [16.0, 16.0]
+forearm-width = [15.0, 15.0]
+hand-scale = 1.3
+reach = [60.0, 136.0]
+
+[bodies.kid.limbs]
+pelvis-y = -190.0
+ankle-y = -24.0
+hip-spread = 18.0
+thigh = 92.0
+shin = 92.0
+upper-arm = 84.0
+forearm = 80.0
+
+# A grown-up: the same head on a taller, longer-limbed body.
+[bodies.grown-up]
+neck = [0.0, -470.0]
+head-above-neck = 112.0
+shoulder-y = -448.0
+shoulder-half = 44.0
+shoulders-turned = [-40.0, 32.0]
+hips-turned = [-16.0, 22.0]
+hem-y = -280.0
+body-radius = 66.0
+leg-width = [18.0, 18.0]
+forearm-width = [17.0, 17.0]
+hand-scale = 1.5
+reach = [72.0, 190.0]
+
+[bodies.grown-up.limbs]
+pelvis-y = -270.0
+ankle-y = -24.0
+hip-spread = 24.0
+thigh = 130.0
+shin = 130.0
+upper-arm = 118.0
+forearm = 112.0
