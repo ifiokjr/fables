@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2060">
+  <title>The plaza: flat colour fields, block houses and geometric trees under a big sun</title>
+  <path id="far-sky" d="M-160 -160 L2560 -160 L2560 1840 L-160 1840 Z" fill="#e0b53f" data-night="#2b2a2e" data-line="none"/>
+  <path id="far-sun" d="M2030 560 C2030 676 1936 770 1820 770 C1704 770 1610 676 1610 560 C1610 444 1704 350 1820 350 C1936 350 2030 444 2030 560 Z" fill="#d9614c" data-time="day" data-line="none"/>
+  <path id="far-moon" d="M1980 560 C1980 648.4 1908.4 720 1820 720 C1731.6 720 1660 648.4 1660 560 C1660 471.6 1731.6 400 1820 400 C1908.4 400 1980 471.6 1980 560 Z" fill="#f3ead6" data-time="night" data-line="none"/>
+  <path id="far-hills" d="M-160 1500 L300 1060 L640 1380 L980 980 L1400 1400 L1760 1120 L2560 1500 L2560 1700 L-160 1700 Z" fill="#3f8f8a" data-line="none" data-depth="0.2"/>
+  <path id="near-field" d="M-160 1560 L2560 1560 L2560 2760 L-160 2760 Z" fill="#7e9c5a" data-wilt="#c7845a" data-line="none"/>
+  <path id="near-path" d="M900 1560 L1300 1560 L2100 2560 L300 2560 Z" fill="#f3ead6" data-line="none"/>
+  <path id="near-house-1" d="M120 1080 L640 1080 L640 1600 L120 1600 Z" fill="#f3ead6"/>
+  <path id="near-house-1-windows" d="M170 1140 L230 1140 L230 1200 L170 1200 Z M290 1140 L350 1140 L350 1200 L290 1200 Z M410 1140 L470 1140 L470 1200 L410 1200 Z M530 1140 L590 1140 L590 1200 L530 1200 Z M170 1260 L230 1260 L230 1320 L170 1320 Z M290 1260 L350 1260 L350 1320 L290 1320 Z M410 1260 L470 1260 L470 1320 L410 1320 Z M530 1260 L590 1260 L590 1320 L530 1320 Z M170 1380 L230 1380 L230 1440 L170 1440 Z M290 1380 L350 1380 L350 1440 L290 1440 Z M410 1380 L470 1380 L470 1440 L410 1440 Z M530 1380 L590 1380 L590 1440 L530 1440 Z" fill="#2b2a2e" data-night="#e0b53f" data-line="none"/>
+  <path id="near-house-2" d="M1580 1180 L1960 1180 L1960 1600 L1580 1600 Z" fill="#5f7fa8"/>
+  <path id="near-house-2-roof" d="M1540 1190 L1770 960 L2000 1190 Z" fill="#d9614c"/>
+  <path id="near-house-2-door" d="M1730 1440 L1810 1440 L1810 1600 L1730 1600 Z" fill="#2b2a2e" data-line="none"/>
+  <path id="near-tree-1-trunk" d="M820 1600 L820 1080" fill="none" stroke="#2b2a2e" stroke-width="10"/>
+  <path id="near-tree-1" d="M710 1366 L820 960 L930 1366 Z" fill="#3f8f8a" data-wilt="#c7845a"/>
+  <path id="near-tree-2-trunk" d="M1060 1600 L1060 1180" fill="none" stroke="#2b2a2e" stroke-width="10"/>
+  <path id="near-tree-2" d="M1170 1180 C1170 1240.8 1120.8 1290 1060 1290 C999.2 1290 950 1240.8 950 1180 C950 1119.2 999.2 1070 1060 1070 C1120.8 1070 1170 1119.2 1170 1180 Z" fill="#7e9c5a" data-wilt="#c7845a"/>
+  <path id="near-tree-3-trunk" d="M2240 1600 L2240 1000" fill="none" stroke="#2b2a2e" stroke-width="10"/>
+  <path id="near-tree-3" d="M2130 1330 L2240 880 L2350 1330 Z" fill="#3f8f8a" data-wilt="#c7845a"/>
+  <path id="front-fence" d="M-100 2560 L-100 2280 M-30 2560 L-30 2280 M40 2560 L40 2280 M110 2560 L110 2280 M180 2560 L180 2280 M250 2560 L250 2280 M320 2560 L320 2280 M390 2560 L390 2280 M460 2560 L460 2280 M530 2560 L530 2280 M-160 2330 L620 2330" fill="none" stroke="#2b2a2e" stroke-width="9"/>
+</svg>

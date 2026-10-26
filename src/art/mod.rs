@@ -650,8 +650,8 @@ impl Svg {
 					self.body,
 					r#"<path d="{}" fill="none" stroke="{line}" stroke-width="{weight:.1}" stroke-linecap="round" stroke-dasharray="{:.1} {:.1}"/>"#,
 					path.as_str(),
-					weight * 9.0,
-					weight * 2.2
+					weight * 26.0,
+					weight * 3.5
 				);
 			}
 			dials::Stroke::Brush | dials::Stroke::Uniform => {

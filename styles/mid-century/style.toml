@@ -1,0 +1,133 @@
+# The mid-century style: the graphic look of 1950s modern animation. Angular, geometric shapes;
+# a small flat palette that every colour snaps to; quick broken lines with the colour printed
+# slightly off them; no shading; and limited motion, held poses that snap from key to key on
+# twos. Abstract settings suit it, and its pages read best in the riso skin.
+name = "mid-century"
+description = "Mid-century modern: angular geometric characters, a small flat palette, broken lines with colour off-register, and held poses that snap between keys."
+
+[finish]
+line = 3.2
+detail = 2.6
+light = [-8.0, -8.0]
+cel-shadow = "#d8cfc0"
+far = "#6a6458"
+
+[line]
+stroke = "broken"       # quick pen lines, broken into long dashes
+colour = "ink"
+register = [7.0, 5.0]   # the colour printed a little off the line
+
+[shade]
+tones = 0
+fill = "palette"
+palette = ["#2b2a2e", "#f3ead6", "#e0b53f", "#d9614c", "#3f8f8a", "#7e9c5a", "#5f7fa8", "#c7845a"]
+
+[motion]
+timing = "twos"
+easing = "snap"         # hold a pose, then snap to the next
+squash = 0.0
+follow-through = 0.3
+blink-every = 4.0
+mouth-rate = 6.0
+
+[face]
+turn = 0.42
+radius = 108.0
+slide = 120.0
+
+# Small almond eyes, a triangle nose, straight brows.
+[features]
+eye = [32.0, -6.0]
+brow = [33.0, -34.0]
+brow-weight = 2.0
+blush = [54.0, 34.0]
+blush-size = [10.0, 6.0]
+nose = [6.0, 26.0]
+nose-scale = 1.0
+nose-shine = false
+mouth = [0.0, 62.0]
+mouth-scale = 0.85
+
+[eyes]
+size = [11.0, 6.5]
+iris = [5.0, 6.0]
+iris-dark = 1.0
+iris-band = 0.0
+pupil = [0.0, 0.0]
+rim = 0.0
+shines = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+gaze = [4.0, 1.5]
+lash = 3.4
+lower-lid = 2.4
+lower-lash = 0.0
+lashes = false
+
+[inks]
+blush = "#ee6a5a"
+eye = "#fffcf5"
+maw = "#6a2034"
+tongue = "#e9747c"
+sock = "#f8f1e4"
+sole = "#f2e4c8"
+clean-teeth = "#fff5da"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#fffcf5"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#c9473d"
+badge = "#f2c24b"
+satchel = "#a85a3c"
+apron = "#f8f1e4"
+mud = "#6e4a30"
+
+# A kid: a big faceted head on an A-line body with thin legs.
+[bodies.kid]
+neck = [0.0, -336.0]
+head-above-neck = 100.0
+shoulder-y = -318.0
+shoulder-half = 36.0
+shoulders-turned = [-32.0, 26.0]
+hips-turned = [-14.0, 18.0]
+hem-y = -196.0
+body-radius = 58.0
+leg-width = [12.0, 10.0]
+forearm-width = [10.0, 8.0]
+hand-scale = 0.95
+reach = [52.0, 120.0]
+
+[bodies.kid.limbs]
+pelvis-y = -190.0
+ankle-y = -24.0
+hip-spread = 20.0
+thigh = 86.0
+shin = 86.0
+upper-arm = 76.0
+forearm = 70.0
+
+[bodies.grown-up]
+neck = [0.0, -520.0]
+head-above-neck = 100.0
+shoulder-y = -496.0
+shoulder-half = 48.0
+shoulders-turned = [-44.0, 34.0]
+hips-turned = [-18.0, 24.0]
+hem-y = -300.0
+body-radius = 68.0
+leg-width = [15.0, 12.0]
+forearm-width = [12.0, 9.0]
+hand-scale = 1.15
+reach = [70.0, 180.0]
+
+[bodies.grown-up.limbs]
+pelvis-y = -300.0
+ankle-y = -24.0
+hip-spread = 26.0
+thigh = 140.0
+shin = 140.0
+upper-arm = 118.0
+forearm = 108.0

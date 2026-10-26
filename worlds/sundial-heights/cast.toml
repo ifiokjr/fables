@@ -1,0 +1,17 @@
+# The folk of Sundial Heights. Every table is one character.
+
+[otto]
+name = "Otto Angle"
+about = "A careful boy who carries a ruler everywhere."
+habit = "Measures everything before he will touch it."
+kind = "kid"
+puppet = "puppets/otto.svg"
+skin = "#c7845a"
+hair-colour = "#2b2a2e"
+top = "#e0b53f"
+trim = "#d9614c"
+bottom = "#3f8f8a"
+shoes = "#2b2a2e"
+eyes = "#2b2a2e"
+pattern = "stripes"
+extras = ["glasses"]
