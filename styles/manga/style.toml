@@ -1,0 +1,122 @@
+# The manga style: anime anatomy printed the way manga is, in black ink on white paper. Every
+# colour becomes white paper, a screentone of dots, or solid black; outlines are heavier, eyes
+# are high-contrast, and in video the characters move on twos. Its kit and template are the
+# anime style's (styles/anime/kit.svg and template.svg), so a character can move between them.
+name = "manga"
+description = "Black-and-white manga: anime anatomy in heavy ink with screentone dots for every colour, high-contrast eyes, speed lines and impact bursts, animated on twos."
+
+[finish]
+line = 3.6              # heavier outer lines, as a manga inker's pen
+detail = 1.9
+light = [-15.0, -12.0]
+cel-shadow = "#b4b4b4"  # a neutral grey: shadows print as a darker screentone
+far = "#5a5a5a"
+screentone = true
+
+[motion]
+on-twos = true
+
+[face]
+turn = 0.42
+radius = 112.0
+slide = 128.0
+
+# Eyes sit low and wide, at the middle of the face; the brows ride high above them.
+[features]
+eye = [37.0, 6.0]
+brow = [39.0, -44.0]
+brow-weight = 1.4
+blush = [52.0, 44.0]
+blush-size = [15.0, 4.5]
+nose = [2.0, 40.0]
+nose-scale = 1.0
+nose-shine = false
+mouth = [0.0, 70.0]
+mouth-scale = 0.55
+
+# Big eyes: a tall coloured iris shaded darker at the top, a pupil, a dark rim, one large and
+# one small highlight, a heavy upper lash line with a flick, and a short lower lash.
+[eyes]
+size = [25.0, 31.0]
+iris = [17.0, 25.0]
+iris-dark = 0.55
+iris-band = 0.5
+pupil = [7.5, 11.0]
+rim = 2.4
+shines = [[-6.5, -10.0, 6.5], [6.0, 9.0, 2.8]]
+gaze = [7.0, 5.0]
+lash = 10.0
+lower-lid = 2.2
+lower-lash = 2.2
+lashes = true
+
+[inks]
+blush = "#f07a8a"
+eye = "#ffffff"
+maw = "#7a2a3a"
+tongue = "#ef8a92"
+sock = "#ffffff"
+sole = "#e9e4ee"
+clean-teeth = "#ffffff"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#ffffff"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#3b4b8c"
+badge = "#f2c24b"
+satchel = "#5a4a6c"
+apron = "#ffffff"
+mud = "#6e4a30"
+
+# A kid (eleven or twelve): about 900 tall, the head a quarter of it, long legs.
+[bodies.kid]
+neck = [0.0, -690.0]
+head-above-neck = 100.0
+shoulder-y = -650.0
+shoulder-half = 50.0
+shoulders-turned = [-44.0, 34.0]
+hips-turned = [-16.0, 22.0]
+hem-y = -400.0
+body-radius = 58.0
+leg-width = [32.0, 19.0]
+forearm-width = [19.0, 13.0]
+hand-scale = 1.4
+reach = [88.0, 224.0]
+
+[bodies.kid.limbs]
+pelvis-y = -420.0
+ankle-y = -24.0
+hip-spread = 22.0
+thigh = 200.0
+shin = 200.0
+upper-arm = 140.0
+forearm = 128.0
+
+# A grown-up: about 1100 tall, the head a fifth of it.
+[bodies.grown-up]
+neck = [0.0, -900.0]
+head-above-neck = 100.0
+shoulder-y = -858.0
+shoulder-half = 62.0
+shoulders-turned = [-56.0, 44.0]
+hips-turned = [-20.0, 28.0]
+hem-y = -540.0
+body-radius = 70.0
+leg-width = [36.0, 22.0]
+forearm-width = [21.0, 14.0]
+hand-scale = 1.6
+reach = [112.0, 290.0]
+
+[bodies.grown-up.limbs]
+pelvis-y = -560.0
+ankle-y = -24.0
+hip-spread = 28.0
+thigh = 270.0
+shin = 270.0
+upper-arm = 180.0
+forearm = 166.0

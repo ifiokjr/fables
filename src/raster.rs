@@ -107,6 +107,11 @@ pub fn grain(pixmap: &mut Pixmap, strength: f32, shift: u32) {
 /// `grain` is the output's base grain (print, screen and video differ); the style scales it.
 pub fn finish(pixmap: &mut Pixmap, style: &Style, grain_amount: f32, shift: u32) {
 	let look = style.finish;
+
+	if look.screentone {
+		screentone(pixmap);
+		return;
+	}
 	let grading = (look.saturation - 1.0).abs() > 0.01 || look.lift > 0.0 || look.mottle > 0.0;
 
 	if grading {
@@ -114,6 +119,54 @@ pub fn finish(pixmap: &mut Pixmap, style: &Style, grain_amount: f32, shift: u32)
 	}
 
 	grain(pixmap, grain_amount * look.grain, shift);
+}
+
+/// Manga printing: black ink on white paper. Near-white becomes paper, near-black ink, and the
+/// tones between become dot screens at 45 degrees, coarser for darker tones, the way sheets of
+/// screentone are cut and laid on a page. The screen is fixed to the page, whatever is drawn.
+pub fn screentone(pixmap: &mut Pixmap) {
+	const PAPER: f32 = 255.0;
+	const INK: f32 = 22.0;
+	let width = pixmap.width() as usize;
+	// About 420 dots across the page (60 lines an inch on a printed page), whatever the
+	// resolution, and never finer than three pixels.
+	let cell = (width as f32 / 420.0).max(3.0);
+	let soft = 0.7 / cell;
+
+	for (index, pixel) in pixmap
+		.data_mut()
+		.as_chunks_mut::<4>()
+		.0
+		.iter_mut()
+		.enumerate()
+	{
+		let (x, y) = ((index % width) as f32, (index / width) as f32);
+		let [r, g, b] = [
+			f32::from(pixel[0]),
+			f32::from(pixel[1]),
+			f32::from(pixel[2]),
+		];
+		let luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+		let coverage = match luma {
+			l if l >= 0.82 => 0.0,
+			l if l >= 0.64 => 0.14,
+			l if l >= 0.44 => 0.3,
+			l if l >= 0.2 => 0.52,
+			_ => 1.0,
+		};
+		let ink = if coverage <= 0.0 || coverage >= 1.0 {
+			coverage
+		} else {
+			let u = (x + y) * std::f32::consts::FRAC_1_SQRT_2 / cell;
+			let v = (x - y) * std::f32::consts::FRAC_1_SQRT_2 / cell;
+			let (du, dv) = (u - u.floor() - 0.5, v - v.floor() - 0.5);
+			let distance = du.hypot(dv);
+			let radius = (coverage / std::f32::consts::PI).sqrt();
+			((radius + soft - distance) / (2.0 * soft)).clamp(0.0, 1.0)
+		};
+		let value = (PAPER + (INK - PAPER) * ink).round() as u8;
+		pixel[..3].fill(value);
+	}
 }
 
 fn grade(pixmap: &mut Pixmap, saturation: f32, lift: f32, mottle: f32) {
@@ -193,6 +246,39 @@ pub fn png(pixmap: &Pixmap) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn screentone_prints_only_paper_ink_and_dots() {
+		let mut pixmap = Pixmap::new(420, 60).unwrap();
+		// White, a light tone, a mid tone and black, side by side.
+		for (index, value) in [250_u8, 180, 120, 10].into_iter().enumerate() {
+			let paint = resvg::tiny_skia::Paint {
+				shader: resvg::tiny_skia::Shader::SolidColor(resvg::tiny_skia::Color::from_rgba8(
+					value, value, value, 255,
+				)),
+				..Default::default()
+			};
+			let rect =
+				resvg::tiny_skia::Rect::from_xywh(index as f32 * 105.0, 0.0, 105.0, 60.0).unwrap();
+			pixmap.fill_rect(rect, &paint, resvg::tiny_skia::Transform::identity(), None);
+		}
+
+		screentone(&mut pixmap);
+		let at = |x: u32, y: u32| pixmap.pixel(x, y).unwrap();
+		let ink = |x0: u32| {
+			(x0..x0 + 100)
+				.flat_map(|x| (0..60).map(move |y| (x, y)))
+				.filter(|&(x, y)| at(x, y).red() < 128)
+				.count() as f32
+				/ 6000.0
+		};
+
+		assert!(ink(0) < 0.01, "white stays paper");
+		assert!(ink(315) > 0.99, "black stays ink");
+		assert!((0.05..0.25).contains(&ink(105)), "light tone: {}", ink(105));
+		assert!(ink(210) > ink(105), "darker tones print more dots");
+		assert!((0..420).all(|x| at(x, 30).red() == at(x, 30).green()));
+	}
 
 	#[test]
 	fn renders_simple_svg() {

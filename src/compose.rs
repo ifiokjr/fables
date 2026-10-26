@@ -20,6 +20,7 @@ use crate::art::palette;
 use crate::art::pt;
 use crate::art::seed_of;
 use crate::art::settings;
+use crate::art::settings::Weather;
 use crate::cast::Kind;
 use crate::stage::Actor;
 use crate::stage::Scene;
@@ -261,6 +262,7 @@ pub fn draw_scene(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	weather.time = time;
 
 	settings::backdrop(svg, scene.setting, &weather);
+	draw_effects(svg, &weather, puppets);
 
 	for puppet in puppets {
 		draw_puppet(svg, puppet);
@@ -280,6 +282,7 @@ pub fn draw_near(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	weather.time = time;
 
 	settings::backdrop_layer(svg, scene.setting, &weather, settings::Layer::Near);
+	draw_effects(svg, &weather, puppets);
 
 	for puppet in puppets {
 		draw_puppet(svg, puppet);
@@ -290,6 +293,27 @@ pub fn draw_near(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	}
 
 	settings::foreground(svg, scene.setting, &weather);
+}
+
+/// Focus lines and impact bursts, aimed at the first person on stage (or the middle of it).
+fn draw_effects(svg: &mut Svg, weather: &Weather, puppets: &[Puppet]) {
+	if weather.speed <= 0.0 && weather.impact <= 0.0 {
+		return;
+	}
+
+	let focus = puppets
+		.iter()
+		.find_map(|puppet| {
+			match &puppet.kind {
+				Kind::Figure(look) => {
+					Some(puppet.at - pt(0.0, look.frame().height() * puppet.scale * 0.6))
+				}
+				_ => None,
+			}
+		})
+		.unwrap_or(pt(STAGE / 2.0, STAGE * 0.45));
+	fx::impact_burst(svg, focus, STAGE * 0.42, weather.impact, 41);
+	fx::focus_lines(svg, focus, STAGE, weather.speed, 17, weather.time);
 }
 
 /// Draws one puppet at its stage position.

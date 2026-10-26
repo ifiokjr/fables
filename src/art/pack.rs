@@ -42,7 +42,7 @@ use super::puppet::Proportions;
 pub const DEFAULT: &str = "cartoon";
 
 /// The packs compiled into fables: name, `style.toml`, `kit.svg` and `template.svg`.
-const BUILT_IN: [(&str, &str, &str, &str); 2] = [
+const BUILT_IN: [(&str, &str, &str, &str); 3] = [
 	(
 		"cartoon",
 		include_str!("../../styles/cartoon/style.toml"),
@@ -52,6 +52,13 @@ const BUILT_IN: [(&str, &str, &str, &str); 2] = [
 	(
 		"anime",
 		include_str!("../../styles/anime/style.toml"),
+		include_str!("../../styles/anime/kit.svg"),
+		include_str!("../../styles/anime/template.svg"),
+	),
+	// Manga is anime anatomy in ink and screentone, so it shares the anime kit and template.
+	(
+		"manga",
+		include_str!("../../styles/manga/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
 	),
@@ -67,6 +74,7 @@ pub struct StylePack {
 	pub face: Face,
 	pub features: Features,
 	pub eyes: Eyes,
+	pub motion: Motion,
 	pub inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
 	/// Parts every character in the style starts with.
@@ -89,6 +97,19 @@ pub struct Finish {
 	pub cel_shadow: Color,
 	/// What limbs on the far side of the body are pushed back towards.
 	pub far: Color,
+	/// Print in black ink on white paper, with colours turned into screentone dots.
+	#[serde(default)]
+	pub screentone: bool,
+}
+
+/// How a style moves in video.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Motion {
+	/// Hold each drawing for two frames (twelve a second), as anime and manga cartoons do,
+	/// while the camera still moves on every frame.
+	#[serde(default)]
+	pub on_twos: bool,
 }
 
 /// The cylinder face features are wrapped round as the head turns.
@@ -194,6 +215,8 @@ struct Entry {
 	face: Face,
 	features: Features,
 	eyes: Eyes,
+	#[serde(default)]
+	motion: Motion,
 	inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
 }
@@ -264,6 +287,7 @@ impl StylePack {
 			face: entry.face,
 			features: entry.features,
 			eyes: entry.eyes,
+			motion: entry.motion,
 			inks: entry.inks,
 			bodies: entry.bodies,
 			kit: Parts::parse(kit).context("in kit.svg")?,

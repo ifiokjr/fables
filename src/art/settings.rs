@@ -71,6 +71,10 @@ pub struct Weather {
 	pub night: bool,
 	/// Background colour for the plain setting.
 	pub tint: Color,
+	/// Manga focus lines rushing in towards the action (0..1).
+	pub speed: f32,
+	/// A jagged burst behind the action, for a big moment (0..1).
+	pub impact: f32,
 	pub time: f32,
 }
 
@@ -82,6 +86,8 @@ impl Default for Weather {
 			mint: 0.0,
 			night: false,
 			tint: palette::SUNFLOWER,
+			speed: 0.0,
+			impact: 0.0,
 			time: 0.0,
 		}
 	}

@@ -27,7 +27,7 @@ fn an_empty_world_renders_a_blank_page() {
 	let mut story = Story::load(&script).unwrap();
 	let world = World::for_story(&story, None).unwrap();
 	assert_eq!(world.dir, found.dir);
-	world.furnish(&mut story);
+	world.furnish(&mut story).unwrap();
 	assert!(story.meta.voice.is_none(), "an empty world has no narrator");
 
 	let cast = world.cast().unwrap();

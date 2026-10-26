@@ -562,7 +562,12 @@ impl Studio {
 	pub fn style_sheets(name: &str, px: u32) -> Result<Vec<Image>> {
 		let pack = StylePack::named(name)?;
 		let look = crate::cast::template_look(&pack, crate::art::figure::Build::Kid)?;
-		let model = sheets::model_sheet(&format!("The {name} style"), &look, px)?;
+		let mut model = sheets::model_sheet(&format!("The {name} style"), &look, px)?;
+
+		if pack.finish.screentone {
+			raster::screentone(&mut model);
+		}
+
 		let parts = sheets::parts_sheet(
 			&format!("The {name} style: kit and template"),
 			&pack.template_figure(),
@@ -620,9 +625,15 @@ pub fn sheets_for(world: &World, id: &str, kinds: &[SheetKind], px: u32) -> Resu
 				}
 			};
 
+			let mut pixmap = fit_width(&pixmap, px);
+
+			if puppet.style.finish.screentone {
+				raster::screentone(&mut pixmap);
+			}
+
 			Ok(Image {
 				label: format!("{}: {label} sheet", member.name),
-				png: raster::png(&fit_width(&pixmap, px))?,
+				png: raster::png(&pixmap)?,
 			})
 		})
 		.collect()

@@ -179,6 +179,19 @@ fn smoothstep(t: f32) -> f32 {
 	t * t * (3.0 - 2.0 * t)
 }
 
+/// Drawings a second when animating on twos: every other frame of 24.
+const DRAWINGS_ON_TWOS: f32 = 12.0;
+
+/// The moment characters are drawn at. On twos they hold each drawing for two frames (never
+/// reaching back before the shot began); the camera still moves on every frame.
+fn drawing_time(time: f32, shot_start: f32, on_twos: bool) -> f32 {
+	if on_twos {
+		((time * DRAWINGS_ON_TWOS).floor() / DRAWINGS_ON_TWOS).max(shot_start)
+	} else {
+		time
+	}
+}
+
 /// Everything needed to draw frames for one output shape.
 pub struct Renderer<'a> {
 	pub timeline: &'a Timeline,
@@ -201,7 +214,8 @@ impl Renderer<'_> {
 	pub fn svg(&self, time: f32, frame: u64) -> String {
 		let shot = self.timeline.shot_at(time);
 		let local = time - shot.start;
-		let (scene, puppets) = self.stage_at(shot, time);
+		let posed = drawing_time(time, shot.start, self.story.drawing.on_twos);
+		let (scene, puppets) = self.stage_at(shot, posed);
 		let view = self.camera(shot, time);
 		let (w, h) = (self.width as f32, self.height as f32);
 		let view_w = view.height * self.format.aspect();
@@ -1012,6 +1026,20 @@ fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 
 #[cfg(test)]
 mod tests {
+	#[test]
+	fn on_twos_holds_each_drawing_for_two_frames() {
+		let frame = 1.0 / 24.0;
+		let first = drawing_time(1.0, 0.0, true);
+		assert_eq!(drawing_time(1.0 + frame * 0.9, 0.0, true), first);
+		assert!(drawing_time(1.0 + frame * 2.0, 0.0, true) > first);
+		assert_eq!(drawing_time(1.0 + frame, 0.0, false), 1.0 + frame);
+		assert_eq!(
+			drawing_time(5.01, 5.0, true),
+			5.0,
+			"a shot never shows the one before"
+		);
+	}
+
 	use super::*;
 
 	#[test]

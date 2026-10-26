@@ -269,12 +269,14 @@ impl Scene {
 			("stink", Some(v)) => self.weather.stink = number(token, v, line)?,
 			("mint", Some(v)) => self.weather.mint = number(token, v, line)?,
 			("tint", Some(v)) => self.weather.tint = colour(v, line)?,
+			("speed", Some(v)) => self.weather.speed = number(token, v, line)?,
+			("impact", Some(v)) => self.weather.impact = number(token, v, line)?,
 			("zoom", Some(v)) => self.camera.zoom = number(token, v, line)?.max(0.5),
 			("look", Some(v)) => self.camera.look = pair(v, line)?,
 			_ => {
 				bail!(
 					"line {line}: `{token}` is not a scene option; use night, day, wilt=, stink=, \
-					 mint=, tint=, zoom= or look=x,y"
+					 mint=, tint=, speed=, impact=, zoom= or look=x,y"
 				)
 			}
 		}

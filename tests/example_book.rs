@@ -23,7 +23,7 @@ fn example() -> (Story, Cast) {
 	let mut story =
 		Story::load(&root.join("worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md")).unwrap();
 	let world = World::for_story(&story, None).unwrap();
-	world.furnish(&mut story);
+	world.furnish(&mut story).unwrap();
 	let cast = world.cast().unwrap();
 
 	(story, cast)

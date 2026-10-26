@@ -26,6 +26,7 @@ use serde::Deserialize;
 use crate::art::pack;
 use crate::art::pack::StylePack;
 use crate::cast::Cast;
+use crate::story::Drawing;
 use crate::story::Story;
 use crate::video::voice::Voice;
 
@@ -205,13 +206,21 @@ impl World {
 		Some(self.dir.join("recipe.md")).filter(|path| path.is_file())
 	}
 
-	/// Gives a script the world's book matter, and its narrator unless the script names its own.
-	pub fn furnish(&self, story: &mut Story) {
+	/// Gives a script the world's book matter and the way its style prints and moves, and its
+	/// narrator unless the script names its own.
+	pub fn furnish(&self, story: &mut Story) -> Result<()> {
+		let style = self.style()?;
 		story.matter.clone_from(&self.matter);
+		story.drawing = Drawing {
+			screentone: style.finish.screentone,
+			on_twos: style.motion.on_twos,
+		};
 
 		if story.meta.voice.is_none() {
 			story.meta.voice.clone_from(&self.narrator);
 		}
+
+		Ok(())
 	}
 }
 
@@ -282,8 +291,8 @@ mod tests {
 		.unwrap();
 		let mut plain =
 			crate::story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n").unwrap();
-		home.furnish(&mut own);
-		home.furnish(&mut plain);
+		home.furnish(&mut own).unwrap();
+		home.furnish(&mut plain).unwrap();
 		assert_eq!(own.meta.voice.unwrap().name, "Moira");
 		assert_eq!(plain.meta.voice.unwrap().name, "Daniel");
 	}

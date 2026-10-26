@@ -507,7 +507,7 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 	}
 
 	let world = World::for_story(&story, world)?;
-	world.furnish(&mut story);
+	world.furnish(&mut story)?;
 	let cast = world.cast()?;
 
 	Ok((story, cast))

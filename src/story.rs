@@ -227,6 +227,17 @@ pub struct Story {
 	pub slug: String,
 	/// The words its world writes into the front and back matter.
 	pub matter: crate::world::Matter,
+	/// How its world's drawing style prints and moves.
+	pub drawing: Drawing,
+}
+
+/// How a world's drawing style prints and moves (see [`StylePack`](crate::art::pack::StylePack)).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Drawing {
+	/// Black ink on white paper, with colours as screentone.
+	pub screentone: bool,
+	/// Characters animated on twos.
+	pub on_twos: bool,
 }
 
 impl Story {
@@ -237,12 +248,16 @@ impl Story {
 	}
 
 	/// The book's art style.
+	/// The skin pages are drawn in, printed the way the world's drawing style prints.
 	pub fn style(&self) -> Style {
-		self.meta
+		let mut style = self
+			.meta
 			.style
 			.as_deref()
 			.and_then(Style::parse)
-			.unwrap_or_default()
+			.unwrap_or_default();
+		style.finish.screentone = self.drawing.screentone;
+		style
 	}
 
 	pub fn load(path: &Path) -> Result<Story> {
@@ -281,6 +296,7 @@ pub fn parse(source: &str) -> Result<Story> {
 		dir: std::path::PathBuf::new(),
 		slug,
 		matter: crate::world::Matter::default(),
+		drawing: Drawing::default(),
 	})
 }
 

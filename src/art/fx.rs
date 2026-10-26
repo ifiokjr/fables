@@ -1,4 +1,5 @@
-//! Effects: the visible consequences that make Kerfuffle's habits show on the outside.
+//! Effects: the visible consequences that make Kerfuffle's habits show on the outside, and the
+//! manga page's own effects (focus lines and impact bursts).
 //!
 //! Every effect takes a `time` in seconds so the same call draws a still for the book and a
 //! moving frame for video.
@@ -274,4 +275,66 @@ pub fn whoosh(svg: &mut Svg, c: Pt, dir: f32, size: f32) {
 			svg.line,
 		);
 	}
+}
+
+/// Manga focus lines: thin wedges rushing in from the edges of the page towards `focus`,
+/// leaving a clear space round it. `strength` (0..1) sets how many there are and how far in
+/// they reach.
+pub fn focus_lines(svg: &mut Svg, focus: Pt, extent: f32, strength: f32, seed: u64, time: f32) {
+	if strength <= 0.0 {
+		return;
+	}
+
+	let count = (60.0 + 90.0 * strength) as u64;
+	// Lines flicker between drawings in video, like a hand redrawing them.
+	let frame = (time * 12.0) as u64;
+
+	for i in 0..count {
+		let jitter = noise(seed ^ frame, i);
+		let angle = (i as f32 + jitter * 0.8) / count as f32 * TAU;
+		let direction = pt(angle.cos(), angle.sin());
+		let clear =
+			extent * (0.32 + 0.14 * noise(seed ^ frame, i + 999).abs()) * (1.2 - strength * 0.4);
+		let width = extent * (0.006 + 0.01 * noise(seed, i + 77).abs());
+		let tip = focus + direction * clear;
+		let base = focus + direction * extent * 1.5;
+		let side = direction.perp() * width;
+		svg.fill(
+			&Path::new()
+				.move_to(tip)
+				.line_to(base + side)
+				.line_to(base - side)
+				.close(),
+			palette::INK,
+		);
+	}
+}
+
+/// A manga impact burst: a jagged white star with an inked edge, behind the action.
+pub fn impact_burst(svg: &mut Svg, focus: Pt, size: f32, strength: f32, seed: u64) {
+	if strength <= 0.0 {
+		return;
+	}
+
+	let spikes = 18;
+	let points: Vec<Pt> = (0..spikes * 2)
+		.map(|i| {
+			let angle = i as f32 / (spikes * 2) as f32 * TAU;
+			let reach = if i % 2 == 0 {
+				size * strength * (1.0 + 0.35 * noise(seed, i as u64).abs())
+			} else {
+				size * strength * 0.55
+			};
+			focus + pt(angle.cos(), angle.sin()) * reach
+		})
+		.collect();
+	let mut burst = Path::new().move_to(points[0]);
+
+	for point in &points[1..] {
+		burst = burst.line_to(*point);
+	}
+
+	let burst = burst.close();
+	svg.fill(&burst, palette::WHITE);
+	svg.stroke(&burst, palette::INK, svg.line * 1.2);
 }

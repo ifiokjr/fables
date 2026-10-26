@@ -1,0 +1,16 @@
+# The folk of Hayate Street. Every table is one character.
+
+[ren]
+name = "Ren Hayabusa"
+about = "The fastest kid on Hayate Street, who has never once walked anywhere."
+habit = "Can't stop running, even when he should stop and look."
+kind = "kid"
+puppet = "puppets/ren.svg"
+skin = "#fbf1ea"
+hair-colour = "#141418"
+top = "#8c8c94"
+trim = "#f4f4f4"
+bottom = "#26262c"
+shoes = "#f4f4f4"
+eyes = "#2a2a36"
+pattern = "stripes"
