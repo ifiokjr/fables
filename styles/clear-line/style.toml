@@ -1,0 +1,130 @@
+# The clear-line style: every line the same weight, inside and out, with no hatching; flat,
+# vivid colour with no shading; simple cartoony characters with dot eyes, meant for detailed
+# settings that get their depth from layered planes rather than shadow. It moves with
+# restraint: gentle eases, little squash. Pages read best in the `clear` skin.
+name = "clear-line"
+description = "Clear line: one even line everywhere, flat vivid colour with no shading, simple characters with dot eyes, and restrained, eased motion."
+
+[finish]
+line = 3.0              # one weight for every line
+detail = 3.0
+light = [-8.0, -8.0]
+cel-shadow = "#d4cbe0"
+far = "#6e6a80"
+
+[line]
+stroke = "uniform"
+colour = "ink"
+
+[shade]
+tones = 0               # flat colour
+fill = "flat"
+
+[motion]
+timing = "ones"
+anticipation = 0.35     # gentle wind-ups
+overshoot = 0.3         # and barely any overshoot
+squash = 0.35
+follow-through = 0.5
+
+[face]
+turn = 0.42
+radius = 108.0
+slide = 128.0
+
+# Dot eyes set wide, a small nose and mouth.
+[features]
+eye = [30.0, 0.0]
+brow = [31.0, -28.0]
+brow-weight = 1.6
+blush = [50.0, 40.0]
+blush-size = [9.0, 5.0]
+nose = [4.0, 30.0]
+nose-scale = 0.75
+nose-shine = false
+mouth = [0.0, 62.0]
+mouth-scale = 0.75
+
+[eyes]
+size = [6.0, 7.5]
+iris = [6.0, 7.5]
+iris-dark = 1.0
+iris-band = 0.0
+pupil = [0.0, 0.0]
+rim = 0.0
+shines = [[-1.6, -2.4, 1.3], [0.0, 0.0, 0.0]]
+gaze = [3.0, 3.0]
+lash = 2.4
+lower-lid = 1.8
+lower-lash = 0.0
+lashes = false
+
+[inks]
+blush = "#ee6a5a"
+eye = "#fffcf5"
+maw = "#6a2034"
+tongue = "#e9747c"
+sock = "#f8f1e4"
+sole = "#f2e4c8"
+clean-teeth = "#fff5da"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#fffcf5"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#c9473d"
+badge = "#f2c24b"
+satchel = "#a85a3c"
+apron = "#f8f1e4"
+mud = "#6e4a30"
+
+# A kid: a big round head on a slim body, about three and a half heads tall.
+[bodies.kid]
+neck = [0.0, -420.0]
+head-above-neck = 100.0
+shoulder-y = -398.0
+shoulder-half = 42.0
+shoulders-turned = [-38.0, 30.0]
+hips-turned = [-14.0, 20.0]
+hem-y = -262.0
+body-radius = 56.0
+leg-width = [24.0, 16.0]
+forearm-width = [15.0, 11.0]
+hand-scale = 1.15
+reach = [70.0, 166.0]
+
+[bodies.kid.limbs]
+pelvis-y = -270.0
+ankle-y = -24.0
+hip-spread = 20.0
+thigh = 124.0
+shin = 124.0
+upper-arm = 104.0
+forearm = 96.0
+
+[bodies.grown-up]
+neck = [0.0, -600.0]
+head-above-neck = 100.0
+shoulder-y = -574.0
+shoulder-half = 54.0
+shoulders-turned = [-48.0, 38.0]
+hips-turned = [-18.0, 26.0]
+hem-y = -360.0
+body-radius = 66.0
+leg-width = [28.0, 19.0]
+forearm-width = [17.0, 12.0]
+hand-scale = 1.35
+reach = [86.0, 230.0]
+
+[bodies.grown-up.limbs]
+pelvis-y = -370.0
+ankle-y = -24.0
+hip-spread = 26.0
+thigh = 175.0
+shin = 175.0
+upper-arm = 140.0
+forearm = 128.0

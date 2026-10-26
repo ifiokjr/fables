@@ -28,6 +28,7 @@ fn caption(name: StyleName) -> &'static str {
 		StyleName::CutPaper => "cut-paper — collage with torn edges and cast shadows",
 		StyleName::Crayon => "crayon — scribbled colour that strays over the lines",
 		StyleName::Storybook => "storybook — pencil line over watercolour washes",
+		StyleName::Clear => "clear — one even line, flat colour, no shading",
 	}
 }
 

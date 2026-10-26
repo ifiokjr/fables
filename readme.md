@@ -77,8 +77,9 @@ styles/cartoon/
 | `anime` | Slender kids and grown-ups with the head about a quarter of their height; big eyes with a shaded iris, a pupil, a rim and two highlights; a tiny nose and mouth; thin even lines; hard two-tone cel shading. |
 | `manga` | Anime anatomy (it shares the anime kit and template) printed in black ink on white paper: every colour becomes paper, a dot screentone or solid black, on every page, print file and video frame. A heavy tapered outer line and high-contrast eyes. Characters move on threes with modulation (fast moves on ones, long holds), trail speed lines on fast moves and flap their mouths, while the camera moves on every frame. |
 | `rubber-hose` | Early animated cartoons: round heads, pie-cut eyes, a button nose, white four-finger gloves, and arms and legs that are one bendy tube. A thick even black line, flat colour, no shading, big squash, stretch and overshoot, and an idle bounce on twos. `rubber-hose-1930s` is the same in soft blacks, greys and old paper white. |
+| `clear-line` | Clear line: one even line weight everywhere, inside and out, with no hatching; flat vivid colour with no shading; simple characters with dot eyes, for detailed settings that get their depth from layered planes; restrained, eased motion. Pages read best in the `clear` skin. |
 
-Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, and [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one; their stars, Hana, Ren and Clem, were designed entirely through the MCP tools below.
+Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one, and [`worlds/tramline/`](worlds/tramline) a clear-line one with its own square; their stars, Hana, Ren, Clem and Zia, were designed entirely through the MCP tools below.
 
 A style is four dials: its construction (bodies, features, eyes and kit), and three tables in `style.toml` whose defaults are the cartoon look:
 
@@ -291,6 +292,7 @@ Colours are palette names (see the bible) or `#rrggbb`. A character with a `habi
 | `cut-paper` | Collage: paper fibres, torn edges, each shape casting a shadow |
 | `crayon` | Waxy scribbled colour that strays over the lines |
 | `storybook` | Pencil lines over soft watercolour washes on textured paper |
+| `clear` | One even outline everywhere, flat colour, no shading or texture (for the clear-line style) |
 
 These are code-drawn looks. For illustrator-quality drawn art, the same rig can take drawn parts instead; see "Drawn art" in [`docs/tv-show.md`](docs/tv-show.md).
 

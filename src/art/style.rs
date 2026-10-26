@@ -27,16 +27,19 @@ pub enum StyleName {
 	Crayon,
 	/// Storybook: pencil lines over soft watercolour washes on textured paper.
 	Storybook,
+	/// Clear line: one even outline everywhere, flat colour, no shading or texture.
+	Clear,
 }
 
 impl StyleName {
-	pub const ALL: [(&'static str, StyleName); 6] = [
+	pub const ALL: [(&'static str, StyleName); 7] = [
 		("riso", StyleName::Riso),
 		("tv", StyleName::Tv),
 		("bold", StyleName::Bold),
 		("cut-paper", StyleName::CutPaper),
 		("crayon", StyleName::Crayon),
 		("storybook", StyleName::Storybook),
+		("clear", StyleName::Clear),
 	];
 
 	pub fn parse(name: &str) -> Option<StyleName> {
@@ -67,6 +70,8 @@ pub enum Shading {
 	Wash,
 	/// Scribbled hatching.
 	Hatch,
+	/// None: flat colour.
+	Flat,
 }
 
 /// A surface texture laid over fills.
@@ -285,6 +290,30 @@ impl Style {
 						lift: 0.05,
 						tone: None,
 						palette: None,
+					},
+				}
+			}
+			StyleName::Clear => {
+				Style {
+					name,
+					outline: 0.8,
+					ink: palette::INK,
+					// Clear line gives every line the same weight, inside and out.
+					detail: 1.0,
+					registration: pt(0.0, 0.0),
+					fill_opacity: 1.0,
+					shadow: None,
+					shading: Shading::Flat,
+					texture: Texture::None,
+					sketch: None,
+					pooling: 0.0,
+					halftone: false,
+					roughen: 0.0,
+					roughen_frequency: 0.0,
+					finish: Finish {
+						grain: 0.0,
+						saturation: 1.06,
+						..plain
 					},
 				}
 			}

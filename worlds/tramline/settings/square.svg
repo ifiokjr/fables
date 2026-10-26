@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2060">
+  <title>The square: cafe fronts, a kiosk and the tram lines, with the city in layered planes behind</title>
+  <path id="far-sky" d="M-160 -160 L2560 -160 L2560 1540 L-160 1540 Z" fill="#cfe8f3" data-night="night" data-line="none"/>
+  <path id="far-skyline-back" d="M-160 1300 L-160 933 L-134.4 933 L-74.8 873.3 L-15.2 933 L10.4 933 L10.4 1300 L10.4 877.5 L36.3 877.5 L97 816.9 L157.6 877.5 L183.6 877.5 L183.6 1300 L183.6 942.1 L223.4 942.1 L316.5 849 L409.6 942.1 L449.5 942.1 L449.5 1300 L449.5 849 L483.8 849 L564 768.9 L644.1 849 L678.4 849 L678.4 1300 L678.4 858.4 L721.2 858.4 L963.4 858.4 L963.4 1300 L963.4 936.5 L1005.6 936.5 L1244.8 936.5 L1244.8 1300 L1244.8 1045.2 L1277.3 1045.2 L1461.6 1045.2 L1461.6 1300 L1461.6 721 L1503 721 L1737.7 721 L1737.7 1300 L1737.7 888.8 L1774.1 888.8 L1858.9 804 L1943.7 888.8 L1980 888.8 L1980 1300 L1980 998.1 L2005 998.1 L2063.3 939.8 L2121.5 998.1 L2146.5 998.1 L2146.5 1300 L2146.5 827 L2182.3 827 L2265.8 743.5 L2349.3 827 L2385.1 827 L2385.1 1300 L2385.1 831.5 L2416.2 831.5 L2592.3 831.5 L2592.3 1300 L2560 2200 L-160 2200 Z" fill="#a9bfdc" data-night="#3a3f78" data-depth="0.7"/>
+  <path id="far-skyline-front" d="M-160 1380 L-160 970.7 L-131.3 970.7 L31.3 970.7 L31.3 1380 L31.3 937.4 L78.5 937.4 L345.6 937.4 L345.6 1380 L345.6 1123 L392.2 1123 L656.5 1123 L656.5 1380 L656.5 877.3 L685.6 877.3 L850.2 877.3 L850.2 1380 L850.2 911.3 L880.4 911.3 L1051.6 911.3 L1051.6 1380 L1051.6 965.9 L1092 965.9 L1321.1 965.9 L1321.1 1380 L1321.1 885.5 L1349.9 885.5 L1513.2 885.5 L1513.2 1380 L1513.2 1053.3 L1545.9 1053.3 L1622.1 977.1 L1698.3 1053.3 L1731 1053.3 L1731 1380 L1731 1146 L1760.9 1146 L1930.4 1146 L1930.4 1380 L1930.4 958.7 L1976.2 958.7 L2235.6 958.7 L2235.6 1380 L2235.6 1030.8 L2273 1030.8 L2360.1 943.7 L2447.2 1030.8 L2484.6 1030.8 L2484.6 1380 L2484.6 1162 L2527.8 1162 L2772.8 1162 L2772.8 1380 L2560 2200 L-160 2200 Z" fill="#86a2cf" data-night="#343a70" data-depth="0.45"/>
+  <path id="near-facade-1" d="M-160 1100 L760 1100 L760 1880 L-160 1880 Z" fill="tangerine"/>
+  <path id="near-roof-1" d="M-180 1060 L780 1060 L780 1110 L-180 1110 Z" fill="cocoa"/>
+  <path id="near-window-1-1-1" d="M-100 1160 L-10 1160 L-10 1280 L-100 1280 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-1-1-2" d="M100 1160 L190 1160 L190 1280 L100 1280 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-1-1-3" d="M300 1160 L390 1160 L390 1280 L300 1280 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-1-1-4" d="M500 1160 L590 1160 L590 1280 L500 1280 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-1-2-1" d="M-100 1330 L-10 1330 L-10 1450 L-100 1450 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-1-2-2" d="M100 1330 L190 1330 L190 1450 L100 1450 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-1-2-3" d="M300 1330 L390 1330 L390 1450 L300 1450 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-1-2-4" d="M500 1330 L590 1330 L590 1450 L500 1450 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-awning-1" d="M-120 1650 L720 1650 L750 1740 L-150 1740 Z" fill="sunflower"/>
+  <path id="near-awning-1-stripes" d="M-70 1650 L-55 1740 M0 1650 L15 1740 M70 1650 L85 1740 M140 1650 L155 1740 M210 1650 L225 1740 M280 1650 L295 1740 M350 1650 L365 1740 M420 1650 L435 1740 M490 1650 L505 1740 M560 1650 L575 1740 M630 1650 L645 1740" fill="none" stroke="white" stroke-width="14"/>
+  <path id="near-door-1" d="M240 1750 L360 1750 L360 1880 L240 1880 Z" fill="cocoa"/>
+  <path id="near-facade-2" d="M600 1180 L1200 1180 L1200 1880 L600 1880 Z" fill="mint"/>
+  <path id="near-roof-2" d="M580 1140 L1220 1140 L1220 1190 L580 1190 Z" fill="cocoa"/>
+  <path id="near-window-2-1-1" d="M660 1240 L750 1240 L750 1360 L660 1360 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-2-1-2" d="M820 1240 L910 1240 L910 1360 L820 1360 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-2-1-3" d="M980 1240 L1070 1240 L1070 1360 L980 1360 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-2-2-1" d="M660 1410 L750 1410 L750 1530 L660 1530 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-2-2-2" d="M820 1410 L910 1410 L910 1530 L820 1530 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-2-2-3" d="M980 1410 L1070 1410 L1070 1530 L980 1530 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-awning-2" d="M640 1650 L1160 1650 L1190 1740 L610 1740 Z" fill="tomato"/>
+  <path id="near-awning-2-stripes" d="M690 1650 L705 1740 M760 1650 L775 1740 M830 1650 L845 1740 M900 1650 L915 1740 M970 1650 L985 1740 M1040 1650 L1055 1740 M1110 1650 L1125 1740" fill="none" stroke="white" stroke-width="14"/>
+  <path id="near-door-2" d="M840 1750 L960 1750 L960 1880 L840 1880 Z" fill="cocoa"/>
+  <path id="near-facade-3" d="M1800 1020 L2560 1020 L2560 1880 L1800 1880 Z" fill="lilac"/>
+  <path id="near-roof-3" d="M1780 980 L2580 980 L2580 1030 L1780 1030 Z" fill="cocoa"/>
+  <path id="near-window-3-1-1" d="M1860 1080 L1950 1080 L1950 1200 L1860 1200 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-3-1-2" d="M2073.3 1080 L2163.3 1080 L2163.3 1200 L2073.3 1200 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-3-1-3" d="M2286.7 1080 L2376.7 1080 L2376.7 1200 L2286.7 1200 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-3-2-1" d="M1860 1250 L1950 1250 L1950 1370 L1860 1370 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-3-2-2" d="M2073.3 1250 L2163.3 1250 L2163.3 1370 L2073.3 1370 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-window-3-2-3" d="M2286.7 1250 L2376.7 1250 L2376.7 1370 L2286.7 1370 Z" fill="#dff3fb" data-night="sunflower"/>
+  <path id="near-awning-3" d="M1840 1650 L2520 1650 L2550 1740 L1810 1740 Z" fill="teal"/>
+  <path id="near-awning-3-stripes" d="M1890 1650 L1905 1740 M1960 1650 L1975 1740 M2030 1650 L2045 1740 M2100 1650 L2115 1740 M2170 1650 L2185 1740 M2240 1650 L2255 1740 M2310 1650 L2325 1740 M2380 1650 L2395 1740 M2450 1650 L2465 1740" fill="none" stroke="white" stroke-width="14"/>
+  <path id="near-door-3" d="M2120 1750 L2240 1750 L2240 1880 L2120 1880 Z" fill="cocoa"/>
+  <path id="near-kiosk" d="M1880 1660 L2140 1660 L2140 1920 L1880 1920 Z" fill="leaf"/>
+  <path id="near-kiosk-roof" d="M1850 1660 L2010 1560 L2170 1660 Z" fill="tomato"/>
+  <path id="near-kiosk-papers" d="M1910 1750 L2110 1750 L2110 1860 L1910 1860 Z" fill="white"/>
+  <path id="near-pavement" d="M-160 1880 L2560 1880 L2560 2680 L-160 2680 Z" fill="sand" data-line="none"/>
+  <path id="near-paving-lines" d="M-600 2560 L876 1880 M-300 2560 L930 1880 M0 2560 L984 1880 M300 2560 L1038 1880 M600 2560 L1092 1880 M900 2560 L1146 1880 M1200 2560 L1200 1880 M1500 2560 L1254 1880 M1800 2560 L1308 1880 M2100 2560 L1362 1880 M2400 2560 L1416 1880 M2700 2560 L1470 1880 M3000 2560 L1524 1880 M-160 1960 L2560 1960 M-160 2100 L2560 2100 M-160 2300 L2560 2300" fill="none" stroke="toffee" stroke-width="4"/>
+  <path id="near-tram-rails" d="M900 2560 L1146 1880 M1060 2560 L1174.8 1880" fill="none" stroke="slate" stroke-width="9"/>
+  <path id="front-lamp-post" d="M2330 2560 L2330 900" fill="none" stroke="night" stroke-width="34" data-noodle=""/>
+  <path id="front-lamp" d="M2270 820 L2390 820 L2390 930 L2270 930 Z" fill="cream" data-night="sunflower"/>
+</svg>

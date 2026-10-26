@@ -45,7 +45,7 @@ use super::puppet::Proportions;
 pub const DEFAULT: &str = "cartoon";
 
 /// The packs compiled into fables: name, `style.toml`, `kit.svg` and `template.svg`.
-const BUILT_IN: [(&str, &str, &str, &str); 5] = [
+const BUILT_IN: [(&str, &str, &str, &str); 6] = [
 	(
 		"cartoon",
 		include_str!("../../styles/cartoon/style.toml"),
@@ -77,6 +77,13 @@ const BUILT_IN: [(&str, &str, &str, &str); 5] = [
 		include_str!("../../styles/rubber-hose-1930s/style.toml"),
 		include_str!("../../styles/rubber-hose/kit.svg"),
 		include_str!("../../styles/rubber-hose/template.svg"),
+	),
+	// Clear line draws its simple characters with the cartoon kit's hands, mouths and props.
+	(
+		"clear-line",
+		include_str!("../../styles/clear-line/style.toml"),
+		include_str!("../../styles/cartoon/kit.svg"),
+		include_str!("../../styles/clear-line/template.svg"),
 	),
 ];
 

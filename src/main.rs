@@ -34,7 +34,8 @@ struct Cli {
 	#[command(subcommand)]
 	command: Command,
 	/// Draw in these art styles instead of the script's own: riso, tv, bold, cut-paper, crayon,
-	/// storybook, a comma-separated list (bold,tv), or all. Each style renders into its own folder.
+	/// storybook, clear, a comma-separated list (bold,tv), or all. Each style renders into its
+	/// own folder.
 	#[arg(long, global = true)]
 	style: Option<String>,
 	/// The world to work in: a folder with a world.toml. Defaults to the nearest world above the
@@ -549,7 +550,7 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 	if let Some(name) = style {
 		if Style::parse(name).is_none() {
 			anyhow::bail!(
-				"unknown style `{name}`; use riso, tv, bold, cut-paper, crayon or storybook"
+				"unknown style `{name}`; use riso, tv, bold, cut-paper, crayon, storybook or clear"
 			);
 		}
 

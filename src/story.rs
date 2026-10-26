@@ -71,7 +71,7 @@ pub struct Meta {
 	pub world: Option<String>,
 	#[serde(default)]
 	pub cover: Option<CoverSpec>,
-	/// The art style: riso, tv, bold, cut-paper, crayon or storybook (default riso).
+	/// The art style: riso, tv, bold, cut-paper, crayon, storybook or clear (default riso).
 	#[serde(default)]
 	pub style: Option<String>,
 	/// The narrator; without one, the world's narrator reads (see [`Story::narrator`]).

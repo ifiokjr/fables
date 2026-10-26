@@ -797,6 +797,7 @@ impl Svg {
 					path.as_str()
 				);
 			}
+			Shading::Flat => self.fill_alpha(path, base, opacity),
 			Shading::Crescent | Shading::Cel | Shading::Wash | Shading::Hatch => {
 				let shade = if self.style.shading == Shading::Cel {
 					shade.darken(0.1)
