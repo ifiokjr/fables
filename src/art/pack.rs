@@ -45,7 +45,7 @@ use super::puppet::Proportions;
 pub const DEFAULT: &str = "cartoon";
 
 /// The packs compiled into fables: name, `style.toml`, `kit.svg` and `template.svg`.
-const BUILT_IN: [(&str, &str, &str, &str); 7] = [
+const BUILT_IN: [(&str, &str, &str, &str); 8] = [
 	(
 		"cartoon",
 		include_str!("../../styles/cartoon/style.toml"),
@@ -90,6 +90,12 @@ const BUILT_IN: [(&str, &str, &str, &str); 7] = [
 		include_str!("../../styles/mid-century/style.toml"),
 		include_str!("../../styles/mid-century/kit.svg"),
 		include_str!("../../styles/mid-century/template.svg"),
+	),
+	(
+		"chibi",
+		include_str!("../../styles/chibi/style.toml"),
+		include_str!("../../styles/chibi/kit.svg"),
+		include_str!("../../styles/chibi/template.svg"),
 	),
 ];
 

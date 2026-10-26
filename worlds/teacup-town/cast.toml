@@ -1,0 +1,16 @@
+# The folk of Teacup Town. Every table is one character.
+
+[mochi]
+name = "Mochi Mae"
+about = "The smallest baker in Teacup Town, with flour on everything."
+habit = "Taste-tests every cake before it is finished."
+kind = "kid"
+puppet = "puppets/mochi.svg"
+skin = "#f7dcc8"
+hair-colour = "#6b3a2e"
+top = "#ffb3c7"
+trim = "#ffffff"
+bottom = "#7a5cb8"
+shoes = "#ff6fae"
+eyes = "#7a4a2e"
+pattern = "dots"

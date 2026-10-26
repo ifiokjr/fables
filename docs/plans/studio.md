@@ -175,3 +175,4 @@ Every layer landed on 26 October 2026, as stacked local branches. Layer 14 went 
 - **Settings (14).** The seven Kerfuffle settings are part files in `settings/`, ported from their code with depth haze added. Worlds add their own, such as Kiteharbour's harbour.
   - A fuller repaint to the [authored-puppet rules](authored-puppets.md#settings) (vanishing points, framing foregrounds) is now an art task on these files, not a code change.
 - **Voices (15).** Cartesia and Hume sit behind `Voice`. They are unit-tested on their request shapes but have not been run against the live services.
+- **Dials and packs (17 to 22).** The dials (line, shade, motion) landed with every existing render byte-identical. Manga moved onto them, and rubber hose (with a 1930s variant), clear line (with a `clear` page skin), mid-century and chibi followed, each with a test character designed through MCP: Clem, Zia, Otto and Mochi. All their sheets await sign-off.
