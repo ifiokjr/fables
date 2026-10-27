@@ -673,6 +673,30 @@ fn wrist(shape: HandShape, target: Pt, side: f32, shoulder_y: f32) -> f32 {
 	}
 }
 
+/// The centre line of a rubber-hose limb: one tube of a fixed `length` from `root` to `end`.
+/// Pulled taut it runs straight; when the end comes closer, the slack bows it into one smooth
+/// arc, on the side the `joint` of a jointed limb would bend to. So the curve flexes with every
+/// move of the hand or foot, and there's never an elbow or knee.
+fn hose(root: Pt, joint: Pt, end: Pt, length: f32) -> [Pt; 9] {
+	let chord = end - root;
+	let reach = chord.len().max(1.0);
+	let slack = (length - reach).max(0.0);
+	// A shallow arc of height h over a chord d is about d + 8h²/3d long.
+	let height = (3.0 * reach * slack / 8.0).sqrt().min(reach * 0.45);
+	let normal = chord.norm().perp();
+	let towards = joint - root;
+	let side = if towards.x * normal.x + towards.y * normal.y < 0.0 {
+		-1.0
+	} else {
+		1.0
+	};
+
+	std::array::from_fn(|i| {
+		let s = i as f32 / 8.0;
+		root.lerp(end, s) + normal * (side * height * 4.0 * s * (1.0 - s))
+	})
+}
+
 /// The rig solved for one moment.
 struct Solved {
 	t: f32,
@@ -988,18 +1012,21 @@ fn draw_leg(
 	let shin = solved.limbs.shin;
 
 	// The leg is one tapered shape bent through the knee, so there's no seam at the joint. A
-	// rubber-hose leg only bends gently where the knee would be.
-	let bend = if puppet.style.motion.limbs == Joints::Hose {
-		let middle = hip.lerp(ankle, 0.5);
-		middle + (knee - middle) * 0.4
+	// rubber-hose leg has no knee: it's one tube that bows as the foot comes closer.
+	let (start, end) = solved.body.leg_width;
+	let leg = if puppet.style.motion.limbs == Joints::Hose {
+		Shape::taper(
+			&hose(hip, knee, ankle, solved.limbs.thigh + shin),
+			start,
+			end,
+		)
 	} else {
-		knee
+		Shape::taper(
+			&[hip, hip.lerp(knee, 0.5), knee, knee.lerp(ankle, 0.5), ankle],
+			start,
+			end,
+		)
 	};
-	let leg = Shape::taper(
-		&[hip, hip.lerp(bend, 0.5), bend, bend.lerp(ankle, 0.5), ankle],
-		solved.body.leg_width.0,
-		solved.body.leg_width.1,
-	);
 	svg.brushed_shaded(
 		&leg,
 		far(inks.skin, is_far, inks.finish.far),
@@ -1354,18 +1381,16 @@ impl Arm<'_> {
 		let hand_skin = inks.features.gloves.unwrap_or(hand_skin);
 
 		if puppet.style.motion.limbs == Joints::Hose {
-			// Rubber hose: one smooth tube from shoulder to wrist; the elbow only bends it.
-			let middle = shoulder.lerp(wrist, 0.5);
-			let bend = middle + (elbow - middle) * 0.4;
+			// Rubber hose: one tube from shoulder to wrist, with no elbow, that bows as the hand
+			// comes closer.
 			let width = solved.body.forearm_width.0;
 			let tube = Shape::taper(
-				&[
+				&hose(
 					shoulder,
-					shoulder.lerp(bend, 0.5),
-					bend,
-					bend.lerp(wrist, 0.5),
+					elbow,
 					wrist,
-				],
+					solved.limbs.upper_arm + solved.limbs.forearm,
+				),
 				width,
 				width,
 			);
@@ -2703,6 +2728,35 @@ mod tests {
 		let warm = cartoon().inks.blush;
 		assert_eq!(blush(Color(0xF4_A2_6B), warm), warm);
 		assert_ne!(blush(Color(0x62_B9_AD), warm), warm);
+	}
+
+	#[test]
+	fn a_hose_limb_bows_with_its_slack_and_keeps_its_length() {
+		let length = |line: &[Pt]| {
+			line.windows(2)
+				.map(|pair| (pair[1] - pair[0]).len())
+				.sum::<f32>()
+		};
+		let root = pt(0.0, 0.0);
+
+		// Pulled taut, the tube is straight.
+		let taut = hose(root, pt(0.0, 50.0), pt(0.0, 100.0), 100.0);
+		assert!(taut.iter().all(|p| p.x.abs() < 1e-3), "{taut:?}");
+
+		// With slack it bows towards the joint, as one arc, and stays about as long.
+		for joint in [pt(30.0, 40.0), pt(-30.0, 40.0)] {
+			let bowed = hose(root, joint, pt(0.0, 80.0), 100.0);
+			let middle = bowed[4];
+			assert!(
+				middle.x.signum() == joint.x.signum() && middle.x.abs() > 15.0,
+				"{bowed:?}"
+			);
+			assert!((length(&bowed) - 100.0).abs() < 6.0, "{}", length(&bowed));
+			assert!(
+				bowed.windows(2).all(|pair| pair[1].y > pair[0].y),
+				"no kinks: {bowed:?}"
+			);
+		}
 	}
 
 	#[test]
