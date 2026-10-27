@@ -402,8 +402,114 @@ pub struct Svg {
 	pub line: f32,
 	pub style: Style,
 	/// How the brushed finish inks and shades, set by whoever is drawing (an authored puppet
-	/// sets its style's line and shade dials while it draws).
+	/// sets its style's line and shade dials while it draws, with [`Svg::use_brush`]).
 	pub brush: Brush,
+	/// How each open group's units map to the document's, innermost last, so an offset can be
+	/// kept the same on the page however a part is turned.
+	frames: Vec<Linear>,
+}
+
+/// The linear part of an SVG transform (translation dropped): how a vector in a group's own
+/// units maps into the units outside it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Linear {
+	a: f32,
+	b: f32,
+	c: f32,
+	d: f32,
+}
+
+impl Linear {
+	const IDENTITY: Linear = Linear {
+		a: 1.0,
+		b: 0.0,
+		c: 0.0,
+		d: 1.0,
+	};
+
+	fn apply(self, v: Pt) -> Pt {
+		pt(self.a * v.x + self.c * v.y, self.b * v.x + self.d * v.y)
+	}
+
+	/// This frame with `inner` nested inside it.
+	fn then(self, inner: Linear) -> Linear {
+		Linear {
+			a: self.a * inner.a + self.c * inner.b,
+			b: self.b * inner.a + self.d * inner.b,
+			c: self.a * inner.c + self.c * inner.d,
+			d: self.b * inner.c + self.d * inner.d,
+		}
+	}
+
+	fn inverse(self) -> Option<Linear> {
+		let det = self.a * self.d - self.b * self.c;
+
+		(det.abs() > 1e-6).then(|| {
+			Linear {
+				a: self.d / det,
+				b: -self.b / det,
+				c: -self.c / det,
+				d: self.a / det,
+			}
+		})
+	}
+
+	/// The linear part of a transform list such as `translate(4 5) rotate(30) scale(-1 1)`,
+	/// as fables writes them.
+	fn of_transform(transform: &str) -> Linear {
+		transform
+			.split(')')
+			.filter_map(|item| item.split_once('('))
+			.fold(Linear::IDENTITY, |frame, (name, args)| {
+				let n: Vec<f32> = args
+					.split(|c: char| c == ',' || c.is_whitespace())
+					.filter_map(|arg| arg.parse().ok())
+					.collect();
+				let arg = |i: usize| n.get(i).copied();
+				let step = match name.trim() {
+					"rotate" => {
+						let (sin, cos) = arg(0).unwrap_or(0.0).to_radians().sin_cos();
+						Linear {
+							a: cos,
+							b: sin,
+							c: -sin,
+							d: cos,
+						}
+					}
+					"scale" => {
+						let x = arg(0).unwrap_or(1.0);
+						Linear {
+							a: x,
+							b: 0.0,
+							c: 0.0,
+							d: arg(1).unwrap_or(x),
+						}
+					}
+					"matrix" => {
+						Linear {
+							a: arg(0).unwrap_or(1.0),
+							b: arg(1).unwrap_or(0.0),
+							c: arg(2).unwrap_or(0.0),
+							d: arg(3).unwrap_or(1.0),
+						}
+					}
+					"skewX" => {
+						Linear {
+							c: arg(0).unwrap_or(0.0).to_radians().tan(),
+							..Linear::IDENTITY
+						}
+					}
+					"skewY" => {
+						Linear {
+							b: arg(0).unwrap_or(0.0).to_radians().tan(),
+							..Linear::IDENTITY
+						}
+					}
+					_ => Linear::IDENTITY,
+				};
+				frame.then(step)
+			})
+	}
 }
 
 /// The line and shade dials as the brushed finish uses them (see [`dials`]).
@@ -416,6 +522,9 @@ pub struct Brush {
 	pub ink: Color,
 	/// The last fill laid down, which a self-coloured line takes its colour from.
 	last_fill: Option<Color>,
+	/// The frame the line's `register` offset is measured in: wherever the brush was picked
+	/// up, so every part's colour slips the same way on the page.
+	frame: Linear,
 }
 
 impl Default for Brush {
@@ -426,6 +535,7 @@ impl Default for Brush {
 			highlight: dials::Highlight::None,
 			ink: palette::INK,
 			last_fill: None,
+			frame: Linear::IDENTITY,
 		}
 	}
 }
@@ -439,6 +549,7 @@ impl Brush {
 			highlight: shade.highlight,
 			ink,
 			last_fill: None,
+			frame: Linear::IDENTITY,
 		}
 	}
 }
@@ -468,7 +579,28 @@ impl Svg {
 			line: 7.0,
 			style,
 			brush: Brush::default(),
+			frames: Vec::new(),
 		}
+	}
+
+	/// Picks up `brush` for what's drawn from here on, measuring its register offset in the
+	/// current frame. Returns the brush it replaces, to put back with `svg.brush = …`.
+	pub fn use_brush(&mut self, brush: Brush) -> Brush {
+		let frame = self.frame();
+		std::mem::replace(&mut self.brush, Brush { frame, ..brush })
+	}
+
+	fn frame(&self) -> Linear {
+		self.frames.last().copied().unwrap_or(Linear::IDENTITY)
+	}
+
+	/// The brush's register offset in the current group's units: the same slip on the page,
+	/// however the group is turned, scaled or mirrored.
+	fn register_here(&self) -> Pt {
+		let register = self.brush.frame.apply(self.brush.line.register);
+		self.frame()
+			.inverse()
+			.map_or(self.brush.line.register, |into| into.apply(register))
 	}
 
 	/// Switches style for everything drawn from now on.
@@ -491,16 +623,21 @@ impl Svg {
 	/// Opens a `<g>` with an SVG transform; pair with [`Svg::end`].
 	pub fn begin(&mut self, transform: &str) {
 		let _ = write!(self.body, r#"<g transform="{transform}">"#);
+		self.frames
+			.push(self.frame().then(Linear::of_transform(transform)));
 	}
 
 	/// Opens a `<g>` with group opacity; pair with [`Svg::end`].
 	pub fn begin_opacity(&mut self, opacity: f32) {
 		let _ = write!(self.body, r#"<g opacity="{opacity:.3}">"#);
+		self.frames.push(self.frame());
 	}
 
 	/// Opens a layer whose edges the style roughens (torn paper, crayon, paint); pair with
 	/// [`Svg::end`]. Applied once per layer rather than per shape, which keeps it cheap.
 	pub fn begin_layer(&mut self) {
+		self.frames.push(self.frame());
+
 		if self.style.roughen <= 0.0 {
 			self.body.push_str("<g>");
 			return;
@@ -519,6 +656,7 @@ impl Svg {
 
 	pub fn end(&mut self) {
 		self.body.push_str("</g>");
+		self.frames.pop();
 	}
 
 	pub fn fill(&mut self, path: &Path, color: Color) {
@@ -599,6 +737,7 @@ impl Svg {
 			path.as_str()
 		);
 		let _ = write!(self.body, r#"<g clip-path="url(#{id})">"#);
+		self.frames.push(self.frame());
 	}
 
 	/// A fill painted with a gradient or pattern from the document's defs, by id.
@@ -628,11 +767,10 @@ impl Svg {
 			self.end();
 		}
 
-		let register = self.brush.line.register;
-
-		if register == pt(0.0, 0.0) {
+		if self.brush.line.register == pt(0.0, 0.0) {
 			self.fill(path, fill);
 		} else {
+			let register = self.register_here();
 			self.begin(&format!("translate({:.2} {:.2})", register.x, register.y));
 			self.fill(path, fill);
 			self.end();
@@ -985,6 +1123,32 @@ pub fn escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn the_register_slips_the_same_way_on_the_page_however_a_part_is_turned() {
+		let mut svg = Svg::new();
+		svg.begin("translate(300 200) scale(0.5)");
+		let line = dials::Line {
+			register: pt(7.0, 5.0),
+			..dials::Line::default()
+		};
+		let _ = svg.use_brush(Brush::new(line, &dials::Shade::default(), palette::INK));
+
+		for transform in [
+			"rotate(37)",
+			"scale(-1 1) translate(0 -40) rotate(-90)",
+			"translate(4 9) rotate(120) scale(1.6 0.7)",
+		] {
+			svg.begin(transform);
+			let slip = svg.frame().apply(svg.register_here());
+			let page = Linear::of_transform("scale(0.5)").apply(pt(7.0, 5.0));
+			assert!(
+				(slip - page).len() < 1e-3,
+				"{transform}: {slip:?} vs {page:?}"
+			);
+			svg.end();
+		}
+	}
 
 	#[test]
 	fn noise_is_deterministic_and_bounded() {

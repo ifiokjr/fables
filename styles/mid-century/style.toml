@@ -1,9 +1,9 @@
 # The mid-century style: the graphic look of 1950s modern animation. Angular, geometric shapes;
-# a small flat palette that every colour snaps to; quick broken lines with the colour printed
-# slightly off them; no shading; and limited motion, held poses that snap from key to key on
-# twos. Abstract settings suit it, and its pages read best in the riso skin.
+# a small flat palette that every colour snaps to; clean, even angular lines with the colour
+# printed slightly off them; no shading; and limited motion, held poses that snap from key to
+# key on twos. Abstract settings suit it, and its pages read best in the riso skin.
 name = "mid-century"
-description = "Mid-century modern: angular geometric characters, a small flat palette, broken lines with colour off-register, and held poses that snap between keys."
+description = "Mid-century modern: angular geometric characters, a small flat palette, clean angular lines with the colour printed off them by one fixed slip, and held poses that snap between keys."
 
 [finish]
 line = 3.2
@@ -13,9 +13,9 @@ cel-shadow = "#d8cfc0"
 far = "#6a6458"
 
 [line]
-stroke = "broken"       # quick pen lines, broken into long dashes
+stroke = "uniform"      # one confident, even pen line
 colour = "ink"
-register = [7.0, 5.0]   # the colour printed a little off the line
+register = [7.0, 5.0]   # the colour printed off the line by one fixed slip, the same on every part
 
 [shade]
 tones = 0

@@ -817,8 +817,11 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	let inks = Inks::of(look, &puppet.style, state.teeth);
 	let t = solved.t;
 	// The style's line and shade dials, for this figure only.
-	let saved = svg.brush;
-	svg.brush = Brush::new(puppet.style.line, &puppet.style.shade, inks.line);
+	let saved = svg.use_brush(Brush::new(
+		puppet.style.line,
+		&puppet.style.shade,
+		inks.line,
+	));
 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 
