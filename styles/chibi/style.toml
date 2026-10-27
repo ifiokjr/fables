@@ -86,29 +86,30 @@ satchel = "#5a4a6c"
 apron = "#ffffff"
 mud = "#6e4a30"
 
-# A kid: about two heads tall, a big head on a small round body with stubby limbs.
+# A kid: about two and a third heads tall (crown of the hair to chin), a big round head on a
+# small round body with short, chunky limbs.
 [bodies.kid]
-neck = [0.0, -232.0]
+neck = [0.0, -316.0]
 head-above-neck = 108.0
-shoulder-y = -222.0
-shoulder-half = 34.0
-shoulders-turned = [-30.0, 24.0]
-hips-turned = [-12.0, 16.0]
-hem-y = -118.0
-body-radius = 50.0
-leg-width = [26.0, 22.0]
-forearm-width = [18.0, 16.0]
-hand-scale = 1.15
-reach = [48.0, 70.0]
+shoulder-y = -306.0
+shoulder-half = 42.0
+shoulders-turned = [-36.0, 30.0]
+hips-turned = [-14.0, 18.0]
+hem-y = -158.0
+body-radius = 56.0
+leg-width = [38.0, 33.0]
+forearm-width = [22.0, 19.0]
+hand-scale = 1.2
+reach = [72.0, 96.0]
 
 [bodies.kid.limbs]
-pelvis-y = -112.0
+pelvis-y = -150.0
 ankle-y = -22.0
-hip-spread = 16.0
-thigh = 46.0
-shin = 46.0
-upper-arm = 44.0
-forearm = 40.0
+hip-spread = 18.0
+thigh = 66.0
+shin = 66.0
+upper-arm = 58.0
+forearm = 50.0
 
 # A grown-up: two and a half heads, a little taller and longer in the leg.
 [bodies.grown-up]
