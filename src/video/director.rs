@@ -1169,6 +1169,44 @@ mod tests {
 	}
 
 	#[test]
+	fn a_page_heading_shot_frames_the_still() {
+		let source = format!(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park shot=close\n@kid \
+			 x=0.5 talk\nHello there.\n"
+		);
+		let story = story::parse(&source).unwrap();
+		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
+		let page = &story.pages[0];
+		let mut scene = Scene::for_page(page, &story.settings).unwrap();
+		let mut memory = std::collections::HashMap::new();
+
+		for beat in &page.beats {
+			if let Beat::Direct(directive) = beat {
+				scene.apply(directive, &cast, &mut memory).unwrap();
+			}
+		}
+
+		let puppets = compose::puppets(&scene, 0.0, true);
+		let view = still_view(&scene, &puppets, ShotSize::Close, &scene.camera.on)
+			.expect("a close shot on a speaking kid frames the still");
+
+		// A real close-up: much tighter than the whole stage, centred on the kid, square.
+		assert!(view.height < STAGE * 0.6, "{}", view.height);
+		assert!(
+			(view.centre.x - puppets[0].at.x).abs() < view.width(1.0),
+			"the kid stays in frame: {} vs {}",
+			view.centre.x,
+			puppets[0].at.x
+		);
+
+		// An unknown subject leaves the page to draw as usual.
+		assert!(
+			still_view(&scene, &puppets, ShotSize::Close, &["ghost".to_owned()]).is_none(),
+			"nobody named, no framing"
+		);
+	}
+
+	#[test]
 	fn relative_moves_arrive_where_their_names_say() {
 		let view = View {
 			centre: pt(1500.0, 1500.0),

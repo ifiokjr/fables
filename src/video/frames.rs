@@ -271,7 +271,9 @@ impl<'a> Renderer<'a> {
 			// and everything alive over it stays sharp.
 			let near_image = self.blurred_backdrop(&scene, Layer::Near, *near)?;
 			svg.raw(&backdrop_image(&near_image));
+			svg.begin_layer();
 			scene_front(&mut svg, &scene, &puppets, time);
+			svg.end();
 		} else {
 			svg.begin_layer();
 			compose::draw_near(&mut svg, &scene, &puppets, time);
