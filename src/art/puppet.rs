@@ -3128,6 +3128,67 @@ mod tests {
 	}
 
 	#[test]
+	fn a_kneeling_leg_is_one_whose_knee_rests_on_the_floor_with_the_foot_behind() {
+		let body = long_legged();
+		let solved = stances(&body);
+		let kneels = |stance: Stance| {
+			let (_, solved, _) = solved
+				.iter()
+				.find(|(s, ..)| *s == stance)
+				.unwrap_or_else(|| unreachable!("every stance is solved"));
+			[-1.0, 1.0].map(|side| solved.kneels(solved.leg(side)))
+		};
+
+		assert_eq!(kneels(Stance::Stand), [false, false]);
+		assert_eq!(kneels(Stance::Tiptoe), [false, false]);
+		assert!(kneels(Stance::Kneel).contains(&true), "a kneel kneels");
+
+		let plain = Solved::new(&stances(&kid())[4].2, &kid());
+		assert!(
+			!plain.kneels(plain.leg(-1.0)),
+			"a body off the floor never kneels"
+		);
+	}
+
+	#[test]
+	fn a_skirt_hangs_from_the_waist_and_never_goes_through_the_floor() {
+		let body = long_legged();
+		let waist = body.limbs.pelvis_y - 40.0;
+
+		for (stance, solved, _) in stances(&body) {
+			// Above the waist the top of the skirt rides with the body, untouched.
+			let band = pt(30.0, waist - 20.0);
+			assert_eq!(solved.skirt(band), band, "{stance:?}");
+
+			// The waist itself joins the hanging cloth without a seam.
+			let at_waist = solved.torso(solved.skirt(pt(-60.0, waist + 0.01)));
+			assert!(
+				(at_waist - solved.torso(pt(-60.0, waist))).len() < 0.5,
+				"{stance:?}: {at_waist:?}"
+			);
+
+			for x in [-120.0, 0.0, 120.0] {
+				let hem = solved.torso(solved.skirt(pt(x, waist + 190.0)));
+				assert!(hem.y <= -4.0 + 0.01, "{stance:?}: hem {hem:?}");
+			}
+		}
+
+		// Bowing, the cloth still falls from the waist: the hem hangs below it, not along the
+		// leaning spine.
+		let (_, bow, _) = stances(&body)
+			.into_iter()
+			.find(|(s, ..)| *s == Stance::Bow)
+			.unwrap_or_else(|| unreachable!("every stance is solved"));
+		let waist_mid = bow.torso(pt(0.0, waist));
+		let hem_mid = bow.torso(bow.skirt(pt(0.0, waist + 150.0)));
+		let leaning = bow.torso(pt(0.0, waist + 150.0));
+		assert!(
+			(hem_mid.x - waist_mid.x).abs() < (leaning.x - waist_mid.x).abs(),
+			"hangs {hem_mid:?} rather than leaning to {leaning:?}"
+		);
+	}
+
+	#[test]
 	fn front_on_knees_bend_towards_the_viewer() {
 		let body = long_legged();
 		let mut state = FigureState::new(&Frame::authored(&cartoon(), Build::Kid));
