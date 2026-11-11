@@ -82,10 +82,11 @@ satchel = "#a85a3c"
 apron = "#f8f1e4"
 mud = "#6e4a30"
 
-# A kid: a big round head on a slim body, about three and a half heads tall.
+# A kid: a big round head on a slim body, about three and a half heads tall, held up on a short
+# neck. The limbs taper gently, with a knee and an elbow you can see.
 [bodies.kid]
 neck = [0.0, -420.0]
-head-above-neck = 100.0
+head-above-neck = 128.0
 shoulder-y = -398.0
 shoulder-half = 42.0
 shoulders-turned = [-38.0, 30.0]
@@ -96,6 +97,8 @@ leg-width = [24.0, 16.0]
 forearm-width = [15.0, 11.0]
 hand-scale = 1.15
 reach = [70.0, 166.0]
+leg-profile = [30.0, 28.0, 25.0, 21.0, 23.5, 19.0, 15.0]
+arm-profile = [21.0, 19.5, 17.0, 14.5, 16.0, 13.0, 10.5]
 floor = true
 
 [bodies.kid.limbs]
@@ -109,7 +112,7 @@ forearm = 96.0
 
 [bodies.grown-up]
 neck = [0.0, -600.0]
-head-above-neck = 100.0
+head-above-neck = 132.0
 shoulder-y = -574.0
 shoulder-half = 54.0
 shoulders-turned = [-48.0, 38.0]
@@ -120,6 +123,8 @@ leg-width = [28.0, 19.0]
 forearm-width = [17.0, 12.0]
 hand-scale = 1.35
 reach = [86.0, 230.0]
+leg-profile = [36.0, 33.0, 29.0, 24.0, 27.0, 22.0, 17.5]
+arm-profile = [25.0, 23.0, 20.0, 17.0, 19.0, 15.0, 12.5]
 floor = true
 
 [bodies.grown-up.limbs]

@@ -85,10 +85,12 @@ satchel = "#a85a3c"
 apron = "#f8f1e4"
 mud = "#6e4a30"
 
-# A kid: a big faceted head on an A-line body with thin legs.
+# A kid: a big faceted head on a wedge of a neck, an A-line body, and limbs cut as wedges: each
+# thigh and upper arm narrows straight to the joint, and the calf and forearm flare below it and
+# taper to a point at the ankle and wrist.
 [bodies.kid]
 neck = [0.0, -336.0]
-head-above-neck = 100.0
+head-above-neck = 126.0
 shoulder-y = -318.0
 shoulder-half = 36.0
 shoulders-turned = [-32.0, 26.0]
@@ -99,6 +101,8 @@ leg-width = [12.0, 10.0]
 forearm-width = [10.0, 8.0]
 hand-scale = 0.95
 reach = [52.0, 120.0]
+leg-profile = [28.0, 22.0, 16.0, 11.0, 20.0, 13.0, 6.5]
+arm-profile = [16.0, 14.0, 12.0, 9.0, 14.0, 10.0, 6.0]
 floor = true
 
 [bodies.kid.limbs]
@@ -112,7 +116,7 @@ forearm = 70.0
 
 [bodies.grown-up]
 neck = [0.0, -520.0]
-head-above-neck = 100.0
+head-above-neck = 130.0
 shoulder-y = -496.0
 shoulder-half = 48.0
 shoulders-turned = [-44.0, 34.0]
@@ -123,6 +127,8 @@ leg-width = [15.0, 12.0]
 forearm-width = [12.0, 9.0]
 hand-scale = 1.15
 reach = [70.0, 180.0]
+leg-profile = [34.0, 27.0, 20.0, 13.5, 24.0, 15.5, 7.5]
+arm-profile = [20.0, 17.5, 15.0, 11.0, 17.0, 12.0, 7.0]
 floor = true
 
 [bodies.grown-up.limbs]
