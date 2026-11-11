@@ -1170,11 +1170,9 @@ mod tests {
 
 	#[test]
 	fn a_page_heading_shot_frames_the_still() {
-		let source = format!(
-			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park shot=close\n@kid \
-			 x=0.5 talk\nHello there.\n"
-		);
-		let story = story::parse(&source).unwrap();
+		let source = "+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park \
+		              shot=close\n@kid x=0.5 talk\nHello there.\n";
+		let story = story::parse(source).unwrap();
 		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
 		let page = &story.pages[0];
 		let mut scene = Scene::for_page(page, &story.settings).unwrap();
