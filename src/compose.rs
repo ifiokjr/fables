@@ -492,3 +492,52 @@ fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::art::figure::Build;
+	use crate::art::light::Light;
+	use crate::art::light::Preset;
+	use crate::art::pack::StylePack;
+
+	/// A standing kid at the middle of the stage.
+	fn kid() -> Puppet {
+		let look = crate::cast::template_look(&StylePack::default_pack(), Build::Kid).unwrap();
+		let state = FigureState::new(&look.frame());
+		Puppet {
+			id: "kid".into(),
+			kind: Kind::Figure(look),
+			at: pt(1200.0, 2060.0),
+			scale: 2.25,
+			z: 0,
+			opacity: 1.0,
+			body: Body::Figure(state),
+			stink: 0.0,
+			mint: 0.0,
+			heading: 1.0,
+			breath: 0.0,
+			lift: 0.0,
+			smear: 0.0,
+		}
+	}
+
+	#[test]
+	fn a_scene_light_turns_the_ground_shadow_into_a_cast_shadow() {
+		let golden = Light::of(Preset::Golden);
+		let (dx, stretch) = golden.cast();
+		let lean = format!("translate({dx:.1} 0) scale({stretch:.3} 1)");
+
+		let mut svg = Svg::new();
+		svg.set_light(golden);
+		draw_puppet(&mut svg, &kid());
+		let lit = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
+		assert!(lit.contains(&lean), "the shadow leans from the key: {lit}");
+
+		// Flat daylight keeps the plain contact shadow: no lean group at all.
+		let mut svg = Svg::new();
+		draw_puppet(&mut svg, &kid());
+		let day = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
+		assert!(!day.contains(&lean), "no cast lean in daylight: {day}");
+	}
+}

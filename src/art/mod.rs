@@ -1242,6 +1242,47 @@ mod tests {
 	}
 
 	#[test]
+	fn a_scene_light_aims_the_cel_shade_and_lights_the_rim() {
+		let square = Shape::parse(
+			"M10 10 C40 10 70 10 90 10 C90 40 90 70 90 90 C70 90 40 90 10 90 C10 70 10 40 10 10 Z",
+		);
+		let golden = Light::of(light::Preset::Golden);
+
+		// Under golden, every shaded style catches a rim in the light's glow colour.
+		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
+		svg.set_light(golden);
+		svg.brushed_shaded(
+			&square,
+			Color(0xFF_FF_FF),
+			pt(-20.0, -20.0),
+			Color(0xD4_BE_D8),
+			palette::INK,
+			4.0,
+		);
+		assert!(
+			svg.body.contains(&golden.glow_colour.to_string()),
+			"the rim is the glow colour: {}",
+			svg.body
+		);
+
+		// In flat daylight the same drawing emits no rim for a style without one.
+		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
+		svg.brushed_shaded(
+			&square,
+			Color(0xFF_FF_FF),
+			pt(-20.0, -20.0),
+			Color(0xD4_BE_D8),
+			palette::INK,
+			4.0,
+		);
+		assert!(
+			!svg.body.contains("fill-opacity=\"0.38\""),
+			"no rim band in daylight: {}",
+			svg.body
+		);
+	}
+
+	#[test]
 	fn escape_handles_markup() {
 		assert_eq!(
 			escape(r#"<"Hi" & bye>"#),
