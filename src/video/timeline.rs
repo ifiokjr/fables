@@ -243,7 +243,7 @@ pub fn build(
 			|| story
 				.pages
 				.get(shot.kind.page().unwrap_or(usize::MAX))
-				.is_some_and(|page| page.directed_by_camera());
+				.is_some_and(crate::story::Page::directed_by_camera);
 
 		director::direct(story, shot, explicit)?;
 	}

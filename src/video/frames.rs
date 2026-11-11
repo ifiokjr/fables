@@ -266,19 +266,16 @@ impl<'a> Renderer<'a> {
 			-(view.centre.y - view.height / 2.0)
 		));
 
-		match &blur {
-			Some((_, near)) => {
-				// The setting just behind the actors softens a little, from a cached image,
-				// and everything alive over it stays sharp.
-				let near_image = self.blurred_backdrop(&scene, Layer::Near, *near)?;
-				svg.raw(&backdrop_image(&near_image));
-				scene_front(&mut svg, &scene, &puppets, time);
-			}
-			None => {
-				svg.begin_layer();
-				compose::draw_near(&mut svg, &scene, &puppets, time);
-				svg.end();
-			}
+		if let Some((_, near)) = &blur {
+			// The setting just behind the actors softens a little, from a cached image,
+			// and everything alive over it stays sharp.
+			let near_image = self.blurred_backdrop(&scene, Layer::Near, *near)?;
+			svg.raw(&backdrop_image(&near_image));
+			scene_front(&mut svg, &scene, &puppets, time);
+		} else {
+			svg.begin_layer();
+			compose::draw_near(&mut svg, &scene, &puppets, time);
+			svg.end();
 		}
 
 		svg.end();
@@ -551,7 +548,7 @@ impl<'a> Renderer<'a> {
 				)
 			}
 			_ => {
-				let over = self.move_length(shot, setups, index, setup.over);
+				let over = Self::move_length(shot, setups, index, setup.over);
 				previous.blend(
 					destination,
 					smoothstep((time - setup.time) / over.max(0.01)),
@@ -561,7 +558,7 @@ impl<'a> Renderer<'a> {
 	}
 
 	/// How long a move takes: what the direction said, else the rest of the setup.
-	fn move_length(&self, shot: &Shot, setups: &[Setup], index: usize, over: f32) -> f32 {
+	fn move_length(shot: &Shot, setups: &[Setup], index: usize, over: f32) -> f32 {
 		if over > 0.0 {
 			return over;
 		}
@@ -952,7 +949,7 @@ impl<'a> Renderer<'a> {
 				Transition::Fade => {
 					svg.fill_alpha(&Path::rect(0.0, 0.0, w, h), palette::PAPER, 1.0 - t);
 				}
-				Transition::Iris => self.iris(svg, w, h, shot, local, t)?,
+				Transition::Iris => self.iris(svg, w, h, shot, local, t),
 				// The slide itself wraps the whole frame; the old page sits underneath.
 				Transition::Push => self.under_previous(svg, shot, 1.0)?,
 			}
@@ -971,7 +968,7 @@ impl<'a> Renderer<'a> {
 				Transition::Fade => {
 					svg.fill_alpha(&Path::rect(0.0, 0.0, w, h), palette::PAPER, 1.0 - leaving);
 				}
-				Transition::Iris => self.iris(svg, w, h, shot, local, leaving)?,
+				Transition::Iris => self.iris(svg, w, h, shot, local, leaving),
 			}
 		}
 
@@ -985,21 +982,13 @@ impl<'a> Renderer<'a> {
 	}
 
 	/// An iris: a circle of the scene through paper, closing or opening on the page's subject.
-	fn iris(
-		&self,
-		svg: &mut Svg,
-		w: f32,
-		h: f32,
-		shot: &Shot,
-		local: f32,
-		fraction: f32,
-	) -> Result<()> {
+	fn iris(&self, svg: &mut Svg, w: f32, h: f32, shot: &Shot, local: f32, fraction: f32) {
 		let radius = w.hypot(h) * 0.6 * fraction;
 		let (cx, cy) = self.iris_centre(shot, shot.start + local);
 
 		if radius < 1.0 {
 			svg.fill(&Path::rect(0.0, 0.0, w, h), palette::PAPER);
-			return Ok(());
+			return;
 		}
 
 		let hole = format!(
@@ -1016,8 +1005,6 @@ impl<'a> Renderer<'a> {
 			r#"<path d="M0 0 H{w:.2} V{h:.2} H0 Z {hole}" fill="{}" fill-rule="evenodd"/>"#,
 			palette::PAPER
 		));
-
-		Ok(())
 	}
 
 	/// Where the iris pinches to: the page's star, or whoever spoke last, on screen.
@@ -1037,12 +1024,7 @@ impl<'a> Renderer<'a> {
 					.iter()
 					.find(|puppet| Some(puppet.id.split('.').next().unwrap_or("")) == star)
 			})
-			.or_else(|| {
-				puppets
-					.iter()
-					.filter(|puppet| puppet.id != "wormsley")
-					.next()
-			});
+			.or_else(|| puppets.iter().find(|puppet| puppet.id != "wormsley"));
 
 		let Some(puppet) = subject else {
 			return centre;

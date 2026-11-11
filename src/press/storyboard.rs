@@ -107,7 +107,7 @@ pub fn write(
 	let cell_w = width + GAP;
 	let cell_h = height + LABEL + GAP;
 	let board_w = GAP + COLUMNS * cell_w;
-	let board_h = GAP + (ROWS * (cell_h)) as u32;
+	let board_h = GAP + ROWS * cell_h;
 	let mut paths = Vec::new();
 
 	for (page, chunk) in panels.chunks(ROWS as usize * COLUMNS as usize).enumerate() {
@@ -191,8 +191,7 @@ fn caption(shot: &Shot, setup: &Setup, hold: f32, cast: &Cast) -> String {
 					.iter()
 					.map(|id| {
 						cast.member(id)
-							.map(|member| member.name.clone())
-							.unwrap_or_else(|| id.clone())
+							.map_or_else(|| id.clone(), |member| member.name.clone())
 					})
 					.collect();
 				format!("{} on {}", size.name(), names.join(", "))

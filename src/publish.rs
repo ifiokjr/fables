@@ -162,8 +162,9 @@ pub fn video(
 pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<Vec<PathBuf>> {
 	let cache = out.join(&story.slug).join("cache").join("voice");
 	let rehearsals = stage::rehearse(story, cast)?;
-	let timeline =
-		crate::video::timeline::build(story, cast, &rehearsals, |line| offline_take(line, &cache))?;
+	let timeline = crate::video::timeline::build(story, cast, &rehearsals, |line| {
+		Ok(offline_take(line, &cache))
+	})?;
 
 	press::storyboard::write(
 		story,
@@ -176,7 +177,7 @@ pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Res
 
 /// The length of a spoken line without a microphone: the cached take when there is one, else
 /// the words read at about 2.6 words a second.
-fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Result<Speech> {
+fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Speech {
 	use crate::art::seed_of;
 	use crate::video::lipsync::Track;
 	use crate::video::voice::SAMPLE_RATE;
@@ -189,10 +190,10 @@ fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Resu
 		Err(_) => (plain_text(line.text).split_whitespace().count() as f32 / 2.6).max(0.3),
 	};
 
-	Ok(Speech {
+	Speech {
 		text: String::new(),
 		samples: vec![0.0; (seconds * SAMPLE_RATE as f32) as usize],
 		envelope: Vec::new(),
 		track: Track::default(),
-	})
+	}
 }

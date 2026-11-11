@@ -75,6 +75,7 @@ pub struct View {
 }
 
 impl View {
+	#[must_use]
 	pub fn blend(self, other: View, t: f32) -> View {
 		View {
 			centre: self.centre.lerp(other.centre, t),
@@ -840,14 +841,14 @@ mod tests {
 	use crate::video::voice::Utterance;
 
 	/// Half a second a word, so tests can write lines long and short.
-	fn silence(utterance: &Utterance<'_>) -> Result<Speech> {
+	fn silence(utterance: &Utterance<'_>) -> Speech {
 		let seconds = utterance.text.split_whitespace().count() as f32 * 0.5;
-		Ok(Speech {
+		Speech {
 			text: String::new(),
 			samples: vec![0.0; (seconds * SAMPLE_RATE as f32) as usize],
 			envelope: Vec::new(),
 			track: Track::default(),
-		})
+		}
 	}
 
 	fn timeline_of(script: &str, front: &str) -> Timeline {
@@ -862,7 +863,7 @@ mod tests {
 		)
 		.unwrap();
 		let rehearsals = rehearse(&story, &cast).unwrap();
-		crate::video::timeline::build(&story, &cast, &rehearsals, silence).unwrap()
+		crate::video::timeline::build(&story, &cast, &rehearsals, |line| Ok(silence(line))).unwrap()
 	}
 
 	fn page_setups(script: &str) -> Vec<Setup> {
@@ -1158,7 +1159,7 @@ mod tests {
 			)?;
 			let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
 			let rehearsals = rehearse(&story, &cast)?;
-			crate::video::timeline::build(&story, &cast, &rehearsals, silence)
+			crate::video::timeline::build(&story, &cast, &rehearsals, |line| Ok(silence(line)))
 		})()
 		.unwrap_err();
 
