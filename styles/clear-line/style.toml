@@ -26,6 +26,12 @@ anticipation = 0.35     # gentle wind-ups
 overshoot = 0.3         # and barely any overshoot
 squash = 0.35
 follow-through = 0.5
+takes = 0.5           # restrained takes
+overlap = 0.5
+arcs = 0.8
+breath = 0.6
+weight-shift = 0.5
+business = 0.5
 
 [face]
 turn = 0.42

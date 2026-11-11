@@ -31,6 +31,11 @@ moving-hold = 0.6       # held poses drift, as hair and ribbons do in a breeze
 follow-through = 1.5
 blink-every = 3.5
 mouth-rate = 8.0
+takes = 0.6           # gentle takes
+overlap = 0.6
+breath = 0.7          # drifting, breathing figures
+weight-shift = 0.4
+business = 0.4
 
 [face]
 turn = 0.42

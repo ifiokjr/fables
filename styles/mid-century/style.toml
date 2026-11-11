@@ -29,6 +29,11 @@ squash = 0.0
 follow-through = 0.3
 blink-every = 4.0
 mouth-rate = 6.0
+overlap = 0.2         # poses snap, so parts barely trail
+breath = 0.2
+weight-shift = 0.0    # held poses stay held
+business = 0.0
+takes = 0.4
 
 [face]
 turn = 0.42
