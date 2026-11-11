@@ -41,8 +41,9 @@ pub(crate) const CAMERA_LEAD: f32 = 0.45;
 /// Stage area drawn past the edges, which the camera may show.
 pub(crate) const OVERDRAW: f32 = 150.0;
 
-/// The shortest shot the automatic director will make.
-const MIN_SHOT: f32 = 1.2;
+/// The shortest shot any director will make. A setup that would run shorter is merged into
+/// its neighbour, except a cut the script wrote, which is honoured and reported as short.
+pub(crate) const MIN_SHOT: f32 = 1.2;
 /// No more than one cut per this many seconds.
 const MIN_CUT_GAP: f32 = 1.2;
 /// A line shorter than this plays over a two-shot, so the cutting never gets frantic.
@@ -57,6 +58,11 @@ const LINE_GUARD: f32 = 0.2;
 const BEFORE_LINE: f32 = 0.25;
 /// How far a right- or left-facing subject sits off centre, as a fraction of the view width.
 const LEAD_ROOM: f32 = 0.12;
+/// Headroom above the highest point of the head, hair and all: at least this fraction of the
+/// frame height. An extreme close-up may crop hair above the brow line instead.
+const HEADROOM: f32 = 0.06;
+/// Room beside a subject, at least this fraction of the frame width on each side.
+const SIDE_MARGIN: f32 = 0.05;
 /// How much a `push` tightens and a `pull` widens, as a multiplier of the view height.
 const PUSH_IN: f32 = 0.75;
 const PULL_OUT: f32 = 1.35;
@@ -170,13 +176,19 @@ pub fn shot_view(
 	}
 }
 
-/// A full shot: wide enough for everyone, the ground line and the tallest head inside the band.
+/// A full shot: wide enough for everyone, the ground line and the tallest head inside the band,
+/// with the head rule's headroom and side margins.
 fn full_view(aspect: f32, band: (f32, f32), subjects: &[&Puppet], ground: f32) -> Option<View> {
 	let extent = bounds(subjects)?;
-	let (top_at, ground_at) = band;
+	let top_at = band.0.max(HEADROOM);
+	let ground_at = band.1;
 	let wide = (extent.2 - extent.0) * 1.15 / aspect;
 	let tall = (ground - extent.1) / (ground_at - top_at);
-	let height = wide.max(tall).clamp(600.0, tallest_view(aspect));
+	let beside = (extent.2 - extent.0) / ((1.0 - 2.0 * SIDE_MARGIN) * aspect);
+	let height = wide
+		.max(tall)
+		.max(beside)
+		.clamp(600.0, tallest_view(aspect));
 	let view_bottom = ground + height * (1.0 - ground_at);
 
 	Some(clamp(
@@ -192,15 +204,13 @@ fn full_view(aspect: f32, band: (f32, f32), subjects: &[&Puppet], ground: f32) -
 }
 
 /// A medium, close or extreme-close shot: measured off the subjects' heads, cropped at the
-/// waist, the shoulders or the chin.
+/// waist, the shoulders or the chin. The whole head — hair and all, taken from the puppet's
+/// drawn extent, the whole animal for a critter — stays inside the frame with headroom and
+/// side margins, and lead room shifts the frame only as far as those margins allow.
 fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet]) -> Option<View> {
 	let heads: Vec<(Pt, f32)> = subjects.iter().map(|puppet| puppet.head()).collect();
 	let radius = heads.iter().map(|(_, r)| *r).fold(0.0, f32::max);
 	let lowest_head = heads.iter().map(|(h, _)| h.y).fold(0.0, f32::max);
-	let head_top = heads
-		.iter()
-		.map(|(h, r)| h.y - r)
-		.fold(f32::INFINITY, f32::min);
 	let extent = bounds(subjects)?;
 
 	// The crop line: the waist for a medium, the shoulders for a close, the chin for an
@@ -214,35 +224,50 @@ fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet
 			.fold(0.0, f32::max);
 	}
 
-	let (headroom, top_margin) = match size {
-		ShotSize::ExtremeClose => (0.06, radius * 0.15),
-		ShotSize::Close => (0.05, radius * 0.35),
-		_ => (0.04, radius * 0.5),
+	// The highest point the frame must show: the top of the drawn extent — the hair, or the
+	// critter's whole outline. An extreme close-up is the one exception: it may crop hair
+	// above the brow line, so it measures to just above the brow instead.
+	let head_top = match size {
+		ShotSize::ExtremeClose => {
+			heads
+				.iter()
+				.map(|(h, r)| h.y - r * 0.85)
+				.fold(f32::INFINITY, f32::min)
+		}
+		_ => extent.1,
 	};
-	let span_top = head_top - top_margin;
-	let span = (crop - span_top).max(radius * 2.0);
-	let top_at = band.0 + headroom;
+
+	// The head sits below the frame's top edge by the format's action band and at least
+	// [`HEADROOM`] of the view height.
+	let top_at = band.0.max(HEADROOM);
+	let span = (crop - head_top).max(radius * 2.0);
 	let mut height = span / (1.0 + CROP - top_at);
 
-	// Wide enough for the group across, with room to breathe either side.
-	let margin = match size {
+	// Wide enough for the group across, with room to breathe either side, and always the
+	// [`SIDE_MARGIN`]s of the frame width either side of the subjects.
+	let breathe = match size {
 		ShotSize::ExtremeClose => radius * 0.5,
 		ShotSize::Close => radius * 1.1,
 		_ => radius * 1.4,
 	};
-	height = height.max((extent.2 - extent.0 + margin * 2.0) / aspect);
+	height = height.max((extent.2 - extent.0 + breathe * 2.0) / aspect);
+	height = height.max((extent.2 - extent.0) / ((1.0 - 2.0 * SIDE_MARGIN) * aspect));
 
-	// Lead room: a subject facing or looking right sits left of centre, and the reverse.
-	let centre_x = if subjects.len() == 1 {
-		subjects[0].at.x - subjects[0].heading * LEAD_ROOM * height * aspect
+	// Lead room: a subject facing or looking right sits left of centre, and the reverse —
+	// but only as far as the side margins allow.
+	let width = height * aspect;
+	let room = width * (0.5 - SIDE_MARGIN);
+	let mut centre_x = if subjects.len() == 1 {
+		subjects[0].at.x - subjects[0].heading * LEAD_ROOM * width
 	} else {
 		f32::midpoint(extent.0, extent.2)
 	};
+	centre_x = centre_x.max(extent.2 - room).min(extent.0 + room);
 
 	Some(clamp(
 		aspect,
 		View {
-			centre: pt(centre_x, span_top + height * (0.5 - top_at)),
+			centre: pt(centre_x, head_top + height * (0.5 - top_at)),
 			height,
 		},
 	))
@@ -620,6 +645,8 @@ fn place_cut(at: f32, shot: &Shot, floor: f32) -> Option<f32> {
 }
 
 /// A framing held longer than [`LONG_HOLD`] gets a slow push, so a still moment never dies.
+/// The push starts early enough to run for at least [`MIN_SHOT`]; where there is no room for
+/// one, the framing keeps holding to the end of the shot.
 fn slow_pushes(setups: &mut Vec<Setup>, shot: &Shot) {
 	let mut index = 0;
 
@@ -627,7 +654,7 @@ fn slow_pushes(setups: &mut Vec<Setup>, shot: &Shot) {
 		let hold_until = setups.get(index + 1).map_or(shot.end, |next| next.time);
 
 		if hold_until - setups[index].time > LONG_HOLD && !setups[index].travel.is_move() {
-			let time = setups[index].time + LONG_HOLD;
+			let time = (setups[index].time + LONG_HOLD).min(hold_until - MIN_SHOT);
 			let framing = setups[index].framing.clone();
 			setups.insert(
 				index + 1,
@@ -644,6 +671,57 @@ fn slow_pushes(setups: &mut Vec<Setup>, shot: &Shot) {
 		} else {
 			index += 1;
 		}
+	}
+}
+
+/// No setup runs shorter than [`MIN_SHOT`], on pages the script directs itself too. A setup
+/// that would flash by is merged into its neighbour — the earlier one keeps running, or the
+/// later one starts earlier — but a cut the script wrote is honoured: it stays where the
+/// script put it, and the setup it leaves under the minimum is reported on the storyboard
+/// as `· short`. A camera state that only shakes or moves on the same framing is not a cut.
+fn enforce_minimum(setups: &mut Vec<Setup>, shot: &Shot) {
+	let honoured = |index: usize, setups: &[Setup]| {
+		setups[index].travel == Travel::Cut && setups[index].framing != setups[index - 1].framing
+	};
+
+	let mut index = 1;
+
+	while index < setups.len() {
+		// Too soon after the setup before it: merge into it, so the earlier one keeps
+		// running until whatever comes next.
+		if !honoured(index, setups) && setups[index].time - setups[index - 1].time < MIN_SHOT - 1e-3
+		{
+			setups.remove(index);
+
+			// The setup before this one now runs to a later boundary: re-check it.
+			if index > 1 {
+				index -= 1;
+			}
+			continue;
+		}
+
+		// Not enough room before the next setup or the page's end: start this one earlier
+		// when that still leaves it a full hold, otherwise merge it too.
+		let end = setups.get(index + 1).map_or(shot.end, |next| next.time);
+
+		if !honoured(index, setups) && end - setups[index].time < MIN_SHOT - 1e-3 {
+			let earlier = end - MIN_SHOT;
+
+			if earlier - setups[index - 1].time >= MIN_SHOT - 1e-3 {
+				setups[index].time = earlier;
+				index += 1;
+			} else {
+				setups.remove(index);
+
+				// The setup before this one now runs to a later boundary: re-check it.
+				if index > 1 {
+					index -= 1;
+				}
+			}
+			continue;
+		}
+
+		index += 1;
 	}
 }
 
@@ -752,6 +830,7 @@ fn written(shot: &Shot) -> Result<Vec<Setup>> {
 		});
 	}
 
+	enforce_minimum(&mut setups, shot);
 	validate(&setups, shot)
 }
 
@@ -913,23 +992,36 @@ mod tests {
 
 	#[test]
 	fn no_setup_is_shorter_than_the_minimum() {
-		let setups = page_setups(
+		let tl = timeline_of(
 			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@kid faint\n@mum talk\nOh no, \
 			 what happened here then?\n@kid wake\n@kid talk\nI am quite alright thanks.\n",
+			"",
 		);
 
-		assert!(
-			setups[1].time - setups[0].time >= ESTABLISH - 1e-4,
-			"the establishing shot reads for at least 1.5s"
-		);
+		for portrait in [false, true] {
+			let setups = tl.shots[1].setups_for(portrait);
+			let end = tl.shots[1].end;
 
-		for pair in setups.windows(2) {
 			assert!(
-				pair[1].time - pair[0].time >= MIN_SHOT - 1e-4,
-				"{:?} lands only {:.2}s after {:?}",
-				pair[1].framing,
-				pair[1].time - pair[0].time,
-				pair[0].framing
+				setups[1].time - setups[0].time >= ESTABLISH - 1e-3,
+				"the establishing shot reads for at least 1.5s"
+			);
+
+			for (index, pair) in setups.windows(2).enumerate() {
+				assert!(
+					pair[1].time - pair[0].time >= MIN_SHOT - 1e-3,
+					"portrait {portrait} setup {index}: {:?} lands only {:.2}s after {:?}",
+					pair[1].framing,
+					pair[1].time - pair[0].time,
+					pair[0].framing
+				);
+			}
+
+			// The page's end is a setup boundary too: the last framing holds its minimum.
+			assert!(
+				end - setups.last().unwrap().time >= MIN_SHOT - 1e-3,
+				"portrait {portrait}: the last setup holds only {:.2}s of the page",
+				end - setups.last().unwrap().time
 			);
 		}
 	}
@@ -1005,6 +1097,103 @@ mod tests {
 		assert_eq!(setups[0].travel, Travel::Cut, "a shot change cuts");
 		assert_eq!(setups[1].travel, Travel::Push);
 		assert!((setups[1].over - 2.0).abs() < 1e-4, "the move takes 2s");
+	}
+
+	#[test]
+	fn explicit_pages_hold_the_minimum_too() {
+		// A shake late on the page would make its setup run 0.35s; it starts early enough
+		// for a full hold instead.
+		let tl = timeline_of(
+			"# park\n@kid x=0.3\n@camera shot=close on=kid\nHello there today my friend.\nWhy \
+			 hello to you too.\n@camera shake=0.4\n",
+			"",
+		);
+
+		for portrait in [false, true] {
+			let setups = tl.shots[1].setups_for(portrait);
+			let end = tl.shots[1].end;
+
+			for (index, pair) in setups.windows(2).enumerate() {
+				assert!(
+					pair[1].time - pair[0].time >= MIN_SHOT - 1e-3,
+					"portrait {portrait} setup {index} holds only {:.2}s",
+					pair[1].time - pair[0].time
+				);
+			}
+
+			let last = setups.last().unwrap();
+			assert!(
+				end - last.time >= MIN_SHOT - 1e-3,
+				"portrait {portrait}: the shake setup holds only {:.2}s",
+				end - last.time
+			);
+			assert!(
+				(last.time - (end - MIN_SHOT)).abs() < 1e-3,
+				"portrait {portrait}: the shake setup starts as late as the minimum allows"
+			);
+		}
+	}
+
+	#[test]
+	fn a_setup_too_close_to_its_neighbour_merges_into_it() {
+		// A push 1.15s after the close it follows would flash by; it merges, and the close
+		// keeps running until the wide shot (which inherits the page's push as its travel).
+		let tl = timeline_of(
+			"# park\n@kid x=0.3\nHi.\n@camera shot=close on=kid\nBye.\n@camera move=push \
+			 over=0.5\nThere we are again.\n@camera shot=wide\nDone.\n",
+			"",
+		);
+		let setups = &tl.shots[1].setups;
+		let framed = subjects(setups);
+
+		assert_eq!(
+			framed,
+			vec!["auto".to_owned(), "kid".to_owned(), "everyone".to_owned()],
+			"the short same-framing push merged away: {framed:?}"
+		);
+
+		let end = tl.shots[1].end;
+
+		for pair in setups.windows(2) {
+			assert!(
+				pair[1].time - pair[0].time >= MIN_SHOT - 1e-3,
+				"{:?} lands {:.2}s after {:?}",
+				pair[1].framing,
+				pair[1].time - pair[0].time,
+				pair[0].framing
+			);
+		}
+
+		assert!(
+			end - setups.last().unwrap().time >= MIN_SHOT - 1e-3,
+			"the last setup holds only {:.2}s of the page",
+			end - setups.last().unwrap().time
+		);
+	}
+
+	#[test]
+	fn a_cut_the_script_wrote_is_kept_even_when_short() {
+		// The wide cut lands 0.9s after the close: short, but the script wrote it, so the
+		// director honours it and the board reports the short hold.
+		let tl = timeline_of(
+			"# park\n@kid x=0.3\nHi.\n@camera shot=close on=kid\nBye.\n@camera shot=wide\n!\n",
+			"",
+		);
+		let setups = &tl.shots[1].setups;
+		let framed = subjects(setups);
+
+		assert_eq!(
+			framed,
+			vec!["auto".to_owned(), "kid".to_owned(), "everyone".to_owned()],
+			"the script's two framings both survive: {framed:?}"
+		);
+
+		let gap = setups[2].time - setups[1].time;
+		assert!(
+			gap < MIN_SHOT,
+			"the written cut stays where the script put it: {gap:.2}s"
+		);
+		assert_eq!(setups[2].travel, Travel::Cut);
 	}
 
 	#[test]
@@ -1095,6 +1284,83 @@ mod tests {
 				puppets[0].at.x,
 				view.centre.x
 			);
+		}
+	}
+
+	/// The framing rule, for every size, both formats, a figure and a critter, facing each
+	/// way: the whole head — hair and all, from the puppet's drawn extent — stays inside the
+	/// frame with [`HEADROOM`] above and [`SIDE_MARGIN`] either side, and lead room only
+	/// shifts the frame as far as those margins allow. An extreme close-up may crop hair
+	/// above the brow line, so it is checked for sides and brow instead.
+	#[test]
+	fn every_shot_keeps_the_whole_head_inside_the_frame() {
+		use crate::video::frames::Format;
+
+		for format in [Format::Landscape, Format::Portrait] {
+			let aspect = format.aspect();
+			let band = format.action_band();
+
+			for facing in ["right", "left"] {
+				for actor in ["kid", "dog"] {
+					let script = format!("# park\n@{actor} x=0.5 face={facing}\n");
+					let puppets = puppets_of(&script);
+					assert_eq!(puppets.len(), 1, "{script}");
+					let cast: Vec<&Puppet> = puppets.iter().collect();
+					let extent = extent_of(&puppets[0]);
+					let (head, head_radius) = puppets[0].head();
+
+					for size in [
+						ShotSize::Wide,
+						ShotSize::Full,
+						ShotSize::Medium,
+						ShotSize::Close,
+						ShotSize::ExtremeClose,
+					] {
+						let view = shot_view(aspect, band, size, &cast, 2060.0).expect("a subject");
+						let (width, height) = (view.width(aspect), view.height);
+						let (left, top) =
+							(view.centre.x - width / 2.0, view.centre.y - height / 2.0);
+						let what = format!("{actor} {facing} {size:?} {format:?}");
+
+						if size == ShotSize::ExtremeClose {
+							// The one exception: hair above the brow may go, the brow stays.
+							assert!(
+								head.y - head_radius * 0.6 >= top - 1e-3,
+								"{what}: the brow line {:.0} is above the frame top {:.0}",
+								head.y - head_radius * 0.6,
+								top
+							);
+						} else {
+							let margin = (extent.1 - top) / height;
+							assert!(
+								extent.1 >= top + HEADROOM * height - 1e-3,
+								"{what}: head top {:.0} is only {:.1}% of the {:.0} unit view \
+								 below the frame top {:.0}",
+								extent.1,
+								margin * 100.0,
+								height,
+								top
+							);
+						}
+
+						assert!(
+							extent.0 >= left + SIDE_MARGIN * width - 1e-3,
+							"{what}: left edge {:.0} is inside the {:.0} unit frame's left margin \
+							 (frame left {:.0})",
+							extent.0,
+							width,
+							left
+						);
+						assert!(
+							extent.2 <= left + width * (1.0 - SIDE_MARGIN) + 1e-3,
+							"{what}: right edge {:.0} crosses the frame's right margin (frame \
+							 right {:.0})",
+							extent.2,
+							left + width
+						);
+					}
+				}
+			}
 		}
 	}
 

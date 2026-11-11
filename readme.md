@@ -165,7 +165,7 @@ Worlds and characters are named by slugs, never paths, so the server only reads 
 | `fables ebook <story>` | `out/<book>/<style>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
 | `fables print <story>` | `out/<book>/<style>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
 | `fables video <story> [--format landscape\|portrait\|both] [--preview]` | `out/<book>/<style>/video/`: MP4s, `soundtrack.wav`, `.srt` captions, a YouTube thumbnail and a 9:16 cover image. `--preview` renders at half size and 15 fps. |
-| `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<style>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. Never records a voice, so it runs offline in a second or two. |
+| `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<style>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. A hold a script-written cut leaves under 1.2 s is labelled `· short`. Never records a voice, so it runs offline in a second or two. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
 | `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<style>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. |
@@ -272,7 +272,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 - `"auto"` (the default): pages without any `@camera` direction are shot by film rules. Every page opens on an establishing wide or full shot long enough to read; whoever speaks gets a medium (landscape) or close (portrait); a two-way exchange alternates shot and reverse shot; very short lines share a two-shot; a strong mood on somebody who isn't speaking earns a close reaction shot; entrances, exits, walks, runs, hops and faints widen to a full shot so the action stays in frame. No shot runs shorter than 1.2 s, cuts land at most one per 1.2 s and never just after a line begins, and a framing held longer than 8 s gets a slow push.
 - `"locked"`: the older camera, kept byte for byte — one auto-framed view per scene key and line, gliding between them.
 
-A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
+A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Setups on directed pages follow the same 1.2 s floor: one that would flash by is merged into its neighbour, but a cut the script wrote is honoured — the storyboard marks the hold it leaves under 1.2 s with `· short`. Every shot frames its subject's whole head, hair and all, with headroom above and room beside it; only an extreme close-up may crop hair above the brow line, and lead room never pushes a head out of frame. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
 
 Teeth, stink and mint **carry over from page to page** until changed, so grotty teeth stay grotty. Actors without an `x` are spaced out automatically.
 

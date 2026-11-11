@@ -16,7 +16,6 @@ use crate::art::Path;
 use crate::art::Pt;
 use crate::art::STAGE;
 use crate::art::Svg;
-use crate::art::fx;
 use crate::art::lerp;
 use crate::art::noise;
 use crate::art::palette;
@@ -25,7 +24,6 @@ use crate::art::rig::Gait;
 use crate::art::seed_of;
 use crate::art::settings;
 use crate::art::settings::Layer;
-use crate::cast::Kind;
 use crate::compose;
 use crate::compose::Body;
 use crate::compose::Puppet;
@@ -107,7 +105,7 @@ impl Format {
 	/// Where the camera frames the action, as fractions of the frame height: the top of the
 	/// tallest head and the ground line. Derived from the caption band, so standing, sitting,
 	/// crouching and kneeling bodies all stay clear of the caption card.
-	fn action_band(self) -> (f32, f32) {
+	pub(crate) fn action_band(self) -> (f32, f32) {
 		let (top, height) = self.caption_band();
 		let card = self.card_pad() + FOOT_ROOM;
 
@@ -707,7 +705,10 @@ impl<'a> Renderer<'a> {
 
 	/// A depth layer of the setting, drawn once, blurred, and remembered as an image the frame
 	/// can place under the camera. Blurring this way costs one small raster per setting,
-	/// weather and light instead of a filter on every frame.
+	/// weather and light instead of a filter on every frame. The cache is PNG: it keeps the layer's
+	/// alpha, so the frame composites each layer over the paper and over the others exactly
+	/// where the setting is transparent — a JPEG cache would turn every transparent pixel
+	/// black.
 	fn blurred_backdrop(&self, scene: &Scene, layer: Layer, deviation: f32) -> Result<String> {
 		let weather = &scene.weather;
 		let key = seed_of(&format!(
@@ -733,10 +734,18 @@ impl<'a> Renderer<'a> {
 			}
 		}
 
-		// The drawn stage at a quarter resolution: plenty for a softened backdrop. The blur's
-		// deviation is in stage units, so it softens as much on screen as a filter would.
+		// The drawn stage rasterised small: plenty for a softened backdrop, and a small image
+		// keeps every frame's decode cheap. The far layer blurs hardest, so it can shrink
+		// furthest — a Gaussian-blurred image carries no detail finer than its own blur, and
+		// each raster keeps the blur at two and a half pixels or more. The blur's deviation
+		// is in stage units, so it softens as much on screen as a filter would.
 		let span = STAGE + director::OVERDRAW * 2.0;
-		let size = (span / 4.0) as u32;
+		let size = match layer {
+			Layer::Far => (span / 8.0) as u32,
+			// Front never goes through the cache (it stays sharp over the actors), but a
+			// total match keeps it at the near layer's resolution should that ever change.
+			Layer::Near | Layer::Front => (span / 4.0) as u32,
+		};
 		let mut svg = Svg::styled(self.story.style());
 		svg.set_light(weather.light);
 		let id = svg.next_id("dof");
@@ -755,7 +764,7 @@ impl<'a> Renderer<'a> {
 			size,
 		);
 		let pixmap = raster::render(&document)?;
-		let encoded = BASE64.encode(raster::jpeg(&pixmap, 82)?);
+		let encoded = BASE64.encode(raster::png(&pixmap)?);
 
 		self.blur_cache
 			.lock()
@@ -1092,107 +1101,30 @@ impl<'a> Renderer<'a> {
 /// An `<image>` of a pre-softened backdrop layer, spanning the drawn stage.
 fn backdrop_image(data: &str) -> String {
 	format!(
-		r#"<image x="-{OVER}" y="-{OVER}" width="{span}" height="{span}" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,{data}"/>"#,
+		r#"<image x="-{OVER}" y="-{OVER}" width="{span}" height="{span}" preserveAspectRatio="none" xlink:href="data:image/png;base64,{data}"/>"#,
 		span = director::OVERDRAW * 2.0 + STAGE,
 		OVER = director::OVERDRAW
 	)
 }
 
 /// The scene's living parts over a softened backdrop: effects, actors, breath, and the front
-/// parts of the setting — what [`compose::draw_near`] draws after its backdrop layer. Mirrors
-/// that order so depth-of-field frames stage the scene exactly as sharp ones do.
+/// parts of the setting — what [`compose::draw_near`] draws after its backdrop layer. Calls
+/// the same drawing code, so effects cannot drift between sharp and soft frames.
 fn scene_front(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	let mut weather = scene.weather;
 	weather.time = time;
 
-	draw_effects(svg, &weather, puppets);
+	compose::draw_effects(svg, &weather, puppets);
 
 	for puppet in puppets {
 		compose::draw_puppet(svg, puppet);
 	}
 
 	for puppet in puppets {
-		draw_breath(svg, puppet, time);
+		compose::draw_breath(svg, puppet, time);
 	}
 
 	settings::foreground(svg, &scene.setting, &weather);
-}
-
-/// Focus lines and impact bursts, aimed at the first person on stage (as compose draws them).
-fn draw_effects(svg: &mut Svg, weather: &settings::Weather, puppets: &[Puppet]) {
-	if weather.speed <= 0.0 && weather.impact <= 0.0 {
-		return;
-	}
-
-	let focus = puppets
-		.iter()
-		.find_map(|puppet| {
-			match &puppet.kind {
-				Kind::Figure(look) => {
-					Some(puppet.at - pt(0.0, look.frame().height() * puppet.scale * 0.6))
-				}
-				_ => None,
-			}
-		})
-		.unwrap_or(pt(STAGE / 2.0, STAGE * 0.45));
-	fx::impact_burst(svg, focus, STAGE * 0.42, weather.impact, 41);
-	fx::focus_lines(svg, focus, STAGE, weather.speed, 17, weather.time);
-}
-
-/// Breath clouds and the flies and glints that give stink and mint away (as compose draws them).
-fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
-	if puppet.opacity < 0.5 {
-		return;
-	}
-
-	let seed = seed_of(&puppet.id);
-	let open = puppet.breath;
-	let (head, radius) = puppet.head();
-
-	if puppet.stink > 0.01 {
-		if let Some(mouth) = puppet.mouth() {
-			fx::stink_cloud(
-				svg,
-				mouth,
-				puppet.heading,
-				puppet.stink * open * puppet.scale * 0.8,
-				time,
-				seed,
-			);
-		}
-
-		for i in 0..(puppet.stink * 3.0).round() as usize {
-			let angle = time * (2.2 + i as f32 * 0.6) + i as f32 * 2.1;
-			// The orbit stays outside the head so a fly never lands on a face.
-			let p = head + pt(angle.cos() * radius * 1.6, angle.sin() * radius * 1.35);
-			fx::fly(svg, p, 9.0 * puppet.scale, time + i as f32);
-		}
-	}
-
-	if puppet.mint > 0.01 {
-		if let Some(mouth) = puppet.mouth() {
-			fx::mint_mist(
-				svg,
-				mouth,
-				puppet.heading,
-				puppet.mint * open * puppet.scale * 0.8,
-				time,
-				seed,
-			);
-		}
-
-		for i in 0..3 {
-			let angle = time * 0.9 + i as f32 * 2.1;
-			let p = head + pt(angle.cos() * radius * 1.7, angle.sin() * radius * 1.45);
-			fx::sparkle(
-				svg,
-				p,
-				22.0 * puppet.scale * puppet.mint.min(1.0),
-				palette::WHITE,
-				time + i as f32,
-			);
-		}
-	}
 }
 
 /// A paper sheet from `x0` to `x1`, with a wobbly leading edge.
@@ -1651,8 +1583,8 @@ mod tests {
 			"a rendered frame is an SVG document"
 		);
 		assert!(
-			svg.matches("data:image/jpeg;base64,").count() == 2,
-			"both backdrop layers arrive as pre-softened images"
+			svg.matches("data:image/png;base64,").count() == 2,
+			"both backdrop layers arrive as pre-softened images, with alpha kept"
 		);
 		assert!(
 			!svg.contains("feGaussianBlur"),
