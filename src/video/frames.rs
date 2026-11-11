@@ -31,8 +31,8 @@ use crate::compose::Body;
 use crate::compose::Puppet;
 use crate::raster;
 use crate::stage::Scene;
-use crate::stage::Side;
 use crate::stage::ShotSize;
+use crate::stage::Side;
 use crate::stage::Travel;
 use crate::story::RunStyle;
 use crate::story::Story;
@@ -172,7 +172,13 @@ pub struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-	pub fn new(timeline: &'a Timeline, story: &'a Story, format: Format, width: u32, height: u32) -> Self {
+	pub fn new(
+		timeline: &'a Timeline,
+		story: &'a Story,
+		format: Format,
+		width: u32,
+		height: u32,
+	) -> Self {
 		Self {
 			timeline,
 			story,
@@ -210,9 +216,8 @@ impl<'a> Renderer<'a> {
 		weather.time = time;
 
 		// A page that enters with a push slides everything into place.
-		let sliding = shot.transition == Transition::Push
-			&& shot.kind != ShotKind::Title
-			&& local < WIPE;
+		let sliding =
+			shot.transition == Transition::Push && shot.kind != ShotKind::Title && local < WIPE;
 
 		if sliding {
 			svg.begin(&format!(
@@ -540,7 +545,10 @@ impl<'a> Renderer<'a> {
 				} else {
 					director::CAMERA_EASE
 				};
-				previous.blend(destination, smoothstep((time - setup.time) / over.max(0.01)))
+				previous.blend(
+					destination,
+					smoothstep((time - setup.time) / over.max(0.01)),
+				)
 			}
 			_ => {
 				let over = self.move_length(shot, setups, index, setup.over);
@@ -730,12 +738,7 @@ impl<'a> Renderer<'a> {
 		svg.raw("</g>");
 
 		let document = svg.finish(
-			(
-				-director::OVERDRAW,
-				-director::OVERDRAW,
-				span,
-				span,
-			),
+			(-director::OVERDRAW, -director::OVERDRAW, span, span),
 			size,
 			size,
 		);
@@ -793,13 +796,15 @@ impl<'a> Renderer<'a> {
 
 		match director::bounds(&focus) {
 			Some(extent) => fit(self.format, extent, ground),
-			None => director::clamp(
-				aspect,
-				View {
-					centre: pt(STAGE / 2.0, ground - STAGE * 0.3),
-					height: if aspect > 1.0 { 1400.0 } else { 2300.0 },
-				},
-			),
+			None => {
+				director::clamp(
+					aspect,
+					View {
+						centre: pt(STAGE / 2.0, ground - STAGE * 0.3),
+						height: if aspect > 1.0 { 1400.0 } else { 2300.0 },
+					},
+				)
+			}
 		}
 	}
 
@@ -998,7 +1003,8 @@ impl<'a> Renderer<'a> {
 		}
 
 		let hole = format!(
-			"M {:.2} {:.2} A {radius:.2} {radius:.2} 0 1 0 {:.2} {:.2} A {radius:.2} {radius:.2} 0 1 0 {:.2} {:.2} Z",
+			"M {:.2} {:.2} A {radius:.2} {radius:.2} 0 1 0 {:.2} {:.2} A {radius:.2} {radius:.2} \
+			 0 1 0 {:.2} {:.2} Z",
 			cx - radius,
 			cy,
 			cx + radius,
@@ -1031,7 +1037,12 @@ impl<'a> Renderer<'a> {
 					.iter()
 					.find(|puppet| Some(puppet.id.split('.').next().unwrap_or("")) == star)
 			})
-			.or_else(|| puppets.iter().filter(|puppet| puppet.id != "wormsley").next());
+			.or_else(|| {
+				puppets
+					.iter()
+					.filter(|puppet| puppet.id != "wormsley")
+					.next()
+			});
 
 		let Some(puppet) = subject else {
 			return centre;
@@ -1118,11 +1129,13 @@ fn draw_effects(svg: &mut Svg, weather: &settings::Weather, puppets: &[Puppet]) 
 
 	let focus = puppets
 		.iter()
-		.find_map(|puppet| match &puppet.kind {
-			Kind::Figure(look) => {
-				Some(puppet.at - pt(0.0, look.frame().height() * puppet.scale * 0.6))
+		.find_map(|puppet| {
+			match &puppet.kind {
+				Kind::Figure(look) => {
+					Some(puppet.at - pt(0.0, look.frame().height() * puppet.scale * 0.6))
+				}
+				_ => None,
 			}
-			_ => None,
 		})
 		.unwrap_or(pt(STAGE / 2.0, STAGE * 0.45));
 	fx::impact_burst(svg, focus, STAGE * 0.42, weather.impact, 41);
@@ -1479,7 +1492,8 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn captions_split_on_phrases_and_keep_markup_balanced() {		let chunks = chunk(
+	fn captions_split_on_phrases_and_keep_markup_balanced() {
+		let chunks = chunk(
 			"\"**YOUR BREATH SMELLS LIKE A SNOWY MOUNTAIN!**\" shouted Shouty McShoutface.",
 			26,
 		);
@@ -1567,8 +1581,8 @@ mod tests {
 		use crate::story;
 		use crate::video::lipsync::Track;
 		use crate::video::timeline;
-		use crate::video::voice::Speech;
 		use crate::video::voice::SAMPLE_RATE;
+		use crate::video::voice::Speech;
 		use crate::video::voice::Utterance;
 
 		let mut story = story::parse(
@@ -1635,7 +1649,10 @@ mod tests {
 		// close-up: its backdrop comes in softened, and the second frame reuses the raster.
 		let page = timeline.shots.last().unwrap();
 		let svg = renderer.svg(page.start + 1.0, 4)?;
-		assert!(svg.contains("viewBox"), "a rendered frame is an SVG document");
+		assert!(
+			svg.contains("viewBox"),
+			"a rendered frame is an SVG document"
+		);
 		assert!(
 			svg.matches("data:image/jpeg;base64,").count() == 2,
 			"both backdrop layers arrive as pre-softened images"

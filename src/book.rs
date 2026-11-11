@@ -718,9 +718,9 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 
 	// A heading's `shot=` frames the still like the video would frame it: composed from the
 	// puppets, with headroom and lead room. It wins over a bare `zoom=`.
-	let shot_transform = camera
-		.shot
-		.and_then(|size| crate::video::director::still_view(&page.scene, &puppets, size, &camera.on));
+	let shot_transform = camera.shot.and_then(|size| {
+		crate::video::director::still_view(&page.scene, &puppets, size, &camera.on)
+	});
 
 	if let Some(view) = shot_transform {
 		let centre = STAGE / 2.0;

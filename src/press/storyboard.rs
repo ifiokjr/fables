@@ -65,14 +65,15 @@ pub fn panels(
 		.iter()
 		.flat_map(|shot| {
 			let setups = shot.setups_for(portrait);
-			setups
-				.iter()
-				.enumerate()
-				.map(move |(index, setup)| {
-					let end = setups.get(index + 1).map_or(shot.end, |next| next.time);
-					let mid = f32::midpoint(setup.time, end);
-					(mid, caption(shot, setup, end - setup.time, cast), spoken(shot, mid))
-				})
+			setups.iter().enumerate().map(move |(index, setup)| {
+				let end = setups.get(index + 1).map_or(shot.end, |next| next.time);
+				let mid = f32::midpoint(setup.time, end);
+				(
+					mid,
+					caption(shot, setup, end - setup.time, cast),
+					spoken(shot, mid),
+				)
+			})
 		})
 		.map(|(mid, label, line)| {
 			Ok(Panel {
@@ -137,10 +138,15 @@ pub fn write(
 			);
 		}
 
-		let name = if page == 0 {
-			"storyboard.png".to_owned()
+		let stem = if portrait {
+			"storyboard-portrait"
 		} else {
-			format!("storyboard-{}.png", page + 1)
+			"storyboard"
+		};
+		let name = if page == 0 {
+			format!("{stem}.png")
+		} else {
+			format!("{stem}-{}.png", page + 1)
 		};
 		let path = dir.join(name);
 		std::fs::write(&path, raster::png(&board)?)
@@ -232,8 +238,8 @@ mod tests {
 		use crate::video::voice::Utterance;
 
 		let story = crate::story::parse(
-			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park\n@kid x=0.3\nOne \
-			 two three.\n",
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park\n@kid x=0.3\nOne two \
+			 three.\n",
 		)
 		.unwrap();
 		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
@@ -265,16 +271,8 @@ mod tests {
 			})
 			.collect();
 
-		assert!(
-			captions[0].starts_with("title · auto ·"),
-			"{}",
-			captions[0]
-		);
-		assert!(
-			captions[1].starts_with("page 1 · "),
-			"{}",
-			captions[1]
-		);
+		assert!(captions[0].starts_with("title · auto ·"), "{}", captions[0]);
+		assert!(captions[1].starts_with("page 1 · "), "{}", captions[1]);
 	}
 
 	#[test]

@@ -935,10 +935,8 @@ mod tests {
 
 	#[test]
 	fn camera_vocabulary_parses_into_the_scene_camera() {
-		let scene = run(
-			"# park\n@camera shot=close on=stinky,mum move=push over=2.5 shake=0.5\n",
-		)
-		.unwrap();
+		let scene =
+			run("# park\n@camera shot=close on=stinky,mum move=push over=2.5 shake=0.5\n").unwrap();
 		let camera = &scene.camera;
 
 		assert_eq!(camera.shot, Some(ShotSize::Close));
@@ -1022,16 +1020,13 @@ mod tests {
 		assert!(story.meta.video.depth_of_field);
 
 		let locked = story::parse(
-			"+++\ntitle = \"T\"\nauthor = \"A\"\n[video]\ndirection = \"locked\"\n\
-			 depth-of-field = false\ntransition = \"dissolve\"\n+++\n# park\n",
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n[video]\ndirection = \"locked\"\ndepth-of-field \
+			 = false\ntransition = \"dissolve\"\n+++\n# park\n",
 		)
 		.unwrap();
 		assert_eq!(locked.meta.video.direction, Direction::Locked);
 		assert!(!locked.meta.video.depth_of_field);
-		assert_eq!(
-			locked.meta.video.transition,
-			Some(Transition::Dissolve)
-		);
+		assert_eq!(locked.meta.video.transition, Some(Transition::Dissolve));
 	}
 
 	#[test]

@@ -153,7 +153,10 @@ pub fn shot_view(
 			Some(clamp(
 				aspect,
 				View {
-					centre: pt(f32::midpoint(extent.0, extent.2), view_bottom - height / 2.0),
+					centre: pt(
+						f32::midpoint(extent.0, extent.2),
+						view_bottom - height / 2.0,
+					),
 					height,
 				},
 			))
@@ -178,7 +181,10 @@ fn full_view(aspect: f32, band: (f32, f32), subjects: &[&Puppet], ground: f32) -
 	Some(clamp(
 		aspect,
 		View {
-			centre: pt(f32::midpoint(extent.0, extent.2), view_bottom - height / 2.0),
+			centre: pt(
+				f32::midpoint(extent.0, extent.2),
+				view_bottom - height / 2.0,
+			),
 			height,
 		},
 	))
@@ -201,7 +207,10 @@ fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet
 	let mut crop = lowest_head + radius * 1.6;
 
 	if size == ShotSize::Medium {
-		crop = subjects.iter().map(|puppet| waist(puppet)).fold(0.0, f32::max);
+		crop = subjects
+			.iter()
+			.map(|puppet| waist(puppet))
+			.fold(0.0, f32::max);
 	}
 
 	let (headroom, top_margin) = match size {
@@ -269,11 +278,13 @@ pub fn still_view(
 
 		puppets
 			.iter()
-			.filter(|puppet| match size {
-				ShotSize::Close | ShotSize::ExtremeClose if !speaking.is_empty() => {
-					speaking.contains(&puppet.id.as_str()) && puppet.id != "wormsley"
+			.filter(|puppet| {
+				match size {
+					ShotSize::Close | ShotSize::ExtremeClose if !speaking.is_empty() => {
+						speaking.contains(&puppet.id.as_str()) && puppet.id != "wormsley"
+					}
+					_ => puppet.id != "wormsley",
 				}
-				_ => puppet.id != "wormsley",
 			})
 			.collect()
 	} else {
@@ -306,7 +317,12 @@ pub(crate) fn extent_of(puppet: &Puppet) -> (f32, f32, f32, f32) {
 
 			if lying {
 				let reach = frame.height() * s;
-				(x - reach, y - frame.head_r * 2.4 * s, x + reach * 0.3, y + 20.0)
+				(
+					x - reach,
+					y - frame.head_r * 2.4 * s,
+					x + reach * 0.3,
+					y + 20.0,
+				)
 			} else {
 				let half = frame.head_r * 1.5 * s;
 				(x - half, y - frame.height() * s - 20.0, x + half, y + 20.0)
@@ -387,9 +403,7 @@ enum EventKind {
 		speaker: Option<String>,
 	},
 	/// A strong mood on somebody who is not speaking: a reaction shot.
-	Reaction {
-		actor: String,
-	},
+	Reaction { actor: String },
 	/// An entrance, exit, walk, run, hop or faint: widen, so the action stays in frame.
 	Action,
 }
@@ -609,9 +623,7 @@ fn slow_pushes(setups: &mut Vec<Setup>, shot: &Shot) {
 	let mut index = 0;
 
 	while index < setups.len() {
-		let hold_until = setups
-			.get(index + 1)
-			.map_or(shot.end, |next| next.time);
+		let hold_until = setups.get(index + 1).map_or(shot.end, |next| next.time);
 
 		if hold_until - setups[index].time > LONG_HOLD && !setups[index].travel.is_move() {
 			let time = setups[index].time + LONG_HOLD;
@@ -650,15 +662,22 @@ fn written(shot: &Shot) -> Result<Vec<Setup>> {
 				Travel::Glide
 			});
 			let (time, over) = match travel {
-				Travel::Glide => (
-					shot.start,
-					if camera.over > 0.0 {
-						camera.over
-					} else {
-						CAMERA_EASE
-					},
-				),
-				Travel::Cut => (place_cut(key.time, shot, shot.start).unwrap_or(key.time), 0.0),
+				Travel::Glide => {
+					(
+						shot.start,
+						if camera.over > 0.0 {
+							camera.over
+						} else {
+							CAMERA_EASE
+						},
+					)
+				}
+				Travel::Cut => {
+					(
+						place_cut(key.time, shot, shot.start).unwrap_or(key.time),
+						0.0,
+					)
+				}
 				_ => (key.time.max(shot.start), camera.over),
 			};
 			setups.push(Setup {
@@ -692,18 +711,22 @@ fn written(shot: &Shot) -> Result<Vec<Setup>> {
 			Travel::Glide
 		});
 		let (time, over) = match travel {
-			Travel::Glide => (
-				(key.time - CAMERA_LEAD).max(shot.start),
-				if camera.over > 0.0 {
-					camera.over
-				} else {
-					CAMERA_EASE
-				},
-			),
-			Travel::Cut => (
-				place_cut(key.time, shot, shot.start).unwrap_or(key.time),
-				0.0,
-			),
+			Travel::Glide => {
+				(
+					(key.time - CAMERA_LEAD).max(shot.start),
+					if camera.over > 0.0 {
+						camera.over
+					} else {
+						CAMERA_EASE
+					},
+				)
+			}
+			Travel::Cut => {
+				(
+					place_cut(key.time, shot, shot.start).unwrap_or(key.time),
+					0.0,
+				)
+			}
 			_ => (key.time, camera.over),
 		};
 
@@ -829,13 +852,13 @@ mod tests {
 
 	fn timeline_of(script: &str, front: &str) -> Timeline {
 		let source = format!(
-			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\nmoral = \"Be kind.\"\n{front}\
-			 \n+++\n{script}"
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\nmoral = \"Be \
+			 kind.\"\n{front}\n+++\n{script}"
 		);
 		let story = story::parse(&source).unwrap();
 		let cast = Cast::parse(
-			"[kid]\nname = \"Kid\"\n[kid.voice]\nname = \"Junior\"\n[mum]\nname = \
-			 \"Mum\"\nkind = \"grown-up\"\n",
+			"[kid]\nname = \"Kid\"\n[kid.voice]\nname = \"Junior\"\n[mum]\nname = \"Mum\"\nkind = \
+			 \"grown-up\"\n",
 		)
 		.unwrap();
 		let rehearsals = rehearse(&story, &cast).unwrap();
@@ -849,17 +872,19 @@ mod tests {
 	fn subjects(setups: &[Setup]) -> Vec<String> {
 		setups
 			.iter()
-			.map(|setup| match &setup.framing {
-				Framing::Shot { on, .. } if on.is_empty() => "everyone".to_owned(),
-				Framing::Shot { on, .. } => on.join("+"),
-				Framing::Zoom { .. } => "zoom".to_owned(),
-				Framing::Auto => "auto".to_owned(),
+			.map(|setup| {
+				match &setup.framing {
+					Framing::Shot { on, .. } if on.is_empty() => "everyone".to_owned(),
+					Framing::Shot { on, .. } => on.join("+"),
+					Framing::Zoom { .. } => "zoom".to_owned(),
+					Framing::Auto => "auto".to_owned(),
+				}
 			})
 			.collect()
 	}
 
-	const EXCHANGE: &str = "# park\n@kid x=0.3 talk\nHello there today my friend.\n@mum talk\n\
-		Why hello to you too.\n@kid talk\nWhat shall we play now?\n";
+	const EXCHANGE: &str = "# park\n@kid x=0.3 talk\nHello there today my friend.\n@mum talk\nWhy \
+	                        hello to you too.\n@kid talk\nWhat shall we play now?\n";
 	#[test]
 	fn an_exchange_produces_shot_and_reverse() {
 		let framed = subjects(&page_setups(EXCHANGE));
@@ -875,7 +900,8 @@ mod tests {
 
 	#[test]
 	fn short_lines_produce_a_two_shot() {
-		let setups = page_setups("# park\n@kid x=0.3\n@mum x=0.7\n@kid talk\nHi.\n@mum talk\nWell hello.\n");
+		let setups =
+			page_setups("# park\n@kid x=0.3\n@mum x=0.7\n@kid talk\nHi.\n@mum talk\nWell hello.\n");
 		let framed = subjects(&setups);
 
 		assert!(
@@ -887,8 +913,8 @@ mod tests {
 	#[test]
 	fn no_setup_is_shorter_than_the_minimum() {
 		let setups = page_setups(
-			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@kid faint\n@mum talk\nOh \
-			 no, what happened here then?\n@kid wake\n@kid talk\nI am quite alright thanks.\n",
+			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@kid faint\n@mum talk\nOh no, \
+			 what happened here then?\n@kid wake\n@kid talk\nI am quite alright thanks.\n",
 		);
 
 		assert!(
@@ -910,8 +936,8 @@ mod tests {
 	#[test]
 	fn a_cut_never_lands_just_after_a_line_begins() {
 		let tl = timeline_of(
-			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@kid faint\n@mum talk\nOh \
-			 no, what happened here then?\n",
+			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@kid faint\n@mum talk\nOh no, \
+			 what happened here then?\n",
 			"",
 		);
 		let (shot, setups) = (&tl.shots[1], &tl.shots[1].setups);
@@ -931,8 +957,8 @@ mod tests {
 	#[test]
 	fn an_entrance_widens_the_shot() {
 		let setups = page_setups(
-			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@mum enter=right\nNow who \
-			 is this coming over the hill?\n@kid talk\nWhy hello to you too.\n",
+			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@mum enter=right\nNow who is \
+			 this coming over the hill?\n@kid talk\nWhy hello to you too.\n",
 		);
 		let framed = subjects(&setups);
 
@@ -994,7 +1020,11 @@ mod tests {
 		moments.extend(shot.lines.iter().map(|line| line.start));
 		moments.sort_by(f32::total_cmp);
 		moments.dedup_by(|a, b| (*a - *b).abs() < 0.05);
-		assert_eq!(setups.len(), moments.len(), "one setup per old camera event");
+		assert_eq!(
+			setups.len(),
+			moments.len(),
+			"one setup per old camera event"
+		);
 
 		for setup in setups {
 			assert_eq!(setup.travel, Travel::Glide);
@@ -1026,10 +1056,9 @@ mod tests {
 	fn puppets_of(script: &str) -> Vec<Puppet> {
 		let source = format!("+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n{script}");
 		let story = story::parse(&source).unwrap();
-		let cast = Cast::parse(
-			"[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n",
-		)
-		.unwrap();
+		let cast =
+			Cast::parse("[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n")
+				.unwrap();
 		let page = &story.pages[0];
 		let mut scene = Scene::for_page(page, &story.settings).unwrap();
 		let mut memory = std::collections::HashMap::new();
@@ -1090,8 +1119,7 @@ mod tests {
 				ShotSize::ExtremeClose,
 			] {
 				for aspect in [16.0 / 9.0, 9.0 / 16.0] {
-					let view =
-						shot_view(aspect, landscape, size, &subjects, 2060.0).unwrap();
+					let view = shot_view(aspect, landscape, size, &subjects, 2060.0).unwrap();
 					let drawn = STAGE + OVERDRAW;
 
 					assert!(
@@ -1110,9 +1138,11 @@ mod tests {
 	#[test]
 	fn portrait_shoots_closer_than_landscape() {
 		let tl = timeline_of(EXCHANGE, "");
-		let size_of = |setups: &[Setup]| match &setups[1].framing {
-			Framing::Shot { size, .. } => *size,
-			other => panic!("{other:?}"),
+		let size_of = |setups: &[Setup]| {
+			match &setups[1].framing {
+				Framing::Shot { size, .. } => *size,
+				other => panic!("{other:?}"),
+			}
 		};
 
 		assert_eq!(size_of(&tl.shots[1].setups), ShotSize::Medium);
@@ -1123,8 +1153,8 @@ mod tests {
 	fn nobody_named_is_an_error() {
 		let error = (|| {
 			let story = story::parse(
-				"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park\n@kid x=0.3\n\
-				 @camera shot=close on=ghost\nHello.\n",
+				"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park\n@kid \
+				 x=0.3\n@camera shot=close on=ghost\nHello.\n",
 			)?;
 			let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
 			let rehearsals = rehearse(&story, &cast)?;
@@ -1158,4 +1188,3 @@ mod tests {
 		assert!((tilted.centre.y - (view.centre.y - view.height * TILT)).abs() < 1e-3);
 	}
 }
-

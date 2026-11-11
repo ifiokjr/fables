@@ -19,8 +19,7 @@ fn estimated(story: &Story, cast: &Cast) -> video::timeline::Timeline {
 	let rehearsals = stage::rehearse(story, cast).unwrap();
 
 	video::timeline::build(story, cast, &rehearsals, |line: &Utterance<'_>| {
-		let seconds =
-			(line.text.split_whitespace().count() as f32 / 2.6).max(0.3);
+		let seconds = (line.text.split_whitespace().count() as f32 / 2.6).max(0.3);
 		let samples = (seconds * SAMPLE_RATE as f32) as usize;
 
 		Ok(Speech {
@@ -111,8 +110,10 @@ fn the_board_shows_different_shots_with_labels() {
 		portrait_sizes
 			.iter()
 			.filter(|size| size.starts_with("close"))
-			.count()
-			> sizes.iter().filter(|size| size.starts_with("close")).count(),
+			.count() > sizes
+			.iter()
+			.filter(|size| size.starts_with("close"))
+			.count(),
 		"portrait favours close shots: landscape {sizes:?} vs portrait {portrait_sizes:?}"
 	);
 }
@@ -142,4 +143,3 @@ fn every_page_opens_on_an_establishing_shot() {
 		);
 	}
 }
-

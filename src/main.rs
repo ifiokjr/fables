@@ -383,11 +383,7 @@ fn run(cli: Cli) -> Result<()> {
 				video(story, cast, &out, &format.formats(), preview)
 			})
 		}
-		Command::Storyboard {
-			story,
-			out,
-			format,
-		} => {
+		Command::Storyboard { story, out, format } => {
 			anyhow::ensure!(
 				format != Shape::Both,
 				"storyboard draws one shape; use --format landscape or portrait"

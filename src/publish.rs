@@ -162,11 +162,16 @@ pub fn video(
 pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<Vec<PathBuf>> {
 	let cache = out.join(&story.slug).join("cache").join("voice");
 	let rehearsals = stage::rehearse(story, cast)?;
-	let timeline = crate::video::timeline::build(story, cast, &rehearsals, |line| {
-		offline_take(line, &cache)
-	})?;
+	let timeline =
+		crate::video::timeline::build(story, cast, &rehearsals, |line| offline_take(line, &cache))?;
 
-	press::storyboard::write(story, &timeline, cast, portrait, &book_dir(out, story).join("storyboard"))
+	press::storyboard::write(
+		story,
+		&timeline,
+		cast,
+		portrait,
+		&book_dir(out, story).join("storyboard"),
+	)
 }
 
 /// The length of a spoken line without a microphone: the cached take when there is one, else

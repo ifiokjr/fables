@@ -134,16 +134,10 @@ pub enum Framing {
 	/// The automatic framing: everyone on stage, fitted by the format (the older camera's view).
 	Auto,
 	/// A zoom and look point, as fractions of the stage.
-	Zoom {
-		zoom: f32,
-		look: (f32, f32),
-	},
+	Zoom { zoom: f32, look: (f32, f32) },
 	/// A shot size framed on the named actors. Empty names mean everyone on stage, or the
 	/// current speaker for a close shot.
-	Shot {
-		size: ShotSize,
-		on: Vec<String>,
-	},
+	Shot { size: ShotSize, on: Vec<String> },
 }
 
 /// One camera setup: a framing the camera holds or moves to, starting at `time`.
