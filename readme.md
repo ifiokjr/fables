@@ -150,6 +150,7 @@ Worlds and characters are named by slugs, never paths, so the server only reads 
 | `fables ebook <story>` | `out/<book>/<style>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
 | `fables print <story>` | `out/<book>/<style>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
 | `fables video <story> [--format landscape\|portrait\|both] [--preview]` | `out/<book>/<style>/video/`: MP4s, `soundtrack.wav`, `.srt` captions, a YouTube thumbnail and a 9:16 cover image. `--preview` renders at half size and 15 fps. |
+| `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<style>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. Never records a voice, so it runs offline in a second or two. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
 | `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<style>/`: the whole cast, every setting, and one character in every mood. |
@@ -225,6 +226,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
 | `size=0.9` | Scales the page's text. |
 | `zoom=1.5 look=0.5,0.6` | A close-up on the point (x, y), as fractions of the page. |
+| `shot=… on=…` | A shot size that frames the still illustration: `wide`, `full`, `medium`, `close` or `extreme-close` on the actors named by `on=` (comma-separated ids; empty means everyone on stage, or whoever speaks for a close shot). Framing is computed from the puppets, with headroom and lead room, so a page can be a close-up without typing coordinates. |
+| `transition=wipe` | How the page is entered in the video: `wipe` (the paper sheet), `cut`, `dissolve`, `fade`, `iris` or `push`. `[video] transition = "…"` sets a book's default. |
 | `video=skip`, `book=skip` | Leave the page out of one format. |
 | `no-wormsley` | Don't hide Wormsley on this page. |
 
@@ -232,7 +235,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page, and `@camera zoom=… look=…` the framing.
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page, and `@camera …` the framing.
 
 | Kind | Values |
 | --- | --- |
@@ -244,6 +247,16 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (for flyers), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
 | Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=toothbrush`/`parcel`/`jam`/`nothing`, `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers) |
 | Entrances | `enter=left`/`right`, `exit=left`/`right` (slide on and off in video; just appear or vanish in the book) |
+| Camera | `shot=wide`/`full`/`medium`/`close`/`extreme-close` framed on `on=<actor>,<actor>` (empty: everyone, or the speaker for a close), `move=push`/`pull`/`pan-left`/`pan-right`/`tilt-up`/`tilt-down`/`track` taking `over=<seconds>` (default the rest of the shot), `shake=0`–`1`, and `cut` or `ease` to choose how the camera arrives (a change of shot cuts unless the direction says `ease`). The older `zoom=` and `look=` still work and win when given. |
+
+### Who points the camera
+
+`[video] direction` chooses between two directors:
+
+- `"auto"` (the default): pages without any `@camera` direction are shot by film rules. Every page opens on an establishing wide or full shot long enough to read; whoever speaks gets a medium (landscape) or close (portrait); a two-way exchange alternates shot and reverse shot; very short lines share a two-shot; a strong mood on somebody who isn't speaking earns a close reaction shot; entrances, exits, walks, runs, hops and faints widen to a full shot so the action stays in frame. No shot runs shorter than 1.2 s, cuts land at most one per 1.2 s and never just after a line begins, and a framing held longer than 8 s gets a slow push.
+- `"locked"`: the older camera, kept byte for byte — one auto-framed view per scene key and line, gliding between them.
+
+A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
 
 Teeth, stink and mint **carry over from page to page** until changed, so grotty teeth stay grotty. Actors without an `x` are spaced out automatically.
 
@@ -394,7 +407,7 @@ src/
   publish.rs      a book's outputs: the check, proofs, ePub, print files and videos
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
-  video/          voices (TTS providers), lip-sync, timeline, frame renderer, soundtrack, ffmpeg
+  video/          voices (TTS providers), lip-sync, timeline, the director's camera setups, frame renderer, soundtrack, ffmpeg
 worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe and books
 settings/         the built-in settings, as part files
 styles/           drawing styles: style.toml, kit and template per look
