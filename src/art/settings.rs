@@ -33,8 +33,9 @@
 //! data-colour data-seed>` places one of the living plants from [`critters`], which have faces
 //! and wilt. The root `<svg>` sets `data-ground`, where actors' feet rest.
 //!
-//! The built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`)
-//! are compiled in from `settings/`; a world adds or replaces them with its own `settings/`.
+//! The built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`,
+//! `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`) are
+//! compiled in from `settings/`; a world adds or replaces them with its own `settings/`.
 
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
@@ -64,7 +65,7 @@ use super::pt;
 pub const OVER: f32 = 160.0;
 
 /// The settings compiled into fables, by name.
-const BUILT_IN: [(&str, &str); 7] = [
+const BUILT_IN: [(&str, &str); 15] = [
 	("plain", include_str!("../../settings/plain.svg")),
 	("town", include_str!("../../settings/town.svg")),
 	("street", include_str!("../../settings/street.svg")),
@@ -72,6 +73,14 @@ const BUILT_IN: [(&str, &str); 7] = [
 	("park", include_str!("../../settings/park.svg")),
 	("bathroom", include_str!("../../settings/bathroom.svg")),
 	("bedroom", include_str!("../../settings/bedroom.svg")),
+	("kitchen", include_str!("../../settings/kitchen.svg")),
+	("classroom", include_str!("../../settings/classroom.svg")),
+	("forest", include_str!("../../settings/forest.svg")),
+	("beach", include_str!("../../settings/beach.svg")),
+	("hilltop", include_str!("../../settings/hilltop.svg")),
+	("shop", include_str!("../../settings/shop.svg")),
+	("playroom", include_str!("../../settings/playroom.svg")),
+	("stage", include_str!("../../settings/stage.svg")),
 ];
 
 /// A built-in setting's part file, by name.
@@ -80,6 +89,11 @@ pub fn built_in_source(name: &str) -> Option<&'static str> {
 		.iter()
 		.find(|(key, _)| *key == name)
 		.map(|(_, source)| *source)
+}
+
+/// The names of the settings compiled into fables.
+pub fn built_in_names() -> impl Iterator<Item = &'static str> {
+	BUILT_IN.iter().map(|(name, _)| *name)
 }
 
 /// A setting file as an editor sees it: its ground, its title, and each part's id and markup,
@@ -1066,6 +1080,56 @@ mod tests {
 				let doc = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
 				crate::raster::render(&doc).unwrap();
 			}
+		}
+	}
+
+	#[test]
+	fn all_fifteen_built_ins_have_three_layers_and_a_ground() {
+		let names: Vec<&str> = built_in_names().collect();
+		assert_eq!(
+			names,
+			[
+				"plain",
+				"town",
+				"street",
+				"garden",
+				"park",
+				"bathroom",
+				"bedroom",
+				"kitchen",
+				"classroom",
+				"forest",
+				"beach",
+				"hilltop",
+				"shop",
+				"playroom",
+				"stage",
+			]
+		);
+
+		let library = Library::built_in();
+
+		for name in names {
+			let setting = library.find(name).unwrap();
+
+			for layer in [Layer::Far, Layer::Near, Layer::Front] {
+				assert!(
+					setting.0.parts.iter().any(|part| part.layer == layer),
+					"{name} has no {layer:?} parts"
+				);
+			}
+
+			assert!(
+				(STAGE * 0.75..STAGE).contains(&setting.ground()),
+				"{name} stands its actors at {}",
+				setting.ground()
+			);
+			assert!(
+				setting.0.parts.len() < 150,
+				"{name} has {} parts, too many to draw every frame",
+				setting.0.parts.len()
+			);
+			assert!(!setting.about().is_empty(), "{name} needs a <title>");
 		}
 	}
 

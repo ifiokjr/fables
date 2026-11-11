@@ -12,6 +12,7 @@ use fables::art::pack::StylePack;
 use fables::art::parts;
 use fables::art::parts::Level;
 use fables::art::parts::Parts;
+use fables::art::settings::built_in_names;
 use fables::art::style::Style;
 use fables::art::style::StyleName;
 use fables::book;
@@ -636,12 +637,9 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 
 	// One setting with one cast member, drawn under every light: the world's colour script.
 	let settings = world.settings()?;
-	let built_in = [
-		"plain", "town", "street", "garden", "park", "bathroom", "bedroom",
-	];
 	let own = settings
 		.names()
-		.find(|name| !built_in.contains(name))
+		.find(|name| !built_in_names().any(|built_in| built_in == *name))
 		.unwrap_or("park");
 	let setting = settings.find(own)?;
 	let member = cast

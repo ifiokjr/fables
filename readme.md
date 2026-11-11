@@ -117,9 +117,9 @@ A setting is an SVG file of named parts on the square stage (2400 units, with 16
 | `fill` | A palette name or hex code; `tint` is the scene's tint; `sky` is the scene light's sky gradient (flat daylight paints the plain sky colour); `none` for a line, with `stroke` and `stroke-width` (`data-noodle` for a thick inked tube). |
 | `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
 | `data-night`, `data-wilt` | The colour at night, and the colour it turns as the scene wilts. Parts without a night colour dim. |
-| `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides: `dusk` shows the sun, `moonlit` the moon and stars, and an `indoor` or `candle` light shows neither. |
+| `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides: `dusk` shows the sun, `moonlit` the moon and stars, `overcast` and `storm` cover the sun with cloud, and an `indoor` or `candle` light shows neither. |
 | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows at dusk, stars at night). |
-| `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, lawns, floors). |
+| `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, lawns, floors). Both colours wilt, fade with distance, dim at night and grade with the light like a flat fill; a part with a `data-night` colour turns that flat colour at night. |
 | `data-glow` | On a `<circle>`, `radius colour opacity`: a soft radial pool of light fading to transparent (a lamp, a window, the sun's bloom). |
 | `data-depth` | 0 to 1: far things fade into the sky and lose line. |
 | `data-dots` | A riso dot screen: `colour spacing radius opacity`. |
@@ -127,7 +127,7 @@ A setting is an SVG file of named parts on the square stage (2400 units, with 16
 
 `<circle data-sparkle="size colour">` twinkles, and `<circle data-critter="flower|tree" r="height" data-colour data-seed>` places one of the living plants, which have faces and wilt. The root `<svg>` sets `data-ground`, where actors stand.
 
-The seven built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`) live in [`settings/`](settings) and every world can use them. A world adds its own, or repaints a built-in one by name, in its `settings/` folder; over MCP, `setting_create`, `setting_parts`, `setting_set_parts` and `setting_render` do the same.
+The fifteen built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`) live in [`settings/`](settings) and every world can use them. A world adds its own, or repaints a built-in one by name, in its `settings/` folder; over MCP, `setting_create`, `setting_parts`, `setting_set_parts` and `setting_render` do the same.
 
 ## Designing characters with an agent (MCP)
 
@@ -235,7 +235,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 | Option | Meaning |
 | --- | --- |
-| Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, or one of the world's own (see Settings). |
+| Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`, or one of the world's own (see Settings). |
 | `night`, `wilt=1`, `stink=0.5`, `mint=1`, `tint=sunflower` | Starting weather (`tint` colours the `plain` blob). |
 | `light=golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. It grades every colour in the scene, paints the sky, aims the shadows and adds haze and a vignette. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. A bare `night` keeps today's behaviour exactly unless a `light=` is also given. |
 | `speed=1`, `impact=1` | Manga effects: focus lines rushing in towards the first person on stage, or a jagged burst behind them. They work in every style. |
