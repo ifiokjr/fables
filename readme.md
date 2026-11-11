@@ -92,6 +92,17 @@ A style is four dials: its construction (bodies, features, eyes and kit), and th
 | `[shade]` | `tones` (0, 1 or 2), `highlight` (none or rim), `fill` (flat, a limited `palette`, or screentone), `tone` (dots or lines). |
 | `[motion]` | `timing` (ones, twos or threes) and `modulate` (moves on ones, holds on threes), `easing` (eased or snap) with `anticipation` and `overshoot`, `squash`, `moving-hold`, `smears`, `limbs` (jointed or hose), `follow-through`, `blink-every`, `mouth-rate`, and an `idle` loop (bounce) with `idle-amount` and `idle-tempo`. |
 
+Each body (`[bodies.kid]`, `[bodies.grown-up]`) can also say how it is built. Left out, every one of these draws the body exactly as before (round tube limbs, a plain neck, cartoon shoes):
+
+| Setting | Meaning |
+| --- | --- |
+| `leg-profile`, `arm-profile` | Seven widths that shape a whole leg or arm as one outline: at the root, a third and two thirds of the way down the upper bone, at the knee or elbow, a third and two thirds of the way down the lower bone (where a calf or forearm swells and narrows), and at the ankle or wrist. A bent limb keeps a round outer curve over the joint and a crease inside it. |
+| `foot-scale` | How much bigger than the kit's drawings shoes are drawn; they grow from the sole, so they still stand on the ground (default 1). |
+| `knee-splay` | How much of a bent knee's sideways reach shows front-on: 1 (the default) bends knees out across the page; less brings them towards the viewer, so a squat foreshortens the thighs instead of splaying them. Turned, knees bend forwards whatever this is. |
+| `floor` | `true` keeps the legs to the floor: a knee that would go through it rests on it, a foot behind a kneeling knee lies along the floor sole up, a foot lifted while standing points its toe down, and a skirt (`legwear` without `legwear-leg`) hangs from the waist under gravity, draping over the lap when the thighs come up, instead of turning with the body. |
+
+The kit can draw two more parts: `neck` (front and three-quarter, in bone units from the head's hinge down, under the top's neckline; without it the neck is a plain tube) and `shoe-sole` (front and three-quarter, inside the shoe, so a toe cap or heel can rise from the sole; without it the sole is a plain strip along the bottom).
+
 `fables rig <id> --motion <style>` shows a character moving the way another style moves.
 
 The built-in styles are compiled into fables, so a world anywhere on disk can name one. They are separate from the `--style` skins (riso, tv, bold…), which restyle the older parametric puppet and the settings.

@@ -400,6 +400,10 @@ impl StylePack {
 			if !(body.neck.y < body.shoulder_y && body.shoulder_y < limbs.pelvis_y) {
 				problem("the neck must be above the shoulders, and both above the pelvis".into());
 			}
+
+			for message in body.problems() {
+				problem(message);
+			}
 		}
 
 		findings.sort_by_key(|finding| finding.level);
@@ -435,6 +439,55 @@ mod tests {
 	fn an_unknown_style_lists_the_known_ones() {
 		let error = format!("{:#}", StylePack::named("vaporwave").unwrap_err());
 		assert!(error.contains("cartoon"), "{error}");
+	}
+
+	/// The cartoon style with `dial` added to its kid's body.
+	fn with_kid_dial(dial: &str) -> Result<StylePack> {
+		let source = include_str!("../../styles/cartoon/style.toml");
+		let at = source
+			.find("[bodies.kid.limbs]")
+			.expect("the cartoon style has a kid");
+		let source = format!("{}{dial}\n\n{}", &source[..at], &source[at..]);
+		StylePack::parse(&source, "<svg/>", "<svg/>")
+	}
+
+	#[test]
+	fn construction_dials_are_read_and_bad_ones_are_reported() {
+		let pack = with_kid_dial(
+			"leg-profile = [40.0, 36.0, 28.0, 24.0, 30.0, 22.0, 16.0]\nfoot-scale = 1.2\nfloor = \
+			 true",
+		)
+		.unwrap();
+		let kid = pack.body(Build::Kid);
+		assert_eq!(kid.leg_profile.map(|widths| widths[4]), Some(30.0));
+		assert!((kid.foot_scale - 1.2).abs() < f32::EPSILON && kid.floor);
+
+		// A profile needs all seven stations; the error says where and what it wants.
+		let error = format!(
+			"{:#}",
+			with_kid_dial("arm-profile = [10.0, 9.0]").unwrap_err()
+		);
+		assert!(
+			error.contains("arm-profile") && error.contains("length 7"),
+			"{error}"
+		);
+
+		let error = format!("{:#}", with_kid_dial("knee-bend = 0.5").unwrap_err());
+		assert!(error.contains("knee-bend"), "{error}");
+
+		// Values that parse but can't draw are errors in the style's check.
+		let pack = with_kid_dial(
+			"leg-profile = [40.0, 36.0, 0.0, 24.0, 30.0, 22.0, 16.0]\nknee-splay = 1.5",
+		)
+		.unwrap();
+		let errors: Vec<String> = pack
+			.check()
+			.iter()
+			.filter(|finding| finding.level == Level::Error && finding.part == "bodies.kid")
+			.map(|finding| finding.message.clone())
+			.collect();
+		assert!(errors.iter().any(|message| message.contains("leg-profile")));
+		assert!(errors.iter().any(|message| message.contains("knee-splay")));
 	}
 
 	#[test]

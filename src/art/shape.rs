@@ -223,6 +223,119 @@ impl Shape {
 		Shape::blob(&outline)
 	}
 
+	/// A limb drawn with anatomy round two bones, `root` to `joint` to `end`. `widths` are the
+	/// limb's width at seven stations: the root, a third and two thirds of the way down the
+	/// first bone, the joint, a third and two thirds of the way down the second bone, and the
+	/// end. So a thigh can be fuller than the calf and a calf can swell and narrow to the ankle.
+	///
+	/// The two ends are round. Bent, the limb keeps one silhouette: the outside of the bend
+	/// rounds over the joint, and the inside creases where the two bones' edges meet. Folded so
+	/// far that one bone lies along the other, only their outside edges show. There is never a
+	/// gap or a ball at the elbow or knee.
+	pub fn limb(root: Pt, joint: Pt, end: Pt, widths: &[f32; 7]) -> Shape {
+		let (first, second) = ((joint - root).norm(), (end - joint).norm());
+		let half = |i: usize| widths[i] / 2.0;
+		let station = |i: usize| {
+			if i <= 3 {
+				root.lerp(joint, i as f32 / 3.0)
+			} else {
+				joint.lerp(end, (i - 3) as f32 / 3.0)
+			}
+		};
+		// How far the second bone turns from the first, positive towards the first's `perp`.
+		let turn = (first.x * second.y - first.y * second.x)
+			.atan2(first.x * second.x + first.y * second.y);
+		let inside = if turn >= 0.0 { 1.0 } else { -1.0 };
+		let edge = |side: f32| {
+			let upper: Vec<Pt> = (0..=3)
+				.map(|i| station(i) + first.perp() * (side * half(i)))
+				.collect();
+			let lower: Vec<Pt> = (3..=6)
+				.map(|i| station(i) + second.perp() * (side * half(i)))
+				.collect();
+			(upper, lower)
+		};
+
+		// The outside of the bend: an arc over the joint joins the two bones' edges.
+		let (upper, lower) = edge(-inside);
+		let mut outside: Vec<(Pt, bool)> = upper[..3].iter().map(|&p| (p, false)).collect();
+		let out = first.perp() * -inside;
+		let from = out.y.atan2(out.x);
+		// One point over a straight joint; more round a sharper bend.
+		let steps = (turn.abs() / 0.5).ceil() as usize;
+
+		for step in 0..=steps {
+			let angle = from + turn * step as f32 / steps.max(1) as f32;
+			outside.push((joint + pt(angle.cos(), angle.sin()) * half(3), false));
+		}
+
+		outside.extend(lower[1..].iter().map(|&p| (p, false)));
+
+		// The inside of the bend: the two edges overlap, so they meet where they cross.
+		let (upper, lower) = edge(inside);
+		let crease = turn.abs() > 0.35;
+		let mut inner: Vec<(Pt, bool)> = Vec::with_capacity(8);
+
+		if let Some((a, b, at)) = crossing(&upper, &lower) {
+			inner.extend(upper[..=a].iter().map(|&p| (p, false)));
+			inner.push((at, crease));
+			inner.extend(lower[b + 1..].iter().map(|&p| (p, false)));
+		} else if turn.abs() < std::f32::consts::FRAC_PI_2 {
+			// Nearly straight: the edges meet end to end at the joint.
+			inner.extend(upper[..3].iter().map(|&p| (p, false)));
+			inner.push((upper[3].lerp(lower[0], 0.5), false));
+			inner.extend(lower[1..].iter().map(|&p| (p, false)));
+		} else {
+			// Folded flat: the inside edges are hidden inside the limb.
+			inner.push((upper[0], false));
+			inner.push((lower[3], false));
+		}
+
+		// Round the far end, back up the other side, and round the root.
+		let (left, right) = if inside > 0.0 {
+			(inner, outside)
+		} else {
+			(outside, inner)
+		};
+		let mut outline = left;
+		outline.push((end + second * half(6), false));
+		outline.extend(right.into_iter().rev());
+		outline.push((root - first * half(0), false));
+
+		Shape::smooth(&outline)
+	}
+
+	/// A smooth closed curve through `points`, with sharp corners where a point says so. Each
+	/// curve's handles run along the curve's direction through the point, a third of the way to
+	/// its neighbour, so unevenly spaced points don't overshoot.
+	fn smooth(points: &[(Pt, bool)]) -> Shape {
+		let n = points.len();
+		let at = |i: usize| points[i % n].0;
+		let direction = |i: usize| (at(i + 1) - at(i + n - 1)).norm();
+		let mut out = vec![at(0)];
+
+		for i in 0..n {
+			let (from, to) = (at(i), at(i + 1));
+			let reach = (to - from).len() / 3.0;
+			let start = if points[i].1 {
+				from.lerp(to, 1.0 / 3.0)
+			} else {
+				from + direction(i) * reach
+			};
+			let finish = if points[(i + 1) % n].1 {
+				from.lerp(to, 2.0 / 3.0)
+			} else {
+				to - direction(i + 1) * reach
+			};
+			out.extend([start, finish, to]);
+		}
+
+		Shape {
+			points: out,
+			closed: true,
+		}
+	}
+
 	/// Blends towards `other`, which must be drawn with the same commands.
 	#[must_use]
 	pub fn lerp(&self, other: &Shape, t: f32) -> Shape {
@@ -266,6 +379,31 @@ impl Shape {
 
 		if self.closed { path.close() } else { path }
 	}
+}
+
+/// Where two edges first cross, searching outwards from the joint between them: `upper` runs
+/// down to the joint and `lower` away from it. Returns the crossing segments' indices and the
+/// point.
+fn crossing(upper: &[Pt], lower: &[Pt]) -> Option<(usize, usize, Pt)> {
+	let mut pairs: Vec<(usize, usize)> = (0..upper.len() - 1)
+		.flat_map(|a| (0..lower.len() - 1).map(move |b| (a, b)))
+		.collect();
+	pairs.sort_by_key(|&(a, b)| (upper.len() - 2 - a) + b);
+
+	pairs.into_iter().find_map(|(a, b)| {
+		let (p, r) = (upper[a], upper[a + 1] - upper[a]);
+		let (q, s) = (lower[b], lower[b + 1] - lower[b]);
+		let cross = |u: Pt, v: Pt| u.x * v.y - u.y * v.x;
+		let denominator = cross(r, s);
+
+		if denominator.abs() < 1e-6 {
+			return None;
+		}
+
+		let t = cross(q - p, s) / denominator;
+		let u = cross(q - p, r) / denominator;
+		((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| (a, b, p + r * t))
+	})
 }
 
 #[cfg(test)]
@@ -325,6 +463,86 @@ mod tests {
 	fn drawings_with_different_commands_do_not_blend() {
 		let a = Shape::parse("M0 0 C0 0 10 0 10 0 Z");
 		let _ = a.lerp(&Shape::ellipse(pt(0.0, 0.0), 1.0, 1.0), 0.5);
+	}
+
+	/// Whether `p` is inside the polygon through a shape's anchor points.
+	fn inside(shape: &Shape, p: Pt) -> bool {
+		let anchors: Vec<Pt> = shape.points.iter().step_by(3).copied().collect();
+		let mut inside = false;
+
+		for (i, &a) in anchors.iter().enumerate() {
+			let b = anchors[(i + 1) % anchors.len()];
+
+			if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+				inside = !inside;
+			}
+		}
+
+		inside
+	}
+
+	/// How far `p` is from the segment `a`–`b`.
+	fn distance(p: Pt, a: Pt, b: Pt) -> f32 {
+		let ab = b - a;
+		let t =
+			(((p - a).x * ab.x + (p - a).y * ab.y) / (ab.x * ab.x + ab.y * ab.y)).clamp(0.0, 1.0);
+		(p - (a + ab * t)).len()
+	}
+
+	const LEG: [f32; 7] = [40.0, 36.0, 28.0, 24.0, 30.0, 22.0, 16.0];
+
+	#[test]
+	fn a_limb_follows_its_width_profile() {
+		let limb = Shape::limb(pt(0.0, 0.0), pt(0.0, 90.0), pt(0.0, 180.0), &LEG);
+		assert!(limb.closed);
+		// Straight down, the outline's half width at each station is the profile's.
+		let width_at = |y: f32| {
+			let near: Vec<f32> = limb
+				.points
+				.iter()
+				.step_by(3)
+				.filter(|p| (p.y - y).abs() < 0.5)
+				.map(|p| p.x.abs())
+				.collect();
+			near.iter().copied().fold(0.0, f32::max) * 2.0
+		};
+		assert!((width_at(30.0) - 36.0).abs() < 0.01, "a full thigh");
+		assert!((width_at(90.0) - 24.0).abs() < 0.01, "a narrow knee");
+		assert!((width_at(120.0) - 30.0).abs() < 0.01, "the calf swells");
+		assert!(
+			(width_at(180.0) - 16.0).abs() < 0.01,
+			"then narrows to the ankle"
+		);
+		// Round ends reach past the root and the end by half their width.
+		let (lo, hi) = limb.bounds();
+		assert!(lo.y < -19.0 && hi.y > 187.0, "{lo:?} {hi:?}");
+	}
+
+	#[test]
+	fn a_bent_limb_is_one_continuous_outline_with_no_gap_or_ball_at_the_joint() {
+		let (root, joint) = (pt(0.0, 0.0), pt(0.0, 90.0));
+
+		// From straight, through a right angle, to folded flat back along itself.
+		for degrees in [0.0_f32, 30.0, 90.0, 135.0, 170.0, -90.0] {
+			let end = joint + pt(0.0, 90.0).rotate(degrees);
+			let limb = Shape::limb(root, joint, end, &LEG);
+			assert!(limb.closed && limb.curves() >= 8, "{degrees}°");
+
+			// Every point of the bones is inside the outline: no gaps.
+			for i in 1..20 {
+				let s = i as f32 / 20.0;
+				for p in [root.lerp(joint, s), joint.lerp(end, s)] {
+					assert!(inside(&limb, p), "{degrees}°: {p:?} is outside");
+				}
+			}
+
+			// No outline point strays further from the bones than the widest station: no
+			// balloon over the joint, no slivers.
+			for &p in limb.points.iter().step_by(3) {
+				let off = distance(p, root, joint).min(distance(p, joint, end));
+				assert!(off <= 20.01, "{degrees}°: {p:?} is {off} off the bones");
+			}
+		}
 	}
 
 	#[test]

@@ -95,6 +95,66 @@ pub struct Proportions {
 	pub hand_scale: f32,
 	/// The units pose reaches are measured in, across and up or down (see `figure::Reach`).
 	pub reach: Pt,
+	/// The legs' anatomy: their width at the hip, a third and two thirds of the way down the
+	/// thigh, the knee, a third and two thirds of the way down the shin, and the ankle (see
+	/// [`Shape::limb`]). Without it, a leg tapers evenly through `leg_width`.
+	#[serde(default)]
+	pub leg_profile: Option<[f32; 7]>,
+	/// The bare arm's anatomy, shoulder to elbow to wrist, drawn under the sleeve. Without it,
+	/// only the forearm shows, as a tube tapering through `forearm_width`.
+	#[serde(default)]
+	pub arm_profile: Option<[f32; 7]>,
+	/// How much bigger than the kit's drawings shoes are. They grow from the sole.
+	#[serde(default = "one")]
+	pub foot_scale: f32,
+	/// How much of a bent knee's sideways reach shows front-on. At 1 knees bend out across the
+	/// page; less brings them towards the viewer, so a squat or a kneel foreshortens the thighs
+	/// instead of splaying them. Three-quarters turned, knees always bend forwards in full.
+	#[serde(default = "one")]
+	pub knee_splay: f32,
+	/// Whether the legs keep to the floor: a knee that would go through it rests on it, with
+	/// the shin reaching back towards the foot (so a deep sit kneels back on the heels), and a
+	/// foot lifted off it while standing points its toe down to it.
+	#[serde(default)]
+	pub floor: bool,
+}
+
+fn one() -> f32 {
+	1.0
+}
+
+impl Proportions {
+	/// Half the knee's width, how far its round sits off the floor when it kneels.
+	fn knee_radius(&self) -> f32 {
+		self.leg_profile.map_or_else(
+			|| (self.leg_width.0 + self.leg_width.1) / 4.0,
+			|widths| widths[3] / 2.0,
+		)
+	}
+
+	/// Checks the construction dials: every width, scale and the splay must be positive.
+	pub fn problems(&self) -> Vec<String> {
+		let mut problems = Vec::new();
+
+		for (dial, profile) in [
+			("leg-profile", self.leg_profile),
+			("arm-profile", self.arm_profile),
+		] {
+			if profile.is_some_and(|widths| widths.iter().any(|&width| width <= 0.0)) {
+				problems.push(format!("every width in {dial} must be more than zero"));
+			}
+		}
+
+		if self.foot_scale <= 0.0 {
+			problems.push("foot-scale must be more than zero".to_owned());
+		}
+
+		if !(self.knee_splay > 0.0 && self.knee_splay <= 1.0) {
+			problems.push("knee-splay must be more than 0 and at most 1".to_owned());
+		}
+
+		problems
+	}
 }
 
 /// The `facing` the stage gives a figure turned towards the middle of the page. An authored
@@ -697,6 +757,15 @@ fn hose(root: Pt, joint: Pt, end: Pt, length: f32) -> [Pt; 9] {
 	})
 }
 
+/// A bent knee seen front-on: it comes towards the viewer, so only `reach` of its sideways
+/// offset from the hip–ankle line shows, and the thigh and shin foreshorten.
+fn splay(hip: Pt, knee: Pt, ankle: Pt, reach: f32) -> Pt {
+	let line = (ankle - hip).norm();
+	let along = (knee - hip).x * line.x + (knee - hip).y * line.y;
+	let base = hip + line * along;
+	base + (knee - base) * reach
+}
+
 /// The rig solved for one moment.
 struct Solved {
 	t: f32,
@@ -738,6 +807,32 @@ impl Solved {
 		)
 	}
 
+	/// Where a skirt's point (in torso units) hangs: cloth below the waist falls from it under
+	/// gravity, whichever way the spine bends, and drapes forwards over thighs that lift towards
+	/// the lap. It never goes through the floor.
+	fn skirt(&self, rest: Pt) -> Pt {
+		let waist = self.limbs.pelvis_y - 40.0;
+		let depth = rest.y - waist;
+
+		if depth <= 0.0 {
+			return rest;
+		}
+
+		let hips = self.hip(-1.0).lerp(self.hip(1.0), 0.5);
+		let (_, near, _) = self.leg(-1.0);
+		let (_, far, _) = self.leg(1.0);
+		let thighs = (near.lerp(far, 0.5) - hips).norm();
+		let lap = pt(0.0, 1.0).lerp(thighs, 0.75).norm();
+		// Across the cloth: sideways when it hangs, thinning to a thigh's thickness on the lap.
+		let across = pt(lap.y, -lap.x) * lerp(1.0, 0.45, ((1.0 - lap.y) / 0.6).clamp(0.0, 1.0));
+		let centre = self.torso(pt(0.0, waist));
+		let seam = self.torso(pt(rest.x, waist)) - centre;
+		let below = (depth / (self.limbs.thigh * 0.3)).clamp(0.0, 1.0);
+		let hanging = centre + seam.lerp(across * rest.x, below) + lap * depth;
+		let world = pt(hanging.x, hanging.y.min(-4.0));
+		(world - self.pivot - pt(0.0, self.drop)).rotate(-self.legs.bend) + self.pivot
+	}
+
 	/// `side` is -1 for the near (page-left) limb and 1 for the far one.
 	fn hip(&self, side: f32) -> Pt {
 		let (near, far) = self.body.hips_turned;
@@ -768,8 +863,51 @@ impl Solved {
 		};
 		// Knees bend outwards from the front and forwards when turned.
 		let pole = pt(lerp(side, 1.2, self.t), -0.25).norm();
-		let (knee, ankle) = rig::two_bone(hip, foot, self.limbs.thigh, self.limbs.shin, pole);
+		let (mut knee, mut ankle) =
+			rig::two_bone(hip, foot, self.limbs.thigh, self.limbs.shin, pole);
+
+		if self.body.floor && knee.y > -self.body.knee_radius() {
+			(knee, ankle) = self.kneel(hip, knee, foot);
+		}
+
+		if self.body.knee_splay < 1.0 {
+			knee = splay(hip, knee, ankle, lerp(self.body.knee_splay, 1.0, self.t));
+		}
+
 		(hip, knee, ankle)
+	}
+
+	/// Rests a knee that would go through the floor on it, swung on the thigh to the side it
+	/// bent to, with the shin reaching from it towards the foot's target (and never through the
+	/// floor either). Where the knee just touches the floor this meets the plain solution, so a
+	/// figure sinking into a sit moves without a jump.
+	fn kneel(&self, hip: Pt, knee: Pt, target: Pt) -> (Pt, Pt) {
+		let floor = -self.body.knee_radius();
+		let (thigh, shin) = (self.limbs.thigh, self.limbs.shin);
+		let drop = (floor - hip.y).clamp(0.0, thigh);
+		let ahead = if knee.x >= hip.x { 1.0 } else { -1.0 };
+		let knee = pt(hip.x + ahead * (thigh * thigh - drop * drop).sqrt(), floor);
+		let mut ankle = knee + (target - knee).norm() * shin;
+		let ground = self.limbs.ankle_y;
+
+		if ankle.y > ground {
+			let rise = ground - knee.y;
+			let back = if ankle.x >= knee.x { 1.0 } else { -1.0 };
+			ankle = pt(
+				knee.x + back * (shin * shin - rise * rise).max(0.0).sqrt(),
+				ground,
+			);
+		}
+
+		(knee, ankle)
+	}
+
+	/// Whether a leg kneels: on a body that keeps to the floor, its knee rests on the floor
+	/// with the foot behind it.
+	fn kneels(&self, (hip, knee, ankle): (Pt, Pt, Pt)) -> bool {
+		self.body.floor
+			&& knee.y >= -self.body.knee_radius() - 0.5
+			&& (ankle.x - knee.x) * (knee.x - hip.x) < 0.0
 	}
 
 	fn arm(&self, posed: &Posed, side: f32) -> (Pt, Pt, Pt) {
@@ -861,7 +999,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	}
 
 	svg.begin(&solved.torso_transform());
-	draw_torso(svg, puppet, look, &inks, t);
+	draw_torso(svg, puppet, look, &inks, &solved);
 	svg.begin(&format!(
 		"translate({:.1} {:.1}) rotate({:.2}) translate(0 {:.1})",
 		body.neck.x, body.neck.y, posed.head_tilt, -body.head_above_neck
@@ -1000,6 +1138,30 @@ fn wrap(p: Pt, t: f32, radius: f32, turn: f32) -> Pt {
 	pt(radius * angle.clamp(-FRAC_PI_2, FRAC_PI_2).sin(), p.y)
 }
 
+/// A leg's skin outline through its hip, knee and ankle. A rubber-hose leg has no knee: it's
+/// one tube that bows as the foot comes closer. Otherwise it is one shape bent through the knee,
+/// so there's no seam at the joint: drawn with the body's anatomy if it has a leg profile, or
+/// tapering evenly from hip to ankle.
+fn leg_shape(puppet: &Authored, solved: &Solved, (hip, knee, ankle): (Pt, Pt, Pt)) -> Shape {
+	let (start, end) = solved.body.leg_width;
+
+	if puppet.style.motion.limbs == Joints::Hose {
+		Shape::taper(
+			&hose(hip, knee, ankle, solved.limbs.thigh + solved.limbs.shin),
+			start,
+			end,
+		)
+	} else if let Some(widths) = &solved.body.leg_profile {
+		Shape::limb(hip, knee, ankle, widths)
+	} else {
+		Shape::taper(
+			&[hip, hip.lerp(knee, 0.5), knee, knee.lerp(ankle, 0.5), ankle],
+			start,
+			end,
+		)
+	}
+}
+
 fn draw_leg(
 	svg: &mut Svg,
 	puppet: &Authored,
@@ -1014,24 +1176,8 @@ fn draw_leg(
 	let (hip, knee, ankle) = solved.leg(side);
 	let shin = solved.limbs.shin;
 
-	// The leg is one tapered shape bent through the knee, so there's no seam at the joint. A
-	// rubber-hose leg has no knee: it's one tube that bows as the foot comes closer.
-	let (start, end) = solved.body.leg_width;
-	let leg = if puppet.style.motion.limbs == Joints::Hose {
-		Shape::taper(
-			&hose(hip, knee, ankle, solved.limbs.thigh + shin),
-			start,
-			end,
-		)
-	} else {
-		Shape::taper(
-			&[hip, hip.lerp(knee, 0.5), knee, knee.lerp(ankle, 0.5), ankle],
-			start,
-			end,
-		)
-	};
 	svg.brushed_shaded(
-		&leg,
+		&leg_shape(puppet, solved, (hip, knee, ankle)),
 		far(inks.skin, is_far, inks.finish.far),
 		inks.finish.light,
 		inks.finish.cel_shadow,
@@ -1039,12 +1185,16 @@ fn draw_leg(
 		inks.finish.line,
 	);
 
-	// Socks, unless trousers come down over them.
+	// Socks, unless trousers come down over them. They fit the ankle they are drawn on.
 	let trouser = puppet.part("legwear-shin", t);
 
 	if trouser.is_none() {
 		let angle = begin_bone(svg, knee, ankle);
-		let sock = capsule(18.0, 15.5, 15.0).shift(pt(0.0, shin - 16.0));
+		let fit = solved
+			.body
+			.leg_profile
+			.map_or(1.0, |widths| widths[6] / 12.5);
+		let sock = capsule(18.0 * fit, 15.5 * fit, 15.0 * fit).shift(pt(0.0, shin - 16.0 * fit));
 		svg.brushed_shaded(
 			&sock,
 			far(inks.kit.sock, is_far, inks.finish.far),
@@ -1055,7 +1205,7 @@ fn draw_leg(
 		);
 		svg.begin_clip(&sock.path());
 		svg.fill(
-			&Path::rect(-12.0, shin - 14.0, 24.0, 4.5),
+			&Path::rect(-12.0 * fit, shin - 14.0 * fit, 24.0 * fit, 4.5 * fit),
 			far(inks.top, is_far, inks.finish.far),
 		);
 		svg.end();
@@ -1063,19 +1213,39 @@ fn draw_leg(
 		svg.end();
 	}
 
-	// The shoe stays level with the ground and tips its toe as the foot lifts in a stride.
-	let lift = (solved.limbs.ankle_y - ankle.y).max(0.0);
-	let toe = if posed.gait.is_some() {
-		-lift * 0.5
-	} else {
-		0.0
-	};
 	let three_quarter = t > 0.5;
 	let mirror = side < 0.0 && !three_quarter;
 
 	if let Some(shoe) = puppet.view("shoe", three_quarter) {
+		let scale = solved.body.foot_scale;
+		// The shoe stays level with the ground and tips its toe as the foot lifts in a stride.
+		// On a body that keeps to the floor, a foot lifted while standing points its toe down to
+		// it (on tiptoe, in a jump).
+		let lift = (solved.limbs.ankle_y - ankle.y).max(0.0);
+		let toe = if posed.gait.is_some() {
+			-lift * 0.5
+		} else if three_quarter && solved.kneels((hip, knee, ankle)) {
+			// Behind a knee on the floor, the foot lies along the floor carrying on the shin's
+			// line: toe back, sole up.
+			let shin = ankle - knee;
+			shin.y.atan2(shin.x).to_degrees()
+		} else if solved.body.floor {
+			// Turned, the far foot's ground is further up the page (see `Posed::of`).
+			let ground = solved.limbs.ankle_y + if side < 0.0 { 3.0 } else { -9.0 } * t;
+			let length = shoe.bounds().1.x.max(1.0) * scale;
+			let reach = ((ground - ankle.y) / length).clamp(0.0, 0.85);
+			reach.asin().to_degrees() * if mirror { -1.0 } else { 1.0 }
+		} else {
+			0.0
+		};
+		// Shoes drawn bigger grow from the sole, so they still stand on the ground.
+		let grow = if (scale - 1.0).abs() > f32::EPSILON {
+			format!(" translate(0 24) scale({scale:.3}) translate(0 -24)")
+		} else {
+			String::new()
+		};
 		svg.begin(&format!(
-			"translate({:.2} {:.2}) rotate({toe:.2}) scale({} 1)",
+			"translate({:.2} {:.2}) rotate({toe:.2}) scale({} 1){grow}",
 			ankle.x,
 			ankle.y,
 			if mirror { -1 } else { 1 }
@@ -1088,18 +1258,24 @@ fn draw_leg(
 		);
 		svg.cel_shade(&shoe, pt(-6.0, -5.0), inks.finish.cel_shadow);
 		svg.begin_clip(&shoe.path());
-		// The sole runs under the whole shoe, however big it is drawn.
-		let (lo, hi) = shoe.bounds();
-		let (heel, toe) = ((lo.x - 2.0).min(-30.0), (hi.x + 2.0).max(50.0));
-		svg.fill(
-			&Path::rect(heel, 17.0, toe - heel, 12.0),
-			far(inks.kit.sole, is_far, inks.finish.far),
-		);
-		svg.brush_line(
-			&Path::new().move_to(pt(heel, 17.0)).line_to(pt(toe, 17.0)),
-			ink,
-			inks.finish.detail,
-		);
+		if let Some(sole) = puppet.view("shoe-sole", three_quarter) {
+			// A drawn sole, trimmed to the shoe: only its top edge shows as a line.
+			svg.fill(&sole.path(), far(inks.kit.sole, is_far, inks.finish.far));
+			svg.brush_line(&sole.path(), ink, inks.finish.detail);
+		} else {
+			// The sole runs under the whole shoe, however big it is drawn.
+			let (lo, hi) = shoe.bounds();
+			let (heel, toe) = ((lo.x - 2.0).min(-30.0), (hi.x + 2.0).max(50.0));
+			svg.fill(
+				&Path::rect(heel, 17.0, toe - heel, 12.0),
+				far(inks.kit.sole, is_far, inks.finish.far),
+			);
+			svg.brush_line(
+				&Path::new().move_to(pt(heel, 17.0)).line_to(pt(toe, 17.0)),
+				ink,
+				inks.finish.detail,
+			);
+		}
 		svg.end();
 
 		if let Some(lace) = puppet.view("shoe-lace", three_quarter) {
@@ -1161,14 +1337,39 @@ fn draw_leg(
 	}
 }
 
-fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32) {
+fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, solved: &Solved) {
+	let t = solved.t;
 	let ink = inks.line;
 	let proportions = puppet.style.body(look.build);
 	let (neck_y, hem_y) = (proportions.neck.y, proportions.hem_y);
 	// Patterns are laid across a little more than the body, and clipped to it.
 	let half = proportions.body_radius * 1.25;
 	let body = |p: Pt| wrap(p, t, proportions.body_radius, inks.face.turn);
+	// A drawn neck sits under the top, which covers its base with the neckline.
+	let drawn_neck = puppet.part("neck", t);
+
+	if let Some(neck) = &drawn_neck {
+		svg.begin(&format!(
+			"translate({:.1} {:.1})",
+			proportions.neck.x, proportions.neck.y
+		));
+		svg.brushed_shaded(
+			neck,
+			inks.skin,
+			inks.finish.light,
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
+		svg.end();
+	}
+
 	let legwear = puppet.required("legwear", t);
+	let legwear = if proportions.floor && puppet.part("legwear-leg", t).is_none() {
+		legwear.map(|p| solved.skirt(p))
+	} else {
+		legwear
+	};
 	svg.brushed_shaded(
 		&legwear,
 		inks.bottom,
@@ -1280,16 +1481,18 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32
 
 	svg.brush_line(&path, ink, inks.finish.line * 1.1);
 
-	// The neck, then the collar over it.
-	let neck = capsule(30.0, 30.0, 30.0).shift(pt(lerp(0.0, 6.0, t), neck_y - 24.0));
-	svg.brushed_shaded(
-		&neck,
-		inks.skin,
-		inks.finish.light,
-		inks.finish.cel_shadow,
-		ink,
-		inks.finish.line,
-	);
+	// A plain tube of a neck, then the collar over it.
+	if drawn_neck.is_none() {
+		let neck = capsule(30.0, 30.0, 30.0).shift(pt(lerp(0.0, 6.0, t), neck_y - 24.0));
+		svg.brushed_shaded(
+			&neck,
+			inks.skin,
+			inks.finish.light,
+			inks.finish.cel_shadow,
+			ink,
+			inks.finish.line,
+		);
+	}
 
 	if let Some(collar) = puppet.part("collar", t) {
 		svg.brushed_shaded(
@@ -1406,17 +1609,33 @@ impl Arm<'_> {
 				inks.finish.line,
 			);
 		} else {
+			// A body with arm anatomy draws the whole bare arm, shoulder to wrist, as one shape
+			// bent through the elbow; the sleeves go over it. Otherwise only the forearm shows.
+			if let Some(widths) = &solved.body.arm_profile {
+				svg.brushed_shaded(
+					&Shape::limb(shoulder, elbow, wrist, widths),
+					far(arm_skin, is_far, inks.finish.far),
+					inks.finish.light,
+					inks.finish.cel_shadow,
+					ink,
+					inks.finish.line,
+				);
+			}
+
 			let angle = begin_bone(svg, elbow, wrist);
-			let (elbow_width, wrist_width) = solved.body.forearm_width;
-			let forearm = capsule(solved.limbs.forearm, elbow_width, wrist_width);
-			svg.brushed_shaded(
-				&forearm,
-				far(arm_skin, is_far, inks.finish.far),
-				inks.finish.light.rotate(-angle),
-				inks.finish.cel_shadow,
-				ink,
-				inks.finish.line,
-			);
+
+			if solved.body.arm_profile.is_none() {
+				let (elbow_width, wrist_width) = solved.body.forearm_width;
+				let forearm = capsule(solved.limbs.forearm, elbow_width, wrist_width);
+				svg.brushed_shaded(
+					&forearm,
+					far(arm_skin, is_far, inks.finish.far),
+					inks.finish.light.rotate(-angle),
+					inks.finish.cel_shadow,
+					ink,
+					inks.finish.line,
+				);
+			}
 
 			// A long sleeve carries on down the forearm.
 			if let Some(lower) = puppet.part("forearm-sleeve", t) {
@@ -2513,6 +2732,7 @@ mod tests {
 	use crate::art::figure::Frame;
 	use crate::art::figure::Pose;
 	use crate::art::parts::Turn;
+	use crate::art::rig::Stance;
 
 	fn cartoon() -> Arc<StylePack> {
 		StylePack::default_pack()
@@ -2778,6 +2998,214 @@ mod tests {
 		);
 		assert!(!behind(Pose::HoldNose));
 		assert!(!behind(Pose::ArmsCrossed));
+	}
+
+	/// Every stance, solved on `body`, three-quarters turned.
+	/// A slender body with long legs that keep to the floor, the way anime bodies are built.
+	fn long_legged() -> Proportions {
+		Proportions {
+			limbs: Limbs {
+				pelvis_y: -580.0,
+				hip_spread: 42.0,
+				thigh: 280.0,
+				shin: 280.0,
+				..kid().limbs
+			},
+			leg_profile: Some([74.0, 66.0, 50.0, 42.0, 50.0, 36.0, 26.0]),
+			knee_splay: 0.45,
+			floor: true,
+			..kid()
+		}
+	}
+
+	/// Only the legs matter here, so the figure is posed in the cartoon style.
+	fn stances(body: &Proportions) -> Vec<(Stance, Solved, Posed)> {
+		let style = cartoon();
+		let frame = Frame::authored(&style, Build::Kid);
+
+		Stance::ALL
+			.iter()
+			.map(|&(_, stance)| {
+				let mut state = FigureState::new(&frame);
+				state.facing = STAGED_FACING;
+				state.legs = body.limbs.stance(stance, STAGED_FACING);
+				let posed = Posed::of(&state, &style, Build::Kid);
+				(stance, Solved::new(&posed, body), posed)
+			})
+			.collect()
+	}
+
+	#[test]
+	fn without_construction_dials_limbs_are_drawn_as_they_always_were() {
+		let body = kid();
+		assert_eq!(
+			(body.leg_profile, body.arm_profile, body.floor),
+			(None, None, false)
+		);
+		assert!((body.foot_scale - 1.0).abs() < f32::EPSILON);
+		assert!((body.knee_splay - 1.0).abs() < f32::EPSILON);
+		let puppet = stinky().puppet.unwrap();
+
+		for (stance, solved, _) in stances(&body) {
+			for side in [-1.0, 1.0] {
+				let (hip, knee, ankle) = solved.leg(side);
+				let foot = if side < 0.0 {
+					solved.legs.feet.0
+				} else {
+					solved.legs.feet.1
+				};
+				let pole = pt(lerp(side, 1.2, solved.t), -0.25).norm();
+				let plain = rig::two_bone(hip, foot, body.limbs.thigh, body.limbs.shin, pole);
+				assert_eq!((knee, ankle), plain, "{stance:?}");
+				assert_eq!(
+					leg_shape(&puppet, &solved, (hip, knee, ankle)),
+					Shape::taper(
+						&[hip, hip.lerp(knee, 0.5), knee, knee.lerp(ankle, 0.5), ankle],
+						body.leg_width.0,
+						body.leg_width.1
+					),
+					"{stance:?}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_body_that_keeps_to_the_floor_kneels_on_it_instead_of_going_through() {
+		let body = long_legged();
+		let floor = -body.knee_radius();
+
+		for (stance, solved, _) in stances(&body) {
+			for side in [-1.0, 1.0] {
+				let (hip, knee, ankle) = solved.leg(side);
+				assert!(knee.y <= floor + 0.01, "{stance:?}: knee {knee:?}");
+				// Turned, the near foot stands a little down the page (see `Posed::of`).
+				assert!(
+					ankle.y <= body.limbs.ankle_y + 3.01,
+					"{stance:?}: ankle {ankle:?}"
+				);
+				assert!(
+					((knee - hip).len() - body.limbs.thigh).abs() < 0.5,
+					"{stance:?}"
+				);
+				assert!(
+					((ankle - knee).len() - body.limbs.shin).abs() < 0.5,
+					"{stance:?}"
+				);
+			}
+		}
+
+		// Sinking from a squat to the floor, over a foot planted just behind the hip, moves the
+		// knee smoothly, with no jump where it reaches the floor.
+		let base = Legs {
+			feet: (pt(-70.0, body.limbs.ankle_y), pt(70.0, body.limbs.ankle_y)),
+			crouch: 0.0,
+			bend: 0.0,
+		};
+		let mut last: Option<(Pt, Pt)> = None;
+
+		for step in 0..=60 {
+			let mut legs = base;
+			legs.crouch = lerp(0.5, 0.97, step as f32 / 60.0);
+			let posed = Posed {
+				legs,
+				..stances(&body)[0].2.clone()
+			};
+			let (_, knee, ankle) = Solved::new(&posed, &body).leg(-1.0);
+
+			if let Some((knee_before, ankle_before)) = last {
+				assert!((knee - knee_before).len() < 20.0, "step {step}");
+				assert!((ankle - ankle_before).len() < 20.0, "step {step}");
+			}
+
+			last = Some((knee, ankle));
+		}
+
+		assert!(
+			last.is_some_and(|(knee, _)| (knee.y - floor).abs() < 0.01),
+			"at the bottom the knee rests on the floor"
+		);
+	}
+
+	#[test]
+	fn a_kneeling_leg_is_one_whose_knee_rests_on_the_floor_with_the_foot_behind() {
+		let body = long_legged();
+		let solved = stances(&body);
+		let kneels = |stance: Stance| {
+			let (_, solved, _) = solved
+				.iter()
+				.find(|(s, ..)| *s == stance)
+				.unwrap_or_else(|| unreachable!("every stance is solved"));
+			[-1.0, 1.0].map(|side| solved.kneels(solved.leg(side)))
+		};
+
+		assert_eq!(kneels(Stance::Stand), [false, false]);
+		assert_eq!(kneels(Stance::Tiptoe), [false, false]);
+		assert!(kneels(Stance::Kneel).contains(&true), "a kneel kneels");
+
+		let plain = Solved::new(&stances(&kid())[4].2, &kid());
+		assert!(
+			!plain.kneels(plain.leg(-1.0)),
+			"a body off the floor never kneels"
+		);
+	}
+
+	#[test]
+	fn a_skirt_hangs_from_the_waist_and_never_goes_through_the_floor() {
+		let body = long_legged();
+		let waist = body.limbs.pelvis_y - 40.0;
+
+		for (stance, solved, _) in stances(&body) {
+			// Above the waist the top of the skirt rides with the body, untouched.
+			let band = pt(30.0, waist - 20.0);
+			assert_eq!(solved.skirt(band), band, "{stance:?}");
+
+			// The waist itself joins the hanging cloth without a seam.
+			let at_waist = solved.torso(solved.skirt(pt(-60.0, waist + 0.01)));
+			assert!(
+				(at_waist - solved.torso(pt(-60.0, waist))).len() < 0.5,
+				"{stance:?}: {at_waist:?}"
+			);
+
+			for x in [-120.0, 0.0, 120.0] {
+				let hem = solved.torso(solved.skirt(pt(x, waist + 190.0)));
+				assert!(hem.y <= -4.0 + 0.01, "{stance:?}: hem {hem:?}");
+			}
+		}
+
+		// Bowing, the cloth still falls from the waist: the hem hangs below it, not along the
+		// leaning spine.
+		let (_, bow, _) = stances(&body)
+			.into_iter()
+			.find(|(s, ..)| *s == Stance::Bow)
+			.unwrap_or_else(|| unreachable!("every stance is solved"));
+		let waist_mid = bow.torso(pt(0.0, waist));
+		let hem_mid = bow.torso(bow.skirt(pt(0.0, waist + 150.0)));
+		let leaning = bow.torso(pt(0.0, waist + 150.0));
+		assert!(
+			(hem_mid.x - waist_mid.x).abs() < (leaning.x - waist_mid.x).abs(),
+			"hangs {hem_mid:?} rather than leaning to {leaning:?}"
+		);
+	}
+
+	#[test]
+	fn front_on_knees_bend_towards_the_viewer() {
+		let body = long_legged();
+		let mut state = FigureState::new(&Frame::authored(&cartoon(), Build::Kid));
+		state.legs = body.limbs.stance(Stance::Crouch, 0.0);
+		let posed = Posed::of(&state, &cartoon(), Build::Kid);
+		let (hip, knee, ankle) = Solved::new(&posed, &body).leg(-1.0);
+		let splayed = Solved::new(
+			&posed,
+			&Proportions {
+				knee_splay: 1.0,
+				..body
+			},
+		)
+		.leg(-1.0)
+		.1;
+		let off = |knee: Pt| (knee - splay(hip, knee, ankle, 0.0)).len();
+		assert!((off(knee) - off(splayed) * body.knee_splay).abs() < 0.5);
 	}
 
 	#[test]
