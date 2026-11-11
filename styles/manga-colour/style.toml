@@ -105,8 +105,8 @@ hand-scale = 1.3
 reach = [120.0, 300.0]
 # Anatomy (see the readme): a full thigh narrowing to the knee, a calf that swells and narrows
 # to the ankle; a bare arm from shoulder to wrist under the sleeve.
-leg-profile = [100.0, 88.0, 66.0, 52.0, 66.0, 48.0, 32.0]
-arm-profile = [58.0, 50.0, 42.0, 38.0, 44.0, 36.0, 28.0]
+leg-profile = [110.0, 100.0, 82.0, 68.0, 78.0, 60.0, 38.0]
+arm-profile = [64.0, 58.0, 48.0, 40.0, 46.0, 37.0, 29.0]
 knee-splay = 0.45
 floor = true
 
@@ -133,8 +133,8 @@ leg-width = [92.0, 32.0]
 forearm-width = [44.0, 30.0]
 hand-scale = 1.55
 reach = [150.0, 420.0]
-leg-profile = [116.0, 104.0, 78.0, 66.0, 76.0, 56.0, 38.0]
-arm-profile = [72.0, 62.0, 52.0, 46.0, 54.0, 44.0, 34.0]
+leg-profile = [140.0, 126.0, 100.0, 82.0, 94.0, 70.0, 46.0]
+arm-profile = [84.0, 74.0, 62.0, 52.0, 60.0, 48.0, 38.0]
 foot-scale = 1.25
 knee-splay = 0.45
 floor = true
