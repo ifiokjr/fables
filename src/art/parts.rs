@@ -164,6 +164,9 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("torso", Space::Body).turning(),
 	part("torso-hem", Space::Body).optional(),
 	part("collar", Space::Body).turning().optional(),
+	// A drawn neck, flaring into the shoulders: the head's hinge (the body's `neck`) at the
+	// origin, running down +y under the top's neckline. Without it the neck is a plain tube.
+	part("neck", Space::Bone).turning().optional().kit(),
 	part("legwear", Space::Body).turning(),
 	part("legwear-waist", Space::Body).optional(),
 	part("sleeve", Space::Bone),
