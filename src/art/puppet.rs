@@ -807,6 +807,32 @@ impl Solved {
 		)
 	}
 
+	/// Where a skirt's point (in torso units) hangs: cloth below the waist falls from it under
+	/// gravity, whichever way the spine bends, and drapes forwards over thighs that lift towards
+	/// the lap. It never goes through the floor.
+	fn skirt(&self, rest: Pt) -> Pt {
+		let waist = self.limbs.pelvis_y - 40.0;
+		let depth = rest.y - waist;
+
+		if depth <= 0.0 {
+			return rest;
+		}
+
+		let hips = self.hip(-1.0).lerp(self.hip(1.0), 0.5);
+		let (_, near, _) = self.leg(-1.0);
+		let (_, far, _) = self.leg(1.0);
+		let thighs = (near.lerp(far, 0.5) - hips).norm();
+		let lap = pt(0.0, 1.0).lerp(thighs, 0.75).norm();
+		// Across the cloth: sideways when it hangs, thinning to a thigh's thickness on the lap.
+		let across = pt(lap.y, -lap.x) * lerp(1.0, 0.45, ((1.0 - lap.y) / 0.6).clamp(0.0, 1.0));
+		let centre = self.torso(pt(0.0, waist));
+		let seam = self.torso(pt(rest.x, waist)) - centre;
+		let below = (depth / (self.limbs.thigh * 0.3)).clamp(0.0, 1.0);
+		let hanging = centre + seam.lerp(across * rest.x, below) + lap * depth;
+		let world = pt(hanging.x, hanging.y.min(-4.0));
+		(world - self.pivot - pt(0.0, self.drop)).rotate(-self.legs.bend) + self.pivot
+	}
+
 	/// `side` is -1 for the near (page-left) limb and 1 for the far one.
 	fn hip(&self, side: f32) -> Pt {
 		let (near, far) = self.body.hips_turned;
@@ -874,6 +900,14 @@ impl Solved {
 		}
 
 		(knee, ankle)
+	}
+
+	/// Whether a leg kneels: on a body that keeps to the floor, its knee rests on the floor
+	/// with the foot behind it.
+	fn kneels(&self, (hip, knee, ankle): (Pt, Pt, Pt)) -> bool {
+		self.body.floor
+			&& knee.y >= -self.body.knee_radius() - 0.5
+			&& (ankle.x - knee.x) * (knee.x - hip.x) < 0.0
 	}
 
 	fn arm(&self, posed: &Posed, side: f32) -> (Pt, Pt, Pt) {
@@ -965,7 +999,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	}
 
 	svg.begin(&solved.torso_transform());
-	draw_torso(svg, puppet, look, &inks, t);
+	draw_torso(svg, puppet, look, &inks, &solved);
 	svg.begin(&format!(
 		"translate({:.1} {:.1}) rotate({:.2}) translate(0 {:.1})",
 		body.neck.x, body.neck.y, posed.head_tilt, -body.head_above_neck
@@ -1190,6 +1224,11 @@ fn draw_leg(
 		let lift = (solved.limbs.ankle_y - ankle.y).max(0.0);
 		let toe = if posed.gait.is_some() {
 			-lift * 0.5
+		} else if three_quarter && solved.kneels((hip, knee, ankle)) {
+			// Behind a knee on the floor, the foot lies along the floor carrying on the shin's
+			// line: toe back, sole up.
+			let shin = ankle - knee;
+			shin.y.atan2(shin.x).to_degrees()
 		} else if solved.body.floor {
 			// Turned, the far foot's ground is further up the page (see `Posed::of`).
 			let ground = solved.limbs.ankle_y + if side < 0.0 { 3.0 } else { -9.0 } * t;
@@ -1298,7 +1337,8 @@ fn draw_leg(
 	}
 }
 
-fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32) {
+fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, solved: &Solved) {
+	let t = solved.t;
 	let ink = inks.line;
 	let proportions = puppet.style.body(look.build);
 	let (neck_y, hem_y) = (proportions.neck.y, proportions.hem_y);
@@ -1325,6 +1365,11 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, t: f32
 	}
 
 	let legwear = puppet.required("legwear", t);
+	let legwear = if proportions.floor && puppet.part("legwear-leg", t).is_none() {
+		legwear.map(|p| solved.skirt(p))
+	} else {
+		legwear
+	};
 	svg.brushed_shaded(
 		&legwear,
 		inks.bottom,
