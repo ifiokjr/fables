@@ -300,7 +300,7 @@ pub fn draw_near(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 }
 
 /// Focus lines and impact bursts, aimed at the first person on stage (or the middle of it).
-fn draw_effects(svg: &mut Svg, weather: &Weather, puppets: &[Puppet]) {
+pub(crate) fn draw_effects(svg: &mut Svg, weather: &Weather, puppets: &[Puppet]) {
 	if weather.speed <= 0.0 && weather.impact <= 0.0 {
 		return;
 	}
@@ -419,7 +419,7 @@ fn draw_shadow(svg: &mut Svg, puppet: &Puppet) {
 
 /// Breath clouds and mist come out of open mouths; closed mouths still give themselves away
 /// with flies (stinky) or glints (minty).
-fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
+pub(crate) fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
 	if puppet.opacity < 0.5 {
 		return;
 	}
