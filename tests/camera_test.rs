@@ -9,10 +9,17 @@ use fables::press;
 use fables::stage;
 use fables::story::Story;
 use fables::video;
+use fables::video::frames::Format;
+use fables::video::frames::Renderer;
+use fables::video::timeline::Framing;
+use fables::video::timeline::ShotKind;
 use fables::video::voice::SAMPLE_RATE;
 use fables::video::voice::Speech;
 use fables::video::voice::Utterance;
 use fables::world::World;
+
+/// The director's minimum setup length, for assertions in this file.
+const MIN_SETUP: f32 = 1.2;
 
 /// The storyboard's offline speaker: about 2.6 words a second.
 fn estimated(story: &Story, cast: &Cast) -> video::timeline::Timeline {
@@ -41,6 +48,94 @@ fn camera_test() -> (Story, Cast) {
 	let cast = world.cast().unwrap();
 
 	(story, cast)
+}
+
+#[test]
+fn depth_of_field_softens_the_backdrop_without_black_holes() {
+	let (story, cast) = camera_test();
+	let timeline = estimated(&story, &cast);
+
+	// Page 3 cuts to an extreme close-up: its setting arrives softened, from the cache.
+	let page = timeline
+		.shots
+		.iter()
+		.find(|shot| shot.kind == ShotKind::Page(2))
+		.expect("page 3 is in the video");
+	let setups = page.setups_for(false);
+	let index = setups
+		.iter()
+		.position(|setup| {
+			matches!(&setup.framing, Framing::Shot { size, .. } if *size == stage::ShotSize::ExtremeClose)
+		})
+		.expect("page 3 holds an extreme close-up");
+	let at = setups[index].time + 0.5;
+
+	let mut sharp_story = camera_test().0;
+	sharp_story.meta.video.depth_of_field = false;
+	let sharp_timeline = estimated(&sharp_story, &cast);
+
+	let frame = 4;
+	let soft = Renderer::new(&timeline, &story, Format::Landscape, 960, 540)
+		.render(at, frame)
+		.unwrap();
+	let crisp = Renderer::new(&sharp_timeline, &sharp_story, Format::Landscape, 960, 540)
+		.render(at, frame)
+		.unwrap();
+
+	let soft_pixels = soft.data().as_chunks::<4>().0;
+	let crisp_pixels = crisp.data().as_chunks::<4>().0;
+	assert_eq!(soft_pixels.len(), crisp_pixels.len());
+
+	// Wherever the sharp frame shows something that is not black, the softened frame must
+	// show it too: a blurred layer cached without alpha would sit there as pure black.
+	let mut differing = 0;
+
+	for (soft, crisp) in soft_pixels.iter().zip(crisp_pixels) {
+		let blackened = soft[..3].iter().all(|channel| *channel <= 2);
+		let visible = crisp[..3].iter().any(|channel| *channel > 8);
+
+		assert!(
+			!(blackened && visible),
+			"a pixel that is {crisp:?} in the sharp frame is black in the depth-of-field frame"
+		);
+
+		if soft[..3] != crisp[..3] {
+			differing += 1;
+		}
+	}
+
+	assert!(
+		differing * 20 > soft.width() * soft.height(),
+		"the backdrop is genuinely softened: only {differing} of {} pixels differ",
+		soft.width() * soft.height()
+	);
+}
+
+#[test]
+fn no_setup_runs_shorter_than_the_minimum() {
+	let (story, cast) = camera_test();
+	let timeline = estimated(&story, &cast);
+
+	for portrait in [false, true] {
+		for shot in &timeline.shots {
+			let setups = shot.setups_for(portrait);
+			let page = shot
+				.kind
+				.page()
+				.map_or("title/end".to_owned(), |p| (p + 1).to_string());
+
+			for (index, setup) in setups.iter().enumerate() {
+				let end = setups.get(index + 1).map_or(shot.end, |next| next.time);
+
+				assert!(
+					end - setup.time >= MIN_SETUP - 1e-3,
+					"page {page} (portrait {portrait}) setup {index} holds only {:.2}s: {:?}",
+					end - setup.time,
+					setups.iter().map(|s| &s.framing).collect::<Vec<_>>()
+				);
+			}
+		}
+	}
 }
 
 #[test]
@@ -116,6 +211,32 @@ fn the_board_shows_different_shots_with_labels() {
 			.count(),
 		"portrait favours close shots: landscape {sizes:?} vs portrait {portrait_sizes:?}"
 	);
+
+	// Every hold states its seconds and is at least the minimum, unless the board marks it
+	// `· short` — a hold only a script-written cut could leave behind.
+	for panel in landscape.iter().chain(portrait.iter()) {
+		let stated = panel.label.split(" · ").nth(2).unwrap_or("");
+		let seconds = stated.strip_suffix('s').unwrap_or_default();
+
+		if panel.label.ends_with(" · short") {
+			let hold: f32 = seconds.parse().unwrap_or(0.0);
+			assert!(
+				hold < MIN_SETUP,
+				"only a short hold is marked: {}",
+				panel.label
+			);
+			continue;
+		}
+
+		let hold: f32 = seconds
+			.parse()
+			.unwrap_or_else(|_| panic!("{} states its hold", panel.label));
+		assert!(
+			hold >= MIN_SETUP,
+			"{} holds only {hold:.1}s, under the minimum",
+			panel.label
+		);
+	}
 }
 
 #[test]
