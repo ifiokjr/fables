@@ -16,6 +16,7 @@ use crate::art::Path;
 use crate::art::Pt;
 use crate::art::STAGE;
 use crate::art::Svg;
+use crate::art::fx;
 use crate::art::lerp;
 use crate::art::noise;
 use crate::art::palette;
@@ -24,6 +25,7 @@ use crate::art::rig::Gait;
 use crate::art::seed_of;
 use crate::art::settings;
 use crate::art::settings::Layer;
+use crate::cast::Kind;
 use crate::compose;
 use crate::compose::Body;
 use crate::compose::Puppet;
@@ -164,9 +166,23 @@ pub struct Renderer<'a> {
 	pub format: Format,
 	pub width: u32,
 	pub height: u32,
+	/// Blurred backdrop images, one per setting, depth layer and weather, built once and
+	/// reused for every frame of a depth-of-field shot.
+	blur_cache: std::sync::Mutex<std::collections::HashMap<u64, String>>,
 }
 
-impl Renderer<'_> {
+impl<'a> Renderer<'a> {
+	pub fn new(timeline: &'a Timeline, story: &'a Story, format: Format, width: u32, height: u32) -> Self {
+		Self {
+			timeline,
+			story,
+			format,
+			width,
+			height,
+			blur_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+		}
+	}
+
 	/// Renders the frame at `time` seconds. `frame` drives line boil and grain.
 	pub fn render(&self, time: f32, frame: u64) -> Result<Pixmap> {
 		let mut pixmap = raster::render(&self.svg(time, frame)?)?;
@@ -216,44 +232,50 @@ impl Renderer<'_> {
 		let blur = self.depth_of_field(setups, time);
 
 		svg.fill(&Path::rect(0.0, 0.0, w, h), palette::PAPER);
-		svg.begin(&format!(
-			"scale({far_scale:.5}) translate({:.2} {:.2})",
-			-(far.centre.x - far_w / 2.0),
-			-(far.centre.y - far.height / 2.0)
-		));
-		if let Some((far, _)) = blur {
-			open_blur(&mut svg, far);
+
+		if let Some((far_dev, _)) = blur {
+			// The sky softens most, and travels with the parallax view.
+			let far_image = self.blurred_backdrop(&scene, Layer::Far, far_dev)?;
+			svg.begin(&format!(
+				"scale({far_scale:.5}) translate({:.2} {:.2})",
+				-(far.centre.x - far_w / 2.0),
+				-(far.centre.y - far.height / 2.0)
+			));
+			svg.raw(&backdrop_image(&far_image));
+			svg.end();
+		} else {
+			svg.begin(&format!(
+				"scale({far_scale:.5}) translate({:.2} {:.2})",
+				-(far.centre.x - far_w / 2.0),
+				-(far.centre.y - far.height / 2.0)
+			));
+			svg.begin_layer();
+			settings::backdrop_layer(&mut svg, &scene.setting, &weather, Layer::Far);
+			svg.end();
+			svg.end();
 		}
-		svg.begin_layer();
-		settings::backdrop_layer(&mut svg, &scene.setting, &weather, Layer::Far);
-		svg.end();
-		if blur.is_some() {
-			close_blur(&mut svg);
-		}
-		svg.end();
 
 		svg.begin(&format!(
 			"scale({scale:.5}) translate({:.2} {:.2})",
 			-(view.centre.x - view_w / 2.0),
 			-(view.centre.y - view.height / 2.0)
 		));
-		if let Some((_, near)) = blur {
-			open_blur(&mut svg, near);
-		}
-		svg.begin_layer();
-		compose::draw_near(&mut svg, &scene, &puppets, time);
-		svg.end();
-		if blur.is_some() {
-			// The blurred near layer drew everyone too; draw the actors again, sharp, and the
-			// front parts of the setting over them.
-			close_blur(&mut svg);
-			svg.begin_layer();
-			for puppet in &puppets {
-				compose::draw_puppet(&mut svg, puppet);
+
+		match &blur {
+			Some((_, near)) => {
+				// The setting just behind the actors softens a little, from a cached image,
+				// and everything alive over it stays sharp.
+				let near_image = self.blurred_backdrop(&scene, Layer::Near, *near)?;
+				svg.raw(&backdrop_image(&near_image));
+				scene_front(&mut svg, &scene, &puppets, time);
 			}
-			settings::foreground(&mut svg, &scene.setting, &weather);
-			svg.end();
+			None => {
+				svg.begin_layer();
+				compose::draw_near(&mut svg, &scene, &puppets, time);
+				svg.end();
+			}
 		}
+
 		svg.end();
 
 		if sliding {
@@ -589,14 +611,14 @@ impl Renderer<'_> {
 
 	/// Which puppets a shot frames: those named by `on`, else everyone on stage — the current
 	/// speaker for a close shot, or the star.
-	fn subjects<'a>(
+	fn subjects<'p>(
 		&self,
 		on: &[String],
 		size: ShotSize,
 		shot: &Shot,
 		time: f32,
-		puppets: &'a [Puppet],
-	) -> Vec<&'a Puppet> {
+		puppets: &'p [Puppet],
+	) -> Vec<&'p Puppet> {
 		if !on.is_empty() {
 			return puppets
 				.iter()
@@ -663,6 +685,69 @@ impl Renderer<'_> {
 			} => Some(EXTREME_BLUR),
 			_ => None,
 		}
+	}
+
+	/// A depth layer of the setting, drawn once, blurred, and remembered as an image the frame
+	/// can place under the camera. Blurring this way costs one small raster per setting and
+	/// weather instead of a filter on every frame.
+	fn blurred_backdrop(&self, scene: &Scene, layer: Layer, deviation: f32) -> Result<String> {
+		let weather = &scene.weather;
+		let key = seed_of(&format!(
+			"{:?}|{:?}|{layer:?}|{deviation}|{}|{:.2}|{:.2}|{:.2}|{:?}",
+			self.story.style().name,
+			scene.setting,
+			weather.night,
+			weather.wilt,
+			weather.stink,
+			weather.mint,
+			weather.tint,
+		));
+
+		{
+			let cache = self
+				.blur_cache
+				.lock()
+				.map_err(|_| anyhow::anyhow!("the blur cache is poisoned"))?;
+
+			if let Some(cached) = cache.get(&key) {
+				return Ok(cached.clone());
+			}
+		}
+
+		// The drawn stage at a quarter resolution: plenty for a softened backdrop. The blur's
+		// deviation is in stage units, so it softens as much on screen as a filter would.
+		let span = STAGE + director::OVERDRAW * 2.0;
+		let size = (span / 4.0) as u32;
+		let mut svg = Svg::styled(self.story.style());
+		let id = svg.next_id("dof");
+		svg.define(&format!(
+			r#"<filter id="{id}" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="{deviation:.2}"/></filter>"#
+		));
+		svg.raw(&format!(r#"<g filter="url(#{id})">"#));
+		svg.begin_layer();
+		settings::backdrop_layer(&mut svg, &scene.setting, weather, layer);
+		svg.end();
+		svg.raw("</g>");
+
+		let document = svg.finish(
+			(
+				-director::OVERDRAW,
+				-director::OVERDRAW,
+				span,
+				span,
+			),
+			size,
+			size,
+		);
+		let pixmap = raster::render(&document)?;
+		let encoded = BASE64.encode(raster::jpeg(&pixmap, 82)?);
+
+		self.blur_cache
+			.lock()
+			.map_err(|_| anyhow::anyhow!("the blur cache is poisoned"))?
+			.insert(key, encoded.clone());
+
+		Ok(encoded)
 	}
 
 	/// Where the camera wants to be once everything settles after `time` (the automatic framing).
@@ -976,13 +1061,13 @@ impl Renderer<'_> {
 			.and_then(|index| index.checked_sub(1))
 			.and_then(|index| self.timeline.shots.get(index))
 			.with_context(|| "a transition needs a page before this one")?;
-		let renderer = Renderer {
-			timeline: self.timeline,
-			story: self.story,
-			format: self.format,
-			width: self.width,
-			height: self.height,
-		};
+		let renderer = Renderer::new(
+			self.timeline,
+			self.story,
+			self.format,
+			self.width,
+			self.height,
+		);
 		let previous = renderer.svg(index.end - 0.01, 0)?;
 		let pixmap = raster::render(&previous)?;
 		let data = BASE64.encode(raster::jpeg(&pixmap, 82)?);
@@ -996,20 +1081,108 @@ impl Renderer<'_> {
 	}
 }
 
-/// Opens a Gaussian-blur group; pair with [`close_blur`]. The `feGaussianBlur` runs in stage
-/// units, so the softening grows as the camera closes in.
-fn open_blur(svg: &mut Svg, deviation: f32) {
-	let id = svg.next_id("dof");
-	svg.define(&format!(
-		r#"<filter id="{id}" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="{deviation:.1}"/></filter>"#
-	));
-	svg.begin_opacity(1.0);
-	svg.raw(&format!(r#"<g filter="url(#{id})">"#));
+/// An `<image>` of a pre-softened backdrop layer, spanning the drawn stage.
+fn backdrop_image(data: &str) -> String {
+	format!(
+		r#"<image x="-{OVER}" y="-{OVER}" width="{span}" height="{span}" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,{data}"/>"#,
+		span = director::OVERDRAW * 2.0 + STAGE,
+		OVER = director::OVERDRAW
+	)
 }
 
-fn close_blur(svg: &mut Svg) {
-	svg.raw("</g>");
-	svg.end();
+/// The scene's living parts over a softened backdrop: effects, actors, breath, and the front
+/// parts of the setting — what [`compose::draw_near`] draws after its backdrop layer. Mirrors
+/// that order so depth-of-field frames stage the scene exactly as sharp ones do.
+fn scene_front(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
+	let mut weather = scene.weather;
+	weather.time = time;
+
+	draw_effects(svg, &weather, puppets);
+
+	for puppet in puppets {
+		compose::draw_puppet(svg, puppet);
+	}
+
+	for puppet in puppets {
+		draw_breath(svg, puppet, time);
+	}
+
+	settings::foreground(svg, &scene.setting, &weather);
+}
+
+/// Focus lines and impact bursts, aimed at the first person on stage (as compose draws them).
+fn draw_effects(svg: &mut Svg, weather: &settings::Weather, puppets: &[Puppet]) {
+	if weather.speed <= 0.0 && weather.impact <= 0.0 {
+		return;
+	}
+
+	let focus = puppets
+		.iter()
+		.find_map(|puppet| match &puppet.kind {
+			Kind::Figure(look) => {
+				Some(puppet.at - pt(0.0, look.frame().height() * puppet.scale * 0.6))
+			}
+			_ => None,
+		})
+		.unwrap_or(pt(STAGE / 2.0, STAGE * 0.45));
+	fx::impact_burst(svg, focus, STAGE * 0.42, weather.impact, 41);
+	fx::focus_lines(svg, focus, STAGE, weather.speed, 17, weather.time);
+}
+
+/// Breath clouds and the flies and glints that give stink and mint away (as compose draws them).
+fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
+	if puppet.opacity < 0.5 {
+		return;
+	}
+
+	let seed = seed_of(&puppet.id);
+	let open = puppet.breath;
+	let (head, radius) = puppet.head();
+
+	if puppet.stink > 0.01 {
+		if let Some(mouth) = puppet.mouth() {
+			fx::stink_cloud(
+				svg,
+				mouth,
+				puppet.heading,
+				puppet.stink * open * puppet.scale * 0.8,
+				time,
+				seed,
+			);
+		}
+
+		for i in 0..(puppet.stink * 3.0).round() as usize {
+			let angle = time * (2.2 + i as f32 * 0.6) + i as f32 * 2.1;
+			// The orbit stays outside the head so a fly never lands on a face.
+			let p = head + pt(angle.cos() * radius * 1.6, angle.sin() * radius * 1.35);
+			fx::fly(svg, p, 9.0 * puppet.scale, time + i as f32);
+		}
+	}
+
+	if puppet.mint > 0.01 {
+		if let Some(mouth) = puppet.mouth() {
+			fx::mint_mist(
+				svg,
+				mouth,
+				puppet.heading,
+				puppet.mint * open * puppet.scale * 0.8,
+				time,
+				seed,
+			);
+		}
+
+		for i in 0..3 {
+			let angle = time * 0.9 + i as f32 * 2.1;
+			let p = head + pt(angle.cos() * radius * 1.7, angle.sin() * radius * 1.45);
+			fx::sparkle(
+				svg,
+				p,
+				22.0 * puppet.scale * puppet.mint.min(1.0),
+				palette::WHITE,
+				time + i as f32,
+			);
+		}
+	}
 }
 
 /// A paper sheet from `x0` to `x1`, with a wobbly leading edge.
@@ -1306,8 +1479,7 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn captions_split_on_phrases_and_keep_markup_balanced() {
-		let chunks = chunk(
+	fn captions_split_on_phrases_and_keep_markup_balanced() {		let chunks = chunk(
 			"\"**YOUR BREATH SMELLS LIKE A SNOWY MOUNTAIN!**\" shouted Shouty McShoutface.",
 			26,
 		);
@@ -1386,5 +1558,93 @@ mod tests {
 		assert!((ease_out_bounce(1.0) - 1.0).abs() < 1e-5);
 		assert!(ease_out_back(0.0).abs() < 1e-5);
 		assert!(ease_out_back(0.6) > 1.0, "back easing overshoots");
+	}
+
+	/// A page held in close-up, for timing depth of field.
+	fn close_up_timeline(depth: bool) -> (Story, Timeline) {
+		use crate::cast::Cast;
+		use crate::stage::rehearse;
+		use crate::story;
+		use crate::video::lipsync::Track;
+		use crate::video::timeline;
+		use crate::video::voice::Speech;
+		use crate::video::voice::SAMPLE_RATE;
+		use crate::video::voice::Utterance;
+
+		let mut story = story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# town shot=close\n@kid \
+			 x=0.5\nOne two three four five six seven eight nine ten.\n",
+		)
+		.unwrap();
+		story.meta.video.depth_of_field = depth;
+		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
+		let rehearsals = rehearse(&story, &cast).unwrap();
+		let tl = timeline::build(&story, &cast, &rehearsals, |line: &Utterance<'_>| {
+			let seconds = line.text.split_whitespace().count() as f32 * 0.35;
+			Ok(Speech {
+				text: String::new(),
+				samples: vec![0.0; (seconds * SAMPLE_RATE as f32) as usize],
+				envelope: Vec::new(),
+				track: Track::default(),
+			})
+		})
+		.unwrap();
+
+		(story, tl)
+	}
+
+	#[test]
+	fn depth_of_field_costs_less_than_twice_a_sharp_frame() -> Result<()> {
+		let mut seconds = Vec::new();
+
+		for depth in [false, true] {
+			let (story, timeline) = close_up_timeline(depth);
+			let renderer = Renderer::new(&timeline, &story, Format::Landscape, 960, 540);
+			// The close-up holds for most of the page; sample the middle of it, after a warm-up
+			// frame has built the blur cache the way a real shot would.
+			let page = timeline.shots.last().unwrap();
+			let start = page.start + 1.0;
+			drop(renderer.render(start, 0)?);
+			let started = std::time::Instant::now();
+
+			for step in 0..10 {
+				drop(renderer.render(start + step as f32 * 0.1, step)?);
+			}
+
+			seconds.push(started.elapsed().as_secs_f32() * 1000.0 / 10.0);
+		}
+
+		let (sharp, blurred) = (seconds[0], seconds[1]);
+		eprintln!(
+			"preview frames at 960x540: sharp {sharp:.1} ms, blurred {blurred:.1} ms per frame"
+		);
+		assert!(
+			blurred < sharp * 2.0 + 3.0,
+			"a blurred frame costs {blurred:.1} ms against {sharp:.1} ms sharp: lower the cost"
+		);
+
+		Ok(())
+	}
+
+	#[test]
+	fn a_close_shot_renders_head_and_shoulders_clear_of_the_captions() -> Result<()> {
+		let (story, timeline) = close_up_timeline(true);
+		let renderer = Renderer::new(&timeline, &story, Format::Landscape, 960, 540);
+
+		// The page's heading shot=close is the opening setup, so a mid-page frame is a
+		// close-up: its backdrop comes in softened, and the second frame reuses the raster.
+		let page = timeline.shots.last().unwrap();
+		let svg = renderer.svg(page.start + 1.0, 4)?;
+		assert!(svg.contains("viewBox"), "a rendered frame is an SVG document");
+		assert!(
+			svg.matches("data:image/jpeg;base64,").count() == 2,
+			"both backdrop layers arrive as pre-softened images"
+		);
+		assert!(
+			!svg.contains("feGaussianBlur"),
+			"no per-frame filter: the blur is baked into the cached rasters"
+		);
+
+		Ok(())
 	}
 }

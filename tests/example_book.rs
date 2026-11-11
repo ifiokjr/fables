@@ -146,13 +146,7 @@ fn the_video_fits_a_short_and_every_shot_renders() {
 
 	for format in [Format::Landscape, Format::Portrait] {
 		let (width, height) = format.size(true);
-		let renderer = Renderer {
-			timeline: &timeline,
-			story: &story,
-			format,
-			width: width / 4,
-			height: height / 4,
-		};
+		let renderer = Renderer::new(&timeline, &story, format, width / 4, height / 4);
 
 		for shot in &timeline.shots {
 			let middle = shot.start + shot.duration() / 2.0;

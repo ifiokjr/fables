@@ -107,13 +107,7 @@ fn encode(
 ) -> Result<()> {
 	let fps: u32 = if options.preview { 15 } else { 30 };
 	let (width, height) = format.size(options.preview);
-	let renderer = Renderer {
-		timeline,
-		story,
-		format,
-		width,
-		height,
-	};
+	let renderer = Renderer::new(timeline, story, format, width, height);
 	let frames = (timeline.duration * fps as f32).ceil() as usize;
 	let clip = Clip {
 		width,
@@ -279,13 +273,7 @@ fn write_covers(story: &Story, timeline: &Timeline, dir: &Path) -> Result<()> {
 		(Format::Landscape, 1280, 720, "thumbnail"),
 		(Format::Portrait, 1080, 1920, "cover-9x16"),
 	] {
-		let renderer = Renderer {
-			timeline,
-			story,
-			format,
-			width,
-			height,
-		};
+		let renderer = Renderer::new(timeline, story, format, width, height);
 		let path = dir.join(format!("{}-{name}.jpg", story.slug));
 		let pixmap = renderer.render(moment, 0)?;
 		std::fs::write(&path, crate::raster::jpeg(&pixmap, 90)?)

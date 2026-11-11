@@ -578,7 +578,7 @@ fn other_of(shot: &Shot, speaker: &str, at: f32) -> Option<String> {
 	shot.scene_at(at)
 		.actors
 		.iter()
-		.filter(|actor| actor.id != speaker && !actor.hidden && actor.kind.is_figure())
+		.filter(|actor| actor.id != speaker && !actor.hidden)
 		.map(|actor| actor.id.clone())
 		.next()
 }
@@ -1158,3 +1158,4 @@ mod tests {
 		assert!((tilted.centre.y - (view.centre.y - view.height * TILT)).abs() < 1e-3);
 	}
 }
+

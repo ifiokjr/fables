@@ -144,6 +144,15 @@ enum Command {
 		#[arg(long)]
 		preview: bool,
 	},
+	/// Draw the video's camera plan as a comic strip: one labelled panel per camera setup.
+	Storyboard {
+		story: PathBuf,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+		/// Which shape's camera plan to draw.
+		#[arg(long, value_enum, default_value = "landscape")]
+		format: Shape,
+	},
 	/// Build the book and both videos.
 	All {
 		story: PathBuf,
@@ -213,7 +222,7 @@ enum StyleAction {
 }
 
 /// Video shapes.
-#[derive(Clone, Copy, clap::ValueEnum)]
+#[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
 enum Shape {
 	/// 16:9 for `YouTube`.
 	Landscape,
@@ -372,6 +381,20 @@ fn run(cli: Cli) -> Result<()> {
 		} => {
 			each_style(&story, &choices, flag, |story, cast| {
 				video(story, cast, &out, &format.formats(), preview)
+			})
+		}
+		Command::Storyboard {
+			story,
+			out,
+			format,
+		} => {
+			anyhow::ensure!(
+				format != Shape::Both,
+				"storyboard draws one shape; use --format landscape or portrait"
+			);
+
+			each_style(&story, &choices, flag, |story, cast| {
+				storyboard(story, cast, &out, format == Shape::Portrait)
 			})
 		}
 		Command::All { story, out } => {
@@ -888,6 +911,16 @@ fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bo
 	let started = Instant::now();
 
 	for path in publish::video(story, cast, out, formats, preview)? {
+		done(&path, started);
+	}
+
+	Ok(())
+}
+
+fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
+	let started = Instant::now();
+
+	for path in publish::storyboard(story, cast, out, portrait)? {
 		done(&path, started);
 	}
 
