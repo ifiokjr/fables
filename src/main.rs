@@ -634,6 +634,33 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	)?;
 	done(&path, started);
 
+	// One setting with one cast member, drawn under every light: the world's colour script.
+	let settings = world.settings()?;
+	let built_in = [
+		"plain", "town", "street", "garden", "park", "bathroom", "bedroom",
+	];
+	let own = settings
+		.names()
+		.find(|name| !built_in.contains(name))
+		.unwrap_or("park");
+	let setting = settings.find(own)?;
+	let member = cast
+		.members
+		.values()
+		.find(|member| member.kind.is_figure())
+		.with_context(|| format!("{} has nobody to stand in the light", world.name))?;
+	let path = out.join(format!("{slug}-lights.png"));
+	std::fs::write(
+		&path,
+		raster::png(&press::sheets::lights_sheet(
+			&world.name,
+			&setting,
+			member,
+			style,
+		)?)?,
+	)?;
+	done(&path, started);
+
 	if let Some(id) = moods {
 		let member = cast
 			.member(id)

@@ -372,7 +372,9 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 	}
 }
 
-/// A soft shadow where a puppet meets the ground, so nobody floats.
+/// A shadow where a puppet meets the ground, so nobody floats. Under a scene light it becomes
+/// a cast shadow: it leans away from the key light, lengthens as the elevation drops and fades
+/// when the light is faint (a soft pool under overcast, barely there at night).
 fn draw_shadow(svg: &mut Svg, puppet: &Puppet) {
 	let airborne = matches!(&puppet.body, Body::Critter(state) if state.lively > 0.5)
 		&& matches!(puppet.kind, Kind::Bird(_));
@@ -385,6 +387,18 @@ fn draw_shadow(svg: &mut Svg, puppet: &Puppet) {
 		"translate({:.1} {:.1}) scale({:.3})",
 		puppet.at.x, puppet.at.y, puppet.scale
 	));
+
+	// The scene light leans and stretches the pool; flat daylight draws exactly the old
+	// contact shadow.
+	let cast = svg.light.map(|light| {
+		let (dx, stretch) = light.cast();
+		(dx, stretch, light.ground_shadow)
+	});
+
+	if let Some((dx, stretch, alpha)) = cast {
+		svg.begin(&format!("translate({dx:.1} 0) scale({stretch:.3} 1)"));
+		svg.begin_opacity(alpha);
+	}
 
 	match (&puppet.kind, &puppet.body) {
 		(Kind::Figure(look), Body::Figure(state)) => {
@@ -412,6 +426,11 @@ fn draw_shadow(svg: &mut Svg, puppet: &Puppet) {
 			);
 		}
 		_ => {}
+	}
+
+	if cast.is_some() {
+		svg.end();
+		svg.end();
 	}
 
 	svg.end();
@@ -471,5 +490,54 @@ fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
 				time + i as f32,
 			);
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::art::figure::Build;
+	use crate::art::light::Light;
+	use crate::art::light::Preset;
+	use crate::art::pack::StylePack;
+
+	/// A standing kid at the middle of the stage.
+	fn kid() -> Puppet {
+		let look = crate::cast::template_look(&StylePack::default_pack(), Build::Kid).unwrap();
+		let state = FigureState::new(&look.frame());
+		Puppet {
+			id: "kid".into(),
+			kind: Kind::Figure(look),
+			at: pt(1200.0, 2060.0),
+			scale: 2.25,
+			z: 0,
+			opacity: 1.0,
+			body: Body::Figure(state),
+			stink: 0.0,
+			mint: 0.0,
+			heading: 1.0,
+			breath: 0.0,
+			lift: 0.0,
+			smear: 0.0,
+		}
+	}
+
+	#[test]
+	fn a_scene_light_turns_the_ground_shadow_into_a_cast_shadow() {
+		let golden = Light::of(Preset::Golden);
+		let (dx, stretch) = golden.cast();
+		let lean = format!("translate({dx:.1} 0) scale({stretch:.3} 1)");
+
+		let mut svg = Svg::new();
+		svg.set_light(golden);
+		draw_puppet(&mut svg, &kid());
+		let lit = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
+		assert!(lit.contains(&lean), "the shadow leans from the key: {lit}");
+
+		// Flat daylight keeps the plain contact shadow: no lean group at all.
+		let mut svg = Svg::new();
+		draw_puppet(&mut svg, &kid());
+		let day = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
+		assert!(!day.contains(&lean), "no cast lean in daylight: {day}");
 	}
 }

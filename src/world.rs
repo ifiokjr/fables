@@ -23,6 +23,8 @@ use anyhow::Result;
 use anyhow::bail;
 use serde::Deserialize;
 
+use crate::art::light::Light;
+use crate::art::light::Preset;
 use crate::art::pack;
 use crate::art::pack::StylePack;
 use crate::art::settings::Library;
@@ -46,6 +48,9 @@ pub struct World {
 	pub about: Option<String>,
 	/// Who reads the books aloud, unless a script names its own `[voice]`.
 	pub narrator: Option<Voice>,
+	/// The light the world's books start in, unless a book names its own (`world.toml`:
+	/// `light = "golden"`).
+	pub light: Option<Light>,
 	pub matter: Matter,
 }
 
@@ -80,6 +85,8 @@ struct Entry {
 	#[serde(default)]
 	about: Option<String>,
 	#[serde(default)]
+	light: Option<String>,
+	#[serde(default)]
 	narrator: Option<Voice>,
 	#[serde(default)]
 	book: Matter,
@@ -112,11 +119,26 @@ impl World {
 		StylePack::named(&entry.style)
 			.with_context(|| format!("the style in {}", path.display()))?;
 
+		let light = entry
+			.light
+			.as_deref()
+			.map(|name| {
+				Light::parse(name).ok_or_else(|| {
+					anyhow::anyhow!(
+						"unknown light `{name}` in {}; try {}",
+						path.display(),
+						Preset::names()
+					)
+				})
+			})
+			.transpose()?;
+
 		Ok(World {
 			dir: dir.to_path_buf(),
 			name: entry.name,
 			style: entry.style,
 			about: entry.about,
+			light,
 			narrator: entry.narrator,
 			matter: entry.book,
 		})
@@ -225,6 +247,13 @@ impl World {
 			motion: style.motion,
 		};
 
+		// The world's default light applies unless the book named its own.
+		if let Some(light) = &self.light
+			&& story.light.is_day()
+		{
+			story.light = *light;
+		}
+
 		if story.meta.voice.is_none() {
 			story.meta.voice.clone_from(&self.narrator);
 		}
@@ -304,5 +333,33 @@ mod tests {
 		home.furnish(&mut plain).unwrap();
 		assert_eq!(own.meta.voice.unwrap().name, "Moira");
 		assert_eq!(plain.meta.voice.unwrap().name, "Daniel");
+	}
+
+	#[test]
+	fn a_world_lights_its_books_unless_the_book_names_a_light() {
+		let dir = tempfile::tempdir().unwrap();
+		let golden = World::load(&world(dir.path(), "golden", "light = \"golden\"\n")).unwrap();
+		let story =
+			&mut crate::story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n")
+				.unwrap();
+		golden.furnish(story).unwrap();
+		assert_eq!(story.light, Light::of(Preset::Golden));
+
+		// The book's own front matter wins over the world's default.
+		let dawn = &mut crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nlight = \"dawn\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		golden.furnish(dawn).unwrap();
+		assert_eq!(dawn.light, Light::of(Preset::Dawn));
+
+		let error = format!(
+			"{:#}",
+			World::load(&world(dir.path(), "odd", "light = \"sunset\"\n")).unwrap_err()
+		);
+		assert!(
+			error.contains("sunset") && error.contains("candle"),
+			"{error}"
+		);
 	}
 }

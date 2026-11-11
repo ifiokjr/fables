@@ -43,6 +43,7 @@ A world needs only a name to start:
 ```toml
 name = "Kerfuffle"
 style = "cartoon"           # optional: the drawing style its folk are drawn in (default cartoon)
+light = "golden"            # optional: the light every page starts in (default day)
 
 [narrator]                  # optional: who reads every book aloud, unless a script names its own [voice]
 name = "Daniel"
@@ -109,14 +110,17 @@ The built-in styles are compiled into fables, so a world anywhere on disk can na
 
 ## Settings
 
-A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page's art style, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene:
+A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page's art style, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene. A page's `light=` grades every colour the scene paints, paints `fill="sky"` parts with the light's sky gradient, and washes a haze and a vignette over the art; the story text and captions keep their own colours.
 
 | Attribute | Meaning |
 | --- | --- |
-| `fill` | A palette name or hex code; `tint` is the scene's tint; `none` for a line, with `stroke` and `stroke-width` (`data-noodle` for a thick inked tube). |
+| `fill` | A palette name or hex code; `tint` is the scene's tint; `sky` is the scene light's sky gradient (flat daylight paints the plain sky colour); `none` for a line, with `stroke` and `stroke-width` (`data-noodle` for a thick inked tube). |
 | `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
 | `data-night`, `data-wilt` | The colour at night, and the colour it turns as the scene wilts. Parts without a night colour dim. |
-| `data-time` | `day` or `night`: only drawn then (the sun, the moon). |
+| `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides: `dusk` shows the sun, `moonlit` the moon and stars, and an `indoor` or `candle` light shows neither. |
+| `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows at dusk, stars at night). |
+| `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, lawns, floors). |
+| `data-glow` | On a `<circle>`, `radius colour opacity`: a soft radial pool of light fading to transparent (a lamp, a window, the sun's bloom). |
 | `data-depth` | 0 to 1: far things fade into the sky and lose line. |
 | `data-dots` | A riso dot screen: `colour spacing radius opacity`. |
 | `data-drift`, `data-swing` | Clouds drift sideways; a swing swings from its pivot (`x y`). |
@@ -164,7 +168,7 @@ Worlds and characters are named by slugs, never paths, so the server only reads 
 | `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<style>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. Never records a voice, so it runs offline in a second or two. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
-| `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<style>/`: the whole cast, every setting, and one character in every mood. |
+| `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<style>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. |
 | `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every art style, side by side. |
 | `fables rig <id>` | `out/rig/<style>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character) and a motion-test video. |
 
@@ -233,6 +237,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | --- | --- |
 | Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, or one of the world's own (see Settings). |
 | `night`, `wilt=1`, `stink=0.5`, `mint=1`, `tint=sunflower` | Starting weather (`tint` colours the `plain` blob). |
+| `light=golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. It grades every colour in the scene, paints the sky, aims the shadows and adds haze and a vignette. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. A bare `night` keeps today's behaviour exactly unless a `light=` is also given. |
 | `speed=1`, `impact=1` | Manga effects: focus lines rushing in towards the first person on stage, or a jagged burst behind them. They work in every style. |
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
 | `size=0.9` | Scales the page's text. |
@@ -246,7 +251,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page, and `@camera …` the framing.
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, `light=…`, and friends; the video eases the change over about a second), and `@camera …` the framing.
 
 | Kind | Values |
 | --- | --- |

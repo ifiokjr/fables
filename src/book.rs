@@ -714,6 +714,10 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 	let puppets = compose::puppets(&page.scene, 0.0, true);
 	let zoom = page.scene.camera.zoom;
 	let camera = &page.scene.camera;
+
+	// The scene draws under its light; the text card and drawing frame after it are page
+	// furniture and keep their own colours.
+	svg.set_light(page.scene.weather.light);
 	svg.begin_layer();
 
 	// A heading's `shot=` frames the still like the video would frame it: composed from the
@@ -749,6 +753,7 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 	}
 
 	svg.end();
+	svg.clear_light();
 
 	if page.decor == Decor::DrawingFrame {
 		let frame = Path::wobbly_poly(

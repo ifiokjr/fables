@@ -27,6 +27,7 @@ use crate::art::dials::Fill;
 use crate::art::dials::Motion;
 use crate::art::dials::Palette;
 use crate::art::dials::Tone;
+use crate::art::light::Light;
 use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::art::style::StyleName;
@@ -69,6 +70,10 @@ pub struct Meta {
 	/// nearest `world.toml` above the script (see [`world`](crate::world)).
 	#[serde(default)]
 	pub world: Option<String>,
+	/// The light every page starts in, unless its heading names `light=` (`"golden"`). A
+	/// world's default applies unless the book names its own.
+	#[serde(default)]
+	pub light: Option<String>,
 	#[serde(default)]
 	pub cover: Option<CoverSpec>,
 	/// The art style: riso, tv, bold, cut-paper, crayon, storybook or clear (default riso).
@@ -336,6 +341,9 @@ pub struct Story {
 	pub drawing: Drawing,
 	/// The settings its pages can use: the built-in ones and its world's.
 	pub settings: Arc<Library>,
+	/// The light pages start in when their heading says nothing (`light = "dawn"` in front
+	/// matter, or the world's default).
+	pub light: Light,
 }
 
 /// How a world's drawing style prints and moves (see [`StylePack`](crate::art::pack::StylePack)).
@@ -397,6 +405,20 @@ pub fn parse(source: &str) -> Result<Story> {
 		}
 	}
 
+	let light = meta
+		.light
+		.as_deref()
+		.map(|name| {
+			Light::parse(name).ok_or_else(|| {
+				anyhow::anyhow!(
+					"unknown light `{name}`; use one of: {}",
+					crate::art::light::Preset::names()
+				)
+			})
+		})
+		.transpose()?
+		.unwrap_or_else(Light::day);
+
 	let slug = slugify(&meta.title);
 
 	Ok(Story {
@@ -407,6 +429,7 @@ pub fn parse(source: &str) -> Result<Story> {
 		matter: crate::world::Matter::default(),
 		drawing: Drawing::default(),
 		settings: Library::built_in(),
+		light,
 	})
 }
 

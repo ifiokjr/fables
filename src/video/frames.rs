@@ -238,6 +238,10 @@ impl<'a> Renderer<'a> {
 
 		svg.fill(&Path::rect(0.0, 0.0, w, h), palette::PAPER);
 
+		// The scene's light grades every colour the frame paints and aims its shadows; the
+		// captions, title cards and paper turns after it are furniture and keep their own.
+		svg.set_light(scene.weather.light);
+
 		if let Some((far_dev, _)) = blur {
 			// The sky softens most, and travels with the parallax view.
 			let far_image = self.blurred_backdrop(&scene, Layer::Far, far_dev)?;
@@ -286,6 +290,7 @@ impl<'a> Renderer<'a> {
 			svg.end();
 		}
 
+		svg.clear_light();
 		svg.line = 4.0 * w.min(h) / 1080.0;
 		svg.registration = svg.style.registration * (0.6 * w.min(h) / 1080.0);
 
@@ -401,6 +406,12 @@ impl<'a> Renderer<'a> {
 			scene.weather.mint = lerp(
 				previous.scene.weather.mint,
 				current.scene.weather.mint,
+				weather_t,
+			);
+			// A mid-page `light=` eases from the old light to the new one, like the weather.
+			scene.weather.light = crate::art::Light::blend(
+				&previous.scene.weather.light,
+				&current.scene.weather.light,
 				weather_t,
 			);
 		}
@@ -695,12 +706,12 @@ impl<'a> Renderer<'a> {
 	}
 
 	/// A depth layer of the setting, drawn once, blurred, and remembered as an image the frame
-	/// can place under the camera. Blurring this way costs one small raster per setting and
-	/// weather instead of a filter on every frame.
+	/// can place under the camera. Blurring this way costs one small raster per setting,
+	/// weather and light instead of a filter on every frame.
 	fn blurred_backdrop(&self, scene: &Scene, layer: Layer, deviation: f32) -> Result<String> {
 		let weather = &scene.weather;
 		let key = seed_of(&format!(
-			"{:?}|{:?}|{layer:?}|{deviation}|{}|{:.2}|{:.2}|{:.2}|{:?}",
+			"{:?}|{:?}|{layer:?}|{deviation}|{}|{:.2}|{:.2}|{:.2}|{:?}|{:x}",
 			self.story.style().name,
 			scene.setting,
 			weather.night,
@@ -708,6 +719,7 @@ impl<'a> Renderer<'a> {
 			weather.stink,
 			weather.mint,
 			weather.tint,
+			weather.light.cache_key(),
 		));
 
 		{
@@ -726,6 +738,7 @@ impl<'a> Renderer<'a> {
 		let span = STAGE + director::OVERDRAW * 2.0;
 		let size = (span / 4.0) as u32;
 		let mut svg = Svg::styled(self.story.style());
+		svg.set_light(weather.light);
 		let id = svg.next_id("dof");
 		svg.define(&format!(
 			r#"<filter id="{id}" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="{deviation:.2}"/></filter>"#

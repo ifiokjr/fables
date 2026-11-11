@@ -10,6 +10,7 @@ pub mod critters;
 pub mod dials;
 pub mod figure;
 pub mod fx;
+pub mod light;
 pub mod pack;
 pub mod palette;
 pub mod parts;
@@ -24,6 +25,7 @@ use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
 
+pub use light::Light;
 pub use palette::Color;
 use shape::Shape;
 use style::Shading;
@@ -389,7 +391,11 @@ impl Path {
 ///
 /// `boil` is mixed into every wobble seed. Video frames bump it a few times a second so ink
 /// lines shimmer like hand-drawn animation; print renders keep it at zero. `style` decides how
-/// every inked shape, outline and detail line is rendered (see [`style`]).
+/// every inked shape, outline and detail line is rendered (see [`style`]). While scene art is
+/// drawn, `light` holds the scene's [`Light`]: every colour the scene paints passes through
+/// its grade where it is emitted, so the print PDF stays pure vector and the ePub and video
+/// match. Page furniture (text cards, captions, title cards, sheets) is drawn with no light
+/// set, exactly as before.
 pub struct Svg {
 	body: String,
 	defs: String,
@@ -404,6 +410,9 @@ pub struct Svg {
 	/// How the brushed finish inks and shades, set by whoever is drawing (an authored puppet
 	/// sets its style's line and shade dials while it draws, with [`Svg::use_brush`]).
 	pub brush: Brush,
+	/// The scene's light while scene art is drawn; `None` for page furniture and for flat
+	/// daylight, which grades nothing.
+	pub light: Option<Light>,
 	/// How each open group's units map to the document's, innermost last, so an offset can be
 	/// kept the same on the page however a part is turned.
 	frames: Vec<Linear>,
@@ -579,8 +588,26 @@ impl Svg {
 			line: 7.0,
 			style,
 			brush: Brush::default(),
+			light: None,
 			frames: Vec::new(),
 		}
+	}
+
+	/// Draws scene art under `light` from here on. Flat daylight clears the light, so a page
+	/// without a light renders exactly as it always did.
+	pub fn set_light(&mut self, light: Light) {
+		self.light = (!light.is_day()).then_some(light);
+	}
+
+	/// Stops grading: everything drawn from here on is page furniture.
+	pub fn clear_light(&mut self) {
+		self.light = None;
+	}
+
+	/// A colour through the scene light's grade, if one is active.
+	#[must_use]
+	pub fn graded(&self, colour: Color) -> Color {
+		self.light.map_or(colour, |light| light.grade(colour))
 	}
 
 	/// Picks up `brush` for what's drawn from here on, measuring its register offset in the
@@ -660,10 +687,12 @@ impl Svg {
 	}
 
 	pub fn fill(&mut self, path: &Path, color: Color) {
+		let color = self.graded(color);
 		let _ = write!(self.body, r#"<path d="{}" fill="{color}"/>"#, path.as_str());
 	}
 
 	pub fn fill_alpha(&mut self, path: &Path, color: Color, opacity: f32) {
+		let color = self.graded(color);
 		let _ = write!(
 			self.body,
 			r#"<path d="{}" fill="{color}" fill-opacity="{opacity:.3}"/>"#,
@@ -689,6 +718,7 @@ impl Svg {
 	}
 
 	fn plain_stroke(&mut self, path: &Path, color: Color, width: f32, opacity: f32) {
+		let color = self.graded(color);
 		let _ = write!(
 			self.body,
 			r#"<path d="{}" fill="none" stroke="{color}" stroke-opacity="{opacity:.3}" stroke-width="{width:.1}" stroke-linecap="round" stroke-linejoin="round"/>"#,
@@ -698,6 +728,7 @@ impl Svg {
 
 	/// A line drawn once, or several times with a little drift for pencil and crayon.
 	fn sketchy(&mut self, path: &Path, color: Color, width: f32, opacity: f32) {
+		let color = self.graded(color);
 		let Some((passes, drift)) = self.style.sketch else {
 			self.plain_stroke(path, color, width, opacity);
 			return;
@@ -810,12 +841,15 @@ impl Svg {
 
 	/// One tone of cel shadow in `shadow`, multiplied over whatever is already painted inside
 	/// `shape` (stripes included). The lit area is the shape itself moved towards the light, so
-	/// the shadow hugs the far edge and follows the part's own curvature.
+	/// the shadow hugs the far edge and follows the part's own curvature. Under a scene light,
+	/// the light's key direction replaces the style's, and a shaded style catches a rim in the
+	/// light's glow colour on the lit side.
 	pub fn cel_shade(&mut self, shape: &Shape, light: Pt, shadow: Color) {
 		if self.brush.tones == 0 {
 			return;
 		}
 
+		let light = self.light.map_or(light, |scene| scene.key);
 		self.shadow_band(shape, light, shadow);
 
 		// A second, deeper tone in the far edge of the first.
@@ -823,18 +857,20 @@ impl Svg {
 			self.shadow_band(shape, light * 0.45, shadow.darken(0.12));
 		}
 
-		// A light rim along the lit edge.
-		if self.brush.highlight == dials::Highlight::Rim {
+		// A light rim along the lit edge: styles that ask for one always, and every shaded
+		// style under lights that cast one (golden, dusk, moonlit, candle).
+		if self.brush.highlight == dials::Highlight::Rim || self.light.is_some_and(|s| s.rim) {
 			let path = shape.path();
 			let rim = Path::new()
 				.append(&path)
 				.append(&shape.shift(light * -0.55).path());
+			let colour = self.light.map_or(palette::WHITE, |scene| scene.glow_colour);
 			self.begin_clip(&path);
 			let _ = write!(
 				self.body,
 				r#"<path d="{}" fill="{}" fill-opacity="0.38" fill-rule="evenodd"/>"#,
 				rim.as_str(),
-				palette::WHITE
+				colour
 			);
 			self.end();
 		}
@@ -842,6 +878,7 @@ impl Svg {
 
 	/// One band of cel shadow: the shape minus itself moved towards the light, multiplied.
 	fn shadow_band(&mut self, shape: &Shape, light: Pt, shadow: Color) {
+		let shadow = self.graded(shadow);
 		let path = shape.path();
 		let lit = Path::new().append(&path).append(&shape.shift(light).path());
 		let id = self.next_id("cel");
@@ -908,6 +945,8 @@ impl Svg {
 		reach: f32,
 		line: f32,
 	) {
+		let base = self.graded(base);
+		let shade = self.graded(shade);
 		self.cast_shadow(path);
 
 		let clip = self.next_id("shade");
@@ -1016,6 +1055,7 @@ impl Svg {
 
 	/// The flat fill, offset by the style's registration.
 	fn paint(&mut self, path: &Path, fill: Color) {
+		let fill = self.graded(fill);
 		let offset = self.registration;
 		let opacity = self.style.fill_opacity;
 		let _ = write!(
@@ -1199,6 +1239,47 @@ mod tests {
 		assert_eq!(at(30, 30).red(), 255, "the lit side keeps its colour");
 		assert!(at(80, 80).red() < 240, "the far side is shaded");
 		assert!(at(10, 50).red() < 100, "the line is drawn");
+	}
+
+	#[test]
+	fn a_scene_light_aims_the_cel_shade_and_lights_the_rim() {
+		let square = Shape::parse(
+			"M10 10 C40 10 70 10 90 10 C90 40 90 70 90 90 C70 90 40 90 10 90 C10 70 10 40 10 10 Z",
+		);
+		let golden = Light::of(light::Preset::Golden);
+
+		// Under golden, every shaded style catches a rim in the light's glow colour.
+		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
+		svg.set_light(golden);
+		svg.brushed_shaded(
+			&square,
+			Color(0xFF_FF_FF),
+			pt(-20.0, -20.0),
+			Color(0xD4_BE_D8),
+			palette::INK,
+			4.0,
+		);
+		assert!(
+			svg.body.contains(&golden.glow_colour.to_string()),
+			"the rim is the glow colour: {}",
+			svg.body
+		);
+
+		// In flat daylight the same drawing emits no rim for a style without one.
+		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
+		svg.brushed_shaded(
+			&square,
+			Color(0xFF_FF_FF),
+			pt(-20.0, -20.0),
+			Color(0xD4_BE_D8),
+			palette::INK,
+			4.0,
+		);
+		assert!(
+			!svg.body.contains("fill-opacity=\"0.38\""),
+			"no rim band in daylight: {}",
+			svg.body
+		);
 	}
 
 	#[test]
