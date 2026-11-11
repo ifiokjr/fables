@@ -14,21 +14,24 @@
 //!
 //! | Attribute | Meaning |
 //! | --- | --- |
-//! | `fill` | The colour; `tint` is the scene's tint (the `plain` blob); `none` for a line. |
+//! | `fill` | The colour; `tint` is the scene's tint (the `plain` blob); `sky` is the scene light's sky gradient; `none` for a line. |
 //! | `stroke`, `stroke-width` | A line's colour and weight; `data-noodle` makes it a thick inked tube. |
 //! | `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
 //! | `data-night` | The colour at night. Parts without one are dimmed. |
 //! | `data-wilt` | The colour it turns as the scene wilts. |
-//! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). |
+//! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides. |
+//! | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows, stars). |
+//! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). |
 //! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line. |
 //! | `data-dots` | A riso dot screen over it: `colour spacing radius opacity`. |
 //! | `data-drift` | Units a second it drifts sideways, wrapping (clouds). |
 //! | `data-swing` | `x y`: the pivot it swings from (a swing seat and its ropes). |
 //!
-//! Two kinds of part are not drawings: `<circle data-sparkle="size colour">` twinkles, and
-//! `<circle data-critter="flower|tree" r="height" data-colour data-seed>` places one of the
-//! living plants from [`critters`], which have faces and wilt. The root `<svg>` sets
-//! `data-ground`, where actors' feet rest.
+//! `<circle data-glow="radius colour opacity">` paints a soft radial pool of light (a lamp, a
+//! window, the sun's bloom). Two kinds of part are not drawings: `<circle
+//! data-sparkle="size colour">` twinkles, and `<circle data-critter="flower|tree" r="height"
+//! data-colour data-seed>` places one of the living plants from [`critters`], which have faces
+//! and wilt. The root `<svg>` sets `data-ground`, where actors' feet rest.
 //!
 //! The built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`)
 //! are compiled in from `settings/`; a world adds or replaces them with its own `settings/`.
@@ -51,6 +54,9 @@ use super::Svg;
 use super::critters;
 use super::critters::CritterState;
 use super::critters::FlowerKind;
+use super::light::Body;
+use super::light::Light;
+use super::light::Preset;
 use super::palette;
 use super::pt;
 
@@ -251,17 +257,24 @@ impl Layer {
 	}
 }
 
-/// A colour, or the scene's tint.
+/// A colour, the scene's tint, or the light's sky gradient.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Paint {
 	Color(Color),
 	Tint,
+	/// The scene light's sky, zenith to horizon. Flat daylight paints the plain sky colour,
+	/// exactly as settings always did.
+	Sky,
 }
 
 impl Paint {
 	fn read(value: &str) -> Result<Paint> {
 		if value == "tint" {
 			return Ok(Paint::Tint);
+		}
+
+		if value == "sky" {
+			return Ok(Paint::Sky);
 		}
 
 		Color::parse(value)
@@ -273,6 +286,7 @@ impl Paint {
 		match self {
 			Paint::Color(color) => color,
 			Paint::Tint => weather.tint,
+			Paint::Sky => palette::SKY,
 		}
 	}
 }
@@ -296,6 +310,13 @@ enum Mark {
 		at: Pt,
 		size: f32,
 		color: Paint,
+	},
+	/// A soft radial pool of light: a lamp, a window, a glow round the sun or moon.
+	Glow {
+		at: Pt,
+		radius: f32,
+		color: Paint,
+		opacity: f32,
 	},
 	Critter {
 		kind: Critter,
@@ -334,6 +355,12 @@ struct Part {
 	dots: Option<Dots>,
 	drift: f32,
 	swing: Option<Pt>,
+	/// A vertical gradient over the part, top and bottom colours.
+	gradient: Option<(Color, Color)>,
+	/// Only drawn under these light presets (`data-lit`).
+	lit: Option<Vec<Preset>>,
+	/// The part's own bounds, for gradients and glows that span it.
+	bounds: Option<(f32, f32, f32, f32)>,
 }
 
 impl Part {
@@ -388,6 +415,21 @@ impl Part {
 				size: size.parse().context("the sparkle's size is not a number")?,
 				color: Paint::read(color.trim())?,
 			}
+		} else if let Some(glow) = node.attribute("data-glow") {
+			let words: Vec<&str> = glow.split_whitespace().collect();
+			let [radius, color, opacity] = words[..] else {
+				bail!("data-glow is `radius colour opacity`");
+			};
+			Mark::Glow {
+				at: at()?,
+				radius: radius
+					.parse()
+					.context("the glow's radius is not a number")?,
+				color: Paint::read(color)?,
+				opacity: opacity
+					.parse()
+					.context("the glow's opacity is not a number")?,
+			}
 		} else {
 			let path = Path::from_data(node.attribute("d").context("a part needs path data, d")?);
 
@@ -434,6 +476,38 @@ impl Part {
 				Ok(pt(x.trim().parse()?, y.trim().parse()?))
 			})
 			.transpose()?;
+		let gradient = node
+			.attribute("data-gradient")
+			.map(|value| -> Result<(Color, Color)> {
+				let (top, bottom) = value
+					.split_once(' ')
+					.context("data-gradient is `top colour bottom colour`")?;
+				let colour = |word: &str| {
+					Color::parse(word.trim())
+						.with_context(|| format!("`{}` is not a colour", word.trim()))
+				};
+				Ok((colour(top)?, colour(bottom)?))
+			})
+			.transpose()?;
+		let lit = node
+			.attribute("data-lit")
+			.map(|value| -> Result<Vec<Preset>> {
+				value
+					.split(',')
+					.map(str::trim)
+					.filter(|name| !name.is_empty())
+					.map(|name| {
+						Preset::parse(name).ok_or_else(|| {
+							anyhow::anyhow!("data-lit names `{name}`; try {}", Preset::names())
+						})
+					})
+					.collect()
+			})
+			.transpose()?;
+		let bounds = match &mark {
+			Mark::Shape { path, .. } | Mark::Line { path, .. } => path_bounds(path.as_str()),
+			_ => None,
+		};
 
 		Ok(Some(Part {
 			id: id.to_owned(),
@@ -456,10 +530,13 @@ impl Part {
 			dots,
 			drift: number("data-drift")?.unwrap_or(0.0),
 			swing,
+			gradient,
+			lit,
+			bounds,
 		}))
 	}
 
-	/// The part's colour in this weather.
+	/// The part's colour in this weather, through the scene light's grade.
 	fn color(&self, paint: Paint, weather: &Weather) -> Color {
 		let mut color = paint.resolve(weather);
 
@@ -474,17 +551,35 @@ impl Part {
 			};
 		}
 
-		// Distance fades towards the sky.
-		let haze = if weather.night {
-			palette::NIGHT
+		// Distance fades towards the sky: under a light, towards its horizon colour.
+		let haze = if weather.light.is_day() {
+			if weather.night {
+				palette::NIGHT
+			} else {
+				palette::SKY.lighten(0.35)
+			}
 		} else {
-			palette::SKY.lighten(0.35)
+			weather.light.horizon
 		};
-		color.mix(haze, self.depth * 0.45)
+		weather.light.grade(color.mix(haze, self.depth * 0.45))
 	}
 
 	fn draw(&self, svg: &mut Svg, weather: &Weather) {
-		if self.night_only.is_some_and(|night| night != weather.night) {
+		if let Some(under) = &self.lit
+			&& !under.contains(&weather.light.preset)
+		{
+			return;
+		}
+
+		// Under a lit scene the sun, moon and stars follow the light's sky body, not the bare
+		// day-or-night flag; interiors (`indoor`, `candle`) have no sky body at all.
+		if !weather.light.is_day() {
+			match (self.night_only, weather.light.body) {
+				(Some(night), Some(body)) if night != (body == Body::Moon) => return,
+				(Some(_), None) => return,
+				_ => {}
+			}
+		} else if self.night_only.is_some_and(|night| night != weather.night) {
 			return;
 		}
 
@@ -512,12 +607,30 @@ impl Part {
 				fill,
 				outline,
 			} => {
-				let color = snap(svg, self.color(*fill, weather));
-
-				if *outline {
-					svg.inked_weight(path, color, weight);
+				if *fill == Paint::Sky && !weather.light.is_day() {
+					// The light paints the whole sky itself.
+					let paint = sky_gradient(svg, &weather.light);
+					svg.fill_paint(path, &paint);
+				} else if let Some((top, bottom)) = self.gradient {
+					let paint = part_gradient(
+						svg,
+						weather.light.grade(top),
+						weather.light.grade(bottom),
+						self.bounds.unwrap_or((0.0, 0.0, STAGE, STAGE)),
+					);
+					svg.fill_paint(path, &paint);
 				} else {
-					svg.fill(path, color);
+					let color = snap(svg, self.color(*fill, weather));
+
+					if *outline {
+						svg.inked_weight(path, color, weight);
+					} else {
+						svg.fill(path, color);
+					}
+				}
+
+				if *outline && (*fill == Paint::Sky || self.gradient.is_some()) {
+					svg.outline(path, weight);
 				}
 
 				if let Some(dots) = self.dots {
@@ -546,8 +659,18 @@ impl Part {
 				}
 			}
 			Mark::Sparkle { at, size, color } => {
-				let color = color.resolve(weather);
+				let color = weather.light.grade(color.resolve(weather));
 				super::fx::sparkle(svg, *at, *size, color, weather.time + at.x * 0.01);
+			}
+			Mark::Glow {
+				at,
+				radius,
+				color,
+				opacity,
+			} => {
+				let color = weather.light.grade(color.resolve(weather));
+				let paint = radial_glow(svg, *at, *radius, color, *opacity);
+				svg.fill_paint(&Path::circle(*at, *radius), &paint);
 			}
 			Mark::Critter {
 				kind,
@@ -561,15 +684,16 @@ impl Part {
 					time: weather.time,
 					..CritterState::default()
 				};
+				let color = weather.light.grade(*color);
 				svg.begin(&format!("translate({:.1} {:.1})", at.x, at.y));
 
 				match kind {
 					Critter::Flower => {
 						let kinds = [FlowerKind::Daisy, FlowerKind::Tulip, FlowerKind::Sunflower];
 						let kind = kinds[(*seed % 3) as usize];
-						critters::flower(svg, kind, *color, *height, state, *seed);
+						critters::flower(svg, kind, color, *height, state, *seed);
 					}
-					Critter::Tree => critters::tree(svg, *color, *height, state, *seed),
+					Critter::Tree => critters::tree(svg, color, *height, state, *seed),
 				}
 
 				svg.end();
@@ -580,6 +704,54 @@ impl Part {
 			svg.end();
 		}
 	}
+}
+
+/// The bounds of absolute path data (`M L Q C Z`, the way part files are written): the corners
+/// every coordinate pair reaches, for gradients that span the part. `None` for data with no
+/// readable points.
+fn path_bounds(data: &str) -> Option<(f32, f32, f32, f32)> {
+	let mut min = pt(f32::MAX, f32::MAX);
+	let mut max = pt(f32::MIN, f32::MIN);
+	let mut numbers: Vec<f32> = Vec::new();
+	let mut any = false;
+	let mut take = |numbers: &mut Vec<f32>| {
+		for pair in numbers.chunks(2) {
+			if let [x, y] = pair {
+				any = true;
+				min.x = min.x.min(*x);
+				min.y = min.y.min(*y);
+				max.x = max.x.max(*x);
+				max.y = max.y.max(*y);
+			}
+		}
+
+		numbers.clear();
+	};
+
+	// Every command letter becomes its own token, so `M0` is a command and a point.
+	let mut spaced = String::with_capacity(data.len() * 2);
+
+	for ch in data.chars() {
+		if ch.is_ascii_alphabetic() {
+			spaced.extend([' ', ch, ' ']);
+		} else {
+			spaced.push(ch);
+		}
+	}
+
+	for word in spaced
+		.split(|c: char| c.is_whitespace() || c == ',')
+		.filter(|word| !word.is_empty())
+	{
+		if word.chars().next().is_some_and(|c: char| c.is_ascii_alphabetic()) {
+			take(&mut numbers);
+		} else if let Ok(value) = word.parse::<f32>() {
+			numbers.push(value);
+		}
+	}
+
+	take(&mut numbers);
+	any.then_some((min.x, min.y, max.x, max.y))
 }
 
 /// A colour snapped to the page's limited palette, if its style has one.
@@ -692,6 +864,9 @@ pub struct Weather {
 	/// A jagged burst behind the action, for a big moment (0..1).
 	pub impact: f32,
 	pub time: f32,
+	/// The scene's light. Flat daylight grades nothing, so a page without `light=` renders
+	/// exactly as it always did.
+	pub light: Light,
 }
 
 impl Default for Weather {
@@ -705,6 +880,7 @@ impl Default for Weather {
 			speed: 0.0,
 			impact: 0.0,
 			time: 0.0,
+			light: Light::day(),
 		}
 	}
 }
@@ -715,28 +891,123 @@ pub fn backdrop(svg: &mut Svg, setting: &Setting, weather: &Weather) {
 	backdrop_layer(svg, setting, weather, Layer::Near);
 }
 
-/// Draws one depth layer of a setting.
+/// Draws one depth layer of a setting. The far layer also paints the light's sun or moon
+/// bloom, just past the sky body it belongs to.
 pub fn backdrop_layer(svg: &mut Svg, setting: &Setting, weather: &Weather, layer: Layer) {
 	if layer == Layer::Far {
 		svg.fill(&full_rect(-OVER, STAGE + OVER * 2.0), palette::PAPER);
 	}
 
+	let body_night = (!weather.light.is_day())
+		.then_some(weather.light.body)
+		.flatten()
+		.map(|body| body == Body::Moon);
+	let mut bloomed = false;
+
 	for part in setting.0.parts.iter().filter(|part| part.layer == layer) {
 		part.draw(svg, weather);
+
+		if !bloomed
+			&& layer == Layer::Far
+			&& body_night.is_some()
+			&& weather.light.glow_strength > 0.01
+			&& part.night_only == body_night
+		{
+			if let Some(bounds) = part.bounds {
+				let at = pt((bounds.0 + bounds.2) / 2.0, (bounds.1 + bounds.3) / 2.0);
+				let radius = 560.0 + 420.0 * weather.light.glow_strength;
+				let paint = radial_glow(
+					svg,
+					at,
+					radius,
+					weather.light.glow_colour,
+					weather.light.glow_strength * 0.9,
+				);
+				svg.fill_paint(&Path::circle(at, radius), &paint);
+				bloomed = true;
+			}
+		}
 	}
 }
 
-/// Draws anything that sits in front of the actors, plus scene-wide air effects.
+/// Draws anything that sits in front of the actors, plus scene-wide air effects and the
+/// light's atmosphere (a haze wash, then a vignette), which the text card and captions sit
+/// over.
 pub fn foreground(svg: &mut Svg, setting: &Setting, weather: &Weather) {
 	backdrop_layer(svg, setting, weather, Layer::Front);
 
 	let bounds = (-OVER, -OVER, STAGE + OVER * 2.0, STAGE + OVER * 2.0);
 	super::fx::haze(svg, weather.stink, palette::MOSS, bounds);
 	super::fx::haze(svg, weather.mint * 0.6, palette::ICE, bounds);
+
+	if !weather.light.is_day() {
+		super::fx::haze(svg, weather.light.haze_amount, weather.light.haze_colour, bounds);
+		vignette(svg, weather.light.vignette);
+	}
 }
 
 fn full_rect(y: f32, h: f32) -> Path {
 	Path::rect(-OVER, y, STAGE + OVER * 2.0, h)
+}
+
+/// The light's sky as a vertical gradient def spanning the drawn stage, zenith to horizon.
+fn sky_gradient(svg: &mut Svg, light: &Light) -> String {
+	let id = svg.next_id("sky");
+	svg.define(&format!(
+		r#"<linearGradient id="{id}" x1="0" y1="{:.1}" x2="0" y2="{:.1}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="{}"/><stop offset="1" stop-color="{}"/></linearGradient>"#,
+		-OVER,
+		STAGE + OVER,
+		light.zenith,
+		light.horizon
+	));
+
+	id
+}
+
+/// A vertical gradient over a part's own extent, for walls, water and floors.
+fn part_gradient(
+	svg: &mut Svg,
+	top: Color,
+	bottom: Color,
+	bounds: (f32, f32, f32, f32),
+) -> String {
+	let id = svg.next_id("grad");
+	svg.define(&format!(
+		r#"<linearGradient id="{id}" x1="0" y1="{:.1}" x2="0" y2="{:.1}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>"#,
+		bounds.1, bounds.3
+	));
+
+	id
+}
+
+/// A soft radial pool of light fading to transparent (a lamp, a window, the sun's bloom).
+fn radial_glow(svg: &mut Svg, at: Pt, radius: f32, color: Color, opacity: f32) -> String {
+	let id = svg.next_id("glow");
+	svg.define(&format!(
+		r#"<radialGradient id="{id}" gradientUnits="userSpaceOnUse" cx="{:.1}" cy="{:.1}" r="{radius:.1}"><stop offset="0" stop-color="{color}" stop-opacity="{opacity:.2}"/><stop offset="1" stop-color="{color}" stop-opacity="0"/></radialGradient>"#,
+		at.x, at.y
+	));
+
+	id
+}
+
+/// Darkens the edges of the scene with a radial gradient to ink, which survives svg2pdf.
+fn vignette(svg: &mut Svg, strength: f32) {
+	if strength <= 0.01 {
+		return;
+	}
+
+	let id = svg.next_id("vignette");
+	let centre = STAGE / 2.0;
+	let radius = STAGE * 0.78;
+	svg.define(&format!(
+		r#"<radialGradient id="{id}" gradientUnits="userSpaceOnUse" cx="{centre}" cy="{centre}" r="{radius}"><stop offset="0.55" stop-color="{}" stop-opacity="0"/><stop offset="1" stop-color="{}" stop-opacity="{strength:.2}"/></radialGradient>"#,
+		palette::INK, palette::INK
+	));
+	svg.fill_paint(
+		&full_rect(-OVER, STAGE + OVER * 2.0),
+		&id,
+	);
 }
 
 /// A dot screen, defined once per document and referenced by id.
@@ -853,6 +1124,132 @@ mod tests {
 		assert!(
 			error.contains("harbour") && error.contains("park"),
 			"{error}"
+		);
+	}
+
+	/// Parses a tiny setting and draws it under a weather, returning the SVG document.
+	fn draw_setting(source: &str, weather: &Weather) -> String {
+		let setting = Setting::parse("test", source).unwrap();
+		let mut svg = Svg::new();
+		backdrop(&mut svg, &setting, weather);
+		foreground(&mut svg, &setting, weather);
+		svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64)
+	}
+
+	#[test]
+	fn the_sky_stays_flat_under_day_and_graduates_under_a_light() {
+		let source = r#"<svg data-ground="2000"><path id="far-sky" d="M0 0 L100 0 L100 100 Z" fill="sky" data-line="none"/></svg>"#;
+		let day = draw_setting(source, &Weather::default());
+		assert!(day.contains("fill=\"#9ed8f0\""), "flat sky colour: {day}");
+		assert!(!day.contains("linearGradient"), "day emits no gradient");
+
+		let dusk = Weather {
+			light: Light::of(Preset::Dusk),
+			..Weather::default()
+		};
+		let lit = draw_setting(source, &dusk);
+		assert!(
+			lit.contains("linearGradient") && lit.contains("#5a5a9e"),
+			"the dusk sky is the light's gradient: {lit}"
+		);
+
+		// Every preset renders without error, and none of them emit a bare flat sky.
+		for light in crate::art::light::ALL {
+			if light.is_day() {
+				continue;
+			}
+
+			let document = draw_setting(source, &Weather { light, ..Weather::default() });
+			crate::raster::render(&document).unwrap();
+		}
+	}
+
+	#[test]
+	fn data_lit_hides_a_part_until_its_light_comes_up() {
+		let source = r#"<svg data-ground="2000"><path id="near-window" d="M0 0 L10 0 L10 10 Z" fill="sunflower" data-lit="dusk,night"/></svg>"#;
+		let part = Setting::parse("test", source).unwrap().0.parts[0].clone();
+		assert_eq!(part.lit, Some(vec![Preset::Dusk, Preset::Night]));
+
+		let day = draw_setting(source, &Weather::default());
+		assert!(!day.contains("fill=\"#ffc93c\""), "hidden by day: {day}");
+
+		let graded = Light::of(Preset::Dusk).grade(palette::SUNFLOWER);
+		let dusk = draw_setting(
+			source,
+			&Weather {
+				light: Light::of(Preset::Dusk),
+				..Weather::default()
+			},
+		);
+		assert!(
+			dusk.contains(&format!("fill=\"{graded}\"")),
+			"drawn at dusk in the graded colour: {dusk}"
+		);
+
+		let error = Setting::parse(
+			"test",
+			r#"<svg data-ground="2000"><path id="near-window" d="M0 0 L10 0 L10 10 Z" fill="sunflower" data-lit="bedtime"/></svg>"#,
+		)
+		.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(
+			message.contains("bedtime") && message.contains("moonlit"),
+			"{message}"
+		);
+	}
+
+	#[test]
+	fn a_glow_and_a_gradient_draw_through_the_grade() {
+		let source = r#"<svg data-ground="2000"><path id="near-sea" d="M0 100 L100 100 L100 200 L0 200 Z" fill="cornflower" data-gradient="cornflower night" data-line="none"/><circle id="near-lamp" cx="50" cy="50" data-glow="60 sunflower 0.5"/></svg>"#;
+		let setting = Setting::parse("test", source).unwrap();
+		let sea = &setting.0.parts[0];
+		assert_eq!(sea.gradient, Some((palette::CORNFLOWER, palette::NIGHT)));
+		assert_eq!(sea.bounds, Some((0.0, 100.0, 100.0, 200.0)));
+
+		let dusk = Weather {
+			light: Light::of(Preset::Dusk),
+			..Weather::default()
+		};
+		let document = draw_setting(source, &dusk);
+		assert!(
+			document.contains("linearGradient") && document.contains("radialGradient"),
+			"both gradients draw: {document}"
+		);
+
+		// Under day the gradient still paints (it is authored data), and the glow too.
+		let day = draw_setting(source, &Weather::default());
+		assert!(day.contains("linearGradient"), "{day}");
+		assert!(day.contains("radialGradient"), "{day}");
+		crate::raster::render(&day).unwrap();
+	}
+
+	#[test]
+	fn a_light_moves_the_sun_and_hides_the_moon() {
+		let source = r#"<svg data-ground="2000"><path id="far-sun" d="M100 100 C100 110 110 110 110 100 C110 90 100 90 100 100 Z" fill="sunflower" data-time="day"/><path id="far-moon" d="M200 100 C200 110 210 110 210 100 C210 90 200 90 200 100 Z" fill="cream" data-time="night"/></svg>"#;
+		let document = draw_setting(
+			source,
+			&Weather {
+				light: Light::of(Preset::Moonlit),
+				..Weather::default()
+			},
+		);
+		let sun_drawn = document.matches("fill=\"#ffc93c\"").count();
+		assert_eq!(sun_drawn, 0, "the moon is up, so the sun hides: {document}");
+		assert!(
+			document.contains("radialGradient"),
+			"the moon blooms: {document}"
+		);
+
+		let indoor = draw_setting(
+			source,
+			&Weather {
+				light: Light::of(Preset::Indoor),
+				..Weather::default()
+			},
+		);
+		assert!(
+			!indoor.contains("fill=\"#ffc93c\"") && !indoor.contains("fill=\"#ffecc8\""),
+			"an interior has no sky bodies: {indoor}"
 		);
 	}
 }
