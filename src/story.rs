@@ -99,7 +99,7 @@ pub struct CoverSpec {
 }
 
 /// How the video is performed.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct VideoOptions {
 	/// Characters speak the words inside quotes in their own cast voices; the narrator reads the
@@ -109,6 +109,89 @@ pub struct VideoOptions {
 	/// With cast voices, skip short dialogue tags ("said Mum.") so scenes play like a show.
 	#[serde(default)]
 	pub drop_tags: bool,
+	/// Who directs the camera: `auto` (default) shots pages by film rules when the script says
+	/// nothing; `locked` keeps the older always-gliding camera exactly as it was.
+	#[serde(default)]
+	pub direction: Direction,
+	/// Soften the setting behind close shots (depth of field). On by default; video only.
+	#[serde(default = "default_true")]
+	pub depth_of_field: bool,
+	/// How every page is entered, unless its heading says `transition=` (default wipe).
+	#[serde(default)]
+	pub transition: Option<Transition>,
+}
+
+impl Default for VideoOptions {
+	fn default() -> Self {
+		Self {
+			cast_voices: false,
+			drop_tags: false,
+			direction: Direction::default(),
+			depth_of_field: true,
+			transition: None,
+		}
+	}
+}
+
+fn default_true() -> bool {
+	true
+}
+
+/// Who directs the camera.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Direction {
+	/// An automatic director shots pages without explicit `@camera` directions by film rules.
+	#[default]
+	Auto,
+	/// The older camera, kept byte-for-byte: one auto-framed view per page that glides.
+	Locked,
+}
+
+/// How a page is entered from the previous one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Transition {
+	/// A paper sheet sweeps across (the classic page turn).
+	#[default]
+	Wipe,
+	/// No effect: the page begins on the cut.
+	Cut,
+	/// The previous page dissolves into this one.
+	Dissolve,
+	/// The page goes through the paper colour.
+	Fade,
+	/// A circle closes on the previous page's subject and opens on this page's.
+	Iris,
+	/// The new page slides in from the right.
+	Push,
+}
+
+impl Transition {
+	pub const ALL: [&'static str; 6] = ["wipe", "cut", "dissolve", "fade", "iris", "push"];
+
+	pub fn parse(value: &str) -> Option<Transition> {
+		match value {
+			"wipe" => Some(Transition::Wipe),
+			"cut" => Some(Transition::Cut),
+			"dissolve" => Some(Transition::Dissolve),
+			"fade" => Some(Transition::Fade),
+			"iris" => Some(Transition::Iris),
+			"push" => Some(Transition::Push),
+			_ => None,
+		}
+	}
+
+	pub fn name(self) -> &'static str {
+		match self {
+			Transition::Wipe => "wipe",
+			Transition::Cut => "cut",
+			Transition::Dissolve => "dissolve",
+			Transition::Fade => "fade",
+			Transition::Iris => "iris",
+			Transition::Push => "push",
+		}
+	}
 }
 
 /// Where narration text appears.
@@ -195,6 +278,22 @@ impl Page {
 			Some("none") => TextPlace::None,
 			_ => TextPlace::Top,
 		}
+	}
+
+	/// How the page is entered from the previous one, from its heading
+	/// (`transition=wipe|cut|dissolve|fade|iris|push`).
+	pub fn transition(&self) -> Option<Transition> {
+		self.option("transition")
+			.and_then(|token| token.value.as_deref())
+			.and_then(Transition::parse)
+	}
+
+	/// Whether a stage direction directs the camera, which makes the page shot exactly as
+	/// written instead of by the automatic director's rules.
+	pub fn directed_by_camera(&self) -> bool {
+		self.beats
+			.iter()
+			.any(|beat| matches!(beat, Beat::Direct(directive) if directive.actor == "camera"))
 	}
 
 	/// Paragraphs printed in the book.

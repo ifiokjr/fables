@@ -15,11 +15,15 @@ use crate::cast::Cast;
 use crate::cast::Kind;
 use crate::stage::Rehearsal;
 use crate::stage::Scene;
+use crate::stage::ShotSize;
+use crate::stage::Travel;
 use crate::story::Beat;
 use crate::story::Medium;
 use crate::story::Story;
+use crate::story::Transition;
 use crate::story::plain_text;
 use crate::video::audio::Sound;
+use crate::video::director;
 use crate::video::voice::Delivery;
 use crate::video::voice::Speech;
 use crate::video::voice::Utterance;
@@ -64,6 +68,16 @@ pub enum ShotKind {
 	End,
 }
 
+impl ShotKind {
+	/// The script page a page shot shows.
+	pub fn page(self) -> Option<usize> {
+		match self {
+			ShotKind::Page(page) => Some(page),
+			ShotKind::Title | ShotKind::End => None,
+		}
+	}
+}
+
 #[derive(Clone, Debug)]
 pub struct Shot {
 	pub kind: ShotKind,
@@ -71,11 +85,27 @@ pub struct Shot {
 	pub end: f32,
 	pub keys: Vec<Key>,
 	pub lines: Vec<Line>,
+	/// How the page is entered from the previous one.
+	pub transition: Transition,
+	/// The camera's work on this shot, decided once when the timeline is built: one setup per
+	/// framing or move. Landscape first; portrait shots are planned separately, because a
+	/// phone frame prefers different sizes.
+	pub setups: Vec<Setup>,
+	pub portrait_setups: Vec<Setup>,
 }
 
 impl Shot {
 	pub fn duration(&self) -> f32 {
 		self.end - self.start
+	}
+
+	/// The camera setups for a frame shape.
+	pub fn setups_for(&self, portrait: bool) -> &[Setup] {
+		if portrait && !self.portrait_setups.is_empty() {
+			&self.portrait_setups
+		} else {
+			&self.setups
+		}
 	}
 
 	/// Whether characters are moving between keys at `time`: within `tween` seconds of a key
@@ -86,6 +116,50 @@ impl Shot {
 			.rposition(|key| key.time <= time)
 			.is_some_and(|index| index > 0 && time - self.keys[index].time < tween)
 	}
+
+	/// The scene the shot is in just after `time`.
+	pub fn scene_at(&self, time: f32) -> &Scene {
+		let index = self
+			.keys
+			.iter()
+			.rposition(|key| key.time <= time + 1e-3)
+			.unwrap_or(0);
+		&self.keys[index].scene
+	}
+}
+
+/// What a camera setup frames.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Framing {
+	/// The automatic framing: everyone on stage, fitted by the format (the older camera's view).
+	Auto,
+	/// A zoom and look point, as fractions of the stage.
+	Zoom {
+		zoom: f32,
+		look: (f32, f32),
+	},
+	/// A shot size framed on the named actors. Empty names mean everyone on stage, or the
+	/// current speaker for a close shot.
+	Shot {
+		size: ShotSize,
+		on: Vec<String>,
+	},
+}
+
+/// One camera setup: a framing the camera holds or moves to, starting at `time`.
+#[derive(Clone, Debug)]
+pub struct Setup {
+	/// When the camera begins the setup (seconds from the start of the video). A cut lands
+	/// exactly here; a glide or move starts here and takes `over`.
+	pub time: f32,
+	/// The scene moment the framing frames, so subject positions are settled.
+	pub anchor: f32,
+	pub framing: Framing,
+	pub travel: Travel,
+	/// Seconds a glide or move takes; zero means the rest of the setup.
+	pub over: f32,
+	/// A decaying shake that starts with the setup (0 = none).
+	pub shake: f32,
 }
 
 /// A sound effect at a moment in the video.
@@ -168,6 +242,18 @@ pub fn build(
 	timeline.duration = cursor;
 	timeline.cues.sort_by(|a, b| a.time.total_cmp(&b.time));
 
+	// The director plans every shot's camera once, so the frame renderer only reads setups.
+	for shot in &mut timeline.shots {
+		let explicit = shot.kind == ShotKind::Title
+			|| shot.kind == ShotKind::End
+			|| story
+				.pages
+				.get(shot.kind.page().unwrap_or(usize::MAX))
+				.is_some_and(|page| page.directed_by_camera());
+
+		director::direct(story, shot, explicit)?;
+	}
+
 	Ok(timeline)
 }
 
@@ -239,6 +325,9 @@ impl<S: Speaker> Builder<'_, S> {
 				text: String::new(),
 				voiced_by: None,
 			}],
+			transition: Transition::Cut,
+			setups: Vec::new(),
+			portrait_setups: Vec::new(),
 		});
 
 		Ok(end)
@@ -271,6 +360,9 @@ impl<S: Speaker> Builder<'_, S> {
 				text: moral.to_owned(),
 				voiced_by: None,
 			}],
+			transition: self.story.meta.video.transition.unwrap_or_default(),
+			setups: Vec::new(),
+			portrait_setups: Vec::new(),
 		});
 
 		Ok(end)
@@ -335,6 +427,11 @@ impl<S: Speaker> Builder<'_, S> {
 			end,
 			keys,
 			lines,
+			transition: page
+				.transition()
+				.unwrap_or(self.story.meta.video.transition.unwrap_or_default()),
+			setups: Vec::new(),
+			portrait_setups: Vec::new(),
 		});
 
 		Ok(end)

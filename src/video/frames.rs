@@ -6,7 +6,10 @@
 
 use std::f32::consts::PI;
 
+use anyhow::Context;
 use anyhow::Result;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use resvg::tiny_skia::Pixmap;
 
 use crate::art::Path;
@@ -21,34 +24,39 @@ use crate::art::rig::Gait;
 use crate::art::seed_of;
 use crate::art::settings;
 use crate::art::settings::Layer;
-use crate::cast::Kind;
 use crate::compose;
 use crate::compose::Body;
 use crate::compose::Puppet;
 use crate::raster;
 use crate::stage::Scene;
 use crate::stage::Side;
+use crate::stage::ShotSize;
+use crate::stage::Travel;
 use crate::story::RunStyle;
 use crate::story::Story;
+use crate::story::Transition;
 use crate::text;
 use crate::text::Anchor;
 use crate::text::Area;
 use crate::text::Ink;
 use crate::video::audio::Sound;
+use crate::video::director;
+use crate::video::director::View;
+use crate::video::timeline::Framing;
+use crate::video::timeline::Setup;
 use crate::video::timeline::Shot;
 use crate::video::timeline::ShotKind;
 use crate::video::timeline::Timeline;
 
 /// How long stage-direction changes take to play out.
 const TWEEN: f32 = 0.6;
-/// How long the camera takes to reframe.
-const CAMERA_EASE: f32 = 0.9;
-/// How far ahead of a line or direction the camera starts moving.
-const CAMERA_LEAD: f32 = 0.45;
-/// Page-turn wipe length at each end of a shot.
+/// Page-turn transition length at each end of a shot.
 const WIPE: f32 = 0.35;
-/// Stage area drawn past the edges, which the camera may show.
-const OVERDRAW: f32 = 150.0;
+
+/// How strongly a close shot's setting softens behind the subject, in stage units: the far
+/// layer most, the near layer less. The actors stay sharp.
+const CLOSE_BLUR: (f32, f32) = (24.0, 10.0);
+const EXTREME_BLUR: (f32, f32) = (32.0, 14.0);
 
 /// Output shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,22 +128,6 @@ const CARD_PAD_Y: f32 = 22.0;
 /// shoes and shadows reach a little below the ground line, and hair a little above a head.
 const FOOT_ROOM: f32 = 0.02;
 
-/// A camera framing: centre and height in stage units (width follows from the aspect).
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct View {
-	centre: Pt,
-	height: f32,
-}
-
-impl View {
-	fn blend(self, other: View, t: f32) -> View {
-		View {
-			centre: self.centre.lerp(other.centre, t),
-			height: lerp(self.height, other.height, t),
-		}
-	}
-}
-
 fn ease_out_back(t: f32) -> f32 {
 	let c1 = 1.4;
 	let c3 = c1 + 1.0;
@@ -177,32 +169,51 @@ pub struct Renderer<'a> {
 impl Renderer<'_> {
 	/// Renders the frame at `time` seconds. `frame` drives line boil and grain.
 	pub fn render(&self, time: f32, frame: u64) -> Result<Pixmap> {
-		let mut pixmap = raster::render(&self.svg(time, frame))?;
+		let mut pixmap = raster::render(&self.svg(time, frame)?)?;
 		raster::finish(&mut pixmap, &self.story.style(), 0.03, (frame / 2) as u32);
 
 		Ok(pixmap)
 	}
 
 	/// The frame as an SVG document.
-	pub fn svg(&self, time: f32, frame: u64) -> String {
+	pub fn svg(&self, time: f32, frame: u64) -> Result<String> {
 		let shot = self.timeline.shot_at(time);
 		let local = time - shot.start;
+		let portrait = self.format.aspect() < 1.0;
+		let setups = shot.setups_for(portrait);
 		let motion = self.story.drawing.motion;
 		let posed = motion.drawing_time(time, shot.start, shot.moving(time, TWEEN));
 		let (scene, puppets) = self.stage_at(shot, posed);
 		let view = self.camera(shot, time);
 		let (w, h) = (self.width as f32, self.height as f32);
-		let view_w = view.height * self.format.aspect();
+		let view_w = view.width(self.format.aspect());
 		let scale = h / view.height;
 		let mut svg = Svg::styled(self.story.style());
 		svg.boil = frame / 4;
+		let mut weather = scene.weather;
+		weather.time = time;
+
+		// A page that enters with a push slides everything into place.
+		let sliding = shot.transition == Transition::Push
+			&& shot.kind != ShotKind::Title
+			&& local < WIPE;
+
+		if sliding {
+			svg.begin(&format!(
+				"translate({:.2} 0)",
+				(1.0 - smoothstep(local / WIPE)) * w
+			));
+		}
 
 		// Parallax: the sky and hills travel half as far as the camera does, from where the shot
 		// opened, so pans and push-ins reveal depth.
 		let opening = self.target(shot, shot.start);
 		let far = opening.blend(view, 0.5);
 		let far_scale = h / far.height;
-		let far_w = far.height * self.format.aspect();
+		let far_w = far.width(self.format.aspect());
+
+		// Depth of field: a close shot's setting softens behind its subject.
+		let blur = self.depth_of_field(setups, time);
 
 		svg.fill(&Path::rect(0.0, 0.0, w, h), palette::PAPER);
 		svg.begin(&format!(
@@ -210,11 +221,15 @@ impl Renderer<'_> {
 			-(far.centre.x - far_w / 2.0),
 			-(far.centre.y - far.height / 2.0)
 		));
-		let mut weather = scene.weather;
-		weather.time = time;
+		if let Some((far, _)) = blur {
+			open_blur(&mut svg, far);
+		}
 		svg.begin_layer();
 		settings::backdrop_layer(&mut svg, &scene.setting, &weather, Layer::Far);
 		svg.end();
+		if blur.is_some() {
+			close_blur(&mut svg);
+		}
 		svg.end();
 
 		svg.begin(&format!(
@@ -222,10 +237,28 @@ impl Renderer<'_> {
 			-(view.centre.x - view_w / 2.0),
 			-(view.centre.y - view.height / 2.0)
 		));
+		if let Some((_, near)) = blur {
+			open_blur(&mut svg, near);
+		}
 		svg.begin_layer();
 		compose::draw_near(&mut svg, &scene, &puppets, time);
 		svg.end();
+		if blur.is_some() {
+			// The blurred near layer drew everyone too; draw the actors again, sharp, and the
+			// front parts of the setting over them.
+			close_blur(&mut svg);
+			svg.begin_layer();
+			for puppet in &puppets {
+				compose::draw_puppet(&mut svg, puppet);
+			}
+			settings::foreground(&mut svg, &scene.setting, &weather);
+			svg.end();
+		}
 		svg.end();
+
+		if sliding {
+			svg.end();
+		}
 
 		svg.line = 4.0 * w.min(h) / 1080.0;
 		svg.registration = svg.style.registration * (0.6 * w.min(h) / 1080.0);
@@ -235,9 +268,9 @@ impl Renderer<'_> {
 			ShotKind::Page(_) | ShotKind::End => self.captions(&mut svg, shot, time),
 		}
 
-		self.wipe(&mut svg, shot, local);
+		self.turn(&mut svg, shot, local)?;
 
-		svg.finish((0.0, 0.0, w, h), self.width, self.height)
+		Ok(svg.finish((0.0, 0.0, w, h), self.width, self.height))
 	}
 
 	/// The scene at `time`, with puppets blended between keyframes and brought to life.
@@ -423,43 +456,41 @@ impl Renderer<'_> {
 		}
 	}
 
-	/// The camera at `time`: framing targets at every keyframe and line, eased between.
+	/// The camera at `time`, reading the setups the director planned for this shot.
 	fn camera(&self, shot: &Shot, time: f32) -> View {
-		let mut events: Vec<f32> = shot.keys.iter().map(|key| key.time).collect();
-		events.extend(shot.lines.iter().map(|line| line.start));
-		events.sort_by(f32::total_cmp);
-		events.dedup_by(|a, b| (*a - *b).abs() < 0.05);
-
-		// The camera sets off a beat early so it has arrived by the time someone speaks.
-		let starts: Vec<f32> = events
+		let portrait = self.format.aspect() < 1.0;
+		let setups = shot.setups_for(portrait);
+		let index = setups
 			.iter()
-			.map(|t| (t - CAMERA_LEAD).max(shot.start))
-			.collect();
-		let index = starts.iter().rposition(|t| *t <= time).unwrap_or(0);
-		let current = self.target(shot, events[index]);
-		let previous = if index == 0 {
-			current
-		} else {
-			self.target(shot, events[index - 1])
-		};
-		let mut view = previous.blend(current, smoothstep((time - starts[index]) / CAMERA_EASE));
+			.rposition(|setup| setup.time <= time)
+			.unwrap_or(0);
+		let mut view = self.setup_view(shot, setups, index, time);
 
 		// A slow push-in over each shot keeps still moments alive.
 		let local = ((time - shot.start) / shot.duration().max(0.1)).clamp(0.0, 1.0);
 		view.height *= 1.0 - 0.04 * local;
 
-		// Big impacts bump the camera, fading out fast.
-		for cue in self
+		// Big impacts bump the camera, fading out fast; so does a direction's `shake=`.
+		let mut bumps: Vec<(f32, f32)> = self
 			.timeline
 			.cues
 			.iter()
 			.filter(|cue| matches!(cue.sound, Sound::Bonk | Sound::Whoosh))
-		{
-			let k = (time - cue.time) / 0.45;
+			.map(|cue| (cue.time, 1.0))
+			.collect();
+		bumps.extend(
+			setups
+				.iter()
+				.filter(|setup| setup.shake > 0.0)
+				.map(|setup| (setup.time, setup.shake)),
+		);
+
+		for (when, strength) in bumps {
+			let k = (time - when) / 0.45;
 
 			if (0.0..1.0).contains(&k) {
 				let tick = (time * 60.0) as u64;
-				let amount = (1.0 - k).powi(2) * view.height * 0.012;
+				let amount = (1.0 - k).powi(2) * view.height * 0.012 * strength;
 				view.centre = view.centre + pt(noise(31, tick), noise(32, tick)) * amount;
 			}
 		}
@@ -467,37 +498,187 @@ impl Renderer<'_> {
 		view
 	}
 
-	/// Where the camera wants to be once everything settles after `time`.
-	fn target(&self, shot: &Shot, time: f32) -> View {
-		let index = shot
-			.keys
+	/// The view one setup gives at `time`: where its travel has carried the camera to.
+	fn setup_view(&self, shot: &Shot, setups: &[Setup], index: usize, time: f32) -> View {
+		let setup = &setups[index];
+		let destination = self.framing_view(shot, setup, time);
+
+		let previous = if index == 0 {
+			destination
+		} else {
+			self.held_view(shot, setups, index - 1)
+		};
+
+		match setup.travel {
+			// A cut lands here; there is nothing to blend.
+			Travel::Cut => destination,
+			Travel::Glide => {
+				let over = if setup.over > 0.0 {
+					setup.over
+				} else {
+					director::CAMERA_EASE
+				};
+				previous.blend(destination, smoothstep((time - setup.time) / over.max(0.01)))
+			}
+			_ => {
+				let over = self.move_length(shot, setups, index, setup.over);
+				previous.blend(
+					destination,
+					smoothstep((time - setup.time) / over.max(0.01)),
+				)
+			}
+		}
+	}
+
+	/// How long a move takes: what the direction said, else the rest of the setup.
+	fn move_length(&self, shot: &Shot, setups: &[Setup], index: usize, over: f32) -> f32 {
+		if over > 0.0 {
+			return over;
+		}
+
+		let end = setups.get(index + 1).map_or(shot.end, |next| next.time);
+		(end - setups[index].time).max(0.01)
+	}
+
+	/// The completed view of a setup: where its framing settles once its move has finished.
+	fn held_view(&self, shot: &Shot, setups: &[Setup], index: usize) -> View {
+		let setup = &setups[index];
+		let aspect = self.format.aspect();
+		let mut view = self.framing_view(shot, setup, setup.anchor);
+
+		// A relative move (no new framing) widens or tightens the view it starts from.
+		if setup.travel.is_move() && index > 0 && setup.framing == setups[index - 1].framing {
+			view = director::arrives_from(
+				setup.travel,
+				self.held_view(shot, setups, index - 1),
+				aspect,
+			);
+		}
+
+		view
+	}
+
+	/// The view a setup's framing names, read at its anchor (or at `time`, for a tracking shot).
+	fn framing_view(&self, shot: &Shot, setup: &Setup, time: f32) -> View {
+		let aspect = self.format.aspect();
+
+		match &setup.framing {
+			Framing::Auto => self.target(shot, setup.anchor),
+			Framing::Zoom { zoom, look } => director::zoom_view(*zoom, *look, aspect),
+			Framing::Shot { size, on } => {
+				let at = if setup.travel == Travel::Track {
+					time
+				} else {
+					setup.anchor
+				};
+				let scene = shot.scene_at(setup.anchor);
+				let puppets = compose::puppets(scene, at, false);
+				let subjects = self.subjects(on, *size, shot, at, &puppets);
+
+				director::shot_view(
+					aspect,
+					self.format.action_band(),
+					*size,
+					&subjects,
+					scene.setting.ground(),
+				)
+				.unwrap_or_else(|| self.target(shot, setup.anchor))
+			}
+		}
+	}
+
+	/// Which puppets a shot frames: those named by `on`, else everyone on stage — the current
+	/// speaker for a close shot, or the star.
+	fn subjects<'a>(
+		&self,
+		on: &[String],
+		size: ShotSize,
+		shot: &Shot,
+		time: f32,
+		puppets: &'a [Puppet],
+	) -> Vec<&'a Puppet> {
+		if !on.is_empty() {
+			return puppets
+				.iter()
+				.filter(|puppet| on.contains(&puppet.id))
+				.collect();
+		}
+
+		let visible: Vec<&Puppet> = puppets
 			.iter()
-			.rposition(|key| key.time <= time + 1e-3)
+			.filter(|puppet| puppet.id != "wormsley")
+			.collect();
+
+		match size {
+			ShotSize::Close | ShotSize::ExtremeClose => {
+				let speaking = speakers_near(shot, time);
+				let speakers: Vec<&Puppet> = visible
+					.iter()
+					.copied()
+					.filter(|puppet| speaking.contains(&puppet.id))
+					.collect();
+
+				if !speakers.is_empty() {
+					return speakers;
+				}
+
+				// Nobody speaking yet: hold on the star.
+				let star = self.story.meta.star.as_deref().unwrap_or("");
+				let starring: Vec<&Puppet> = visible
+					.iter()
+					.copied()
+					.filter(|puppet| puppet.id.split('.').next().unwrap_or("") == star)
+					.collect();
+
+				if starring.is_empty() {
+					visible
+				} else {
+					starring
+				}
+			}
+			_ => visible,
+		}
+	}
+
+	/// How strongly the setting softens behind the subject on a close shot: (far, near) blurs in
+	/// stage units. `None` keeps everything sharp.
+	fn depth_of_field(&self, setups: &[Setup], local: f32) -> Option<(f32, f32)> {
+		if !self.story.meta.video.depth_of_field {
+			return None;
+		}
+
+		let index = setups
+			.iter()
+			.rposition(|setup| setup.time <= local)
 			.unwrap_or(0);
-		let scene = &shot.keys[index].scene;
-		let puppets = compose::puppets(scene, time, false);
+
+		match &setups[index].framing {
+			Framing::Shot {
+				size: ShotSize::Close,
+				..
+			} => Some(CLOSE_BLUR),
+			Framing::Shot {
+				size: ShotSize::ExtremeClose,
+				..
+			} => Some(EXTREME_BLUR),
+			_ => None,
+		}
+	}
+
+	/// Where the camera wants to be once everything settles after `time` (the automatic framing).
+	fn target(&self, shot: &Shot, time: f32) -> View {
+		let scene = shot.scene_at(time);
 		let ground = scene.setting.ground();
 		let aspect = self.format.aspect();
 
 		if (scene.camera.zoom - 1.0).abs() > 0.01 {
 			let (lx, ly) = scene.camera.look;
-			let side = STAGE / scene.camera.zoom;
-
-			return clamp(
-				self.format,
-				View {
-					centre: pt(lx * STAGE, ly * STAGE),
-					height: if aspect > 1.0 {
-						side * 0.75
-					} else {
-						side * 1.25
-					},
-				},
-			);
+			return director::zoom_view(scene.camera.zoom, (lx, ly), aspect);
 		}
 
 		let speakers = speakers_near(shot, time);
 		let star = self.story.meta.star.as_deref();
+		let puppets = compose::puppets(scene, time, false);
 		let visible: Vec<&Puppet> = puppets.iter().filter(|p| p.id != "wormsley").collect();
 		let focus: Vec<&Puppet> = if aspect < 1.0 {
 			let talking: Vec<&Puppet> = visible
@@ -525,17 +706,15 @@ impl Renderer<'_> {
 			visible.clone()
 		};
 
-		match bounds(&focus) {
+		match director::bounds(&focus) {
 			Some(extent) => fit(self.format, extent, ground),
-			None => {
-				clamp(
-					self.format,
-					View {
-						centre: pt(STAGE / 2.0, ground - STAGE * 0.3),
-						height: if aspect > 1.0 { 1400.0 } else { 2300.0 },
-					},
-				)
-			}
+			None => director::clamp(
+				aspect,
+				View {
+					centre: pt(STAGE / 2.0, ground - STAGE * 0.3),
+					height: if aspect > 1.0 { 1400.0 } else { 2300.0 },
+				},
+			),
 		}
 	}
 
@@ -657,48 +836,204 @@ impl Renderer<'_> {
 		svg.raw(&text::svg(&block, Ink::default()));
 	}
 
-	/// A paper sheet that sweeps across at the end of a page and away at the start of the next.
-	fn wipe(&self, svg: &mut Svg, shot: &Shot, local: f32) {
+	/// The page turn at the edges of a shot: this page's `transition` arriving, and the next
+	/// page's leaving.
+	fn turn(&self, svg: &mut Svg, shot: &Shot, local: f32) -> Result<()> {
 		let (w, h) = (self.width as f32, self.height as f32);
 		let first = shot.kind == ShotKind::Title;
-		let last = std::ptr::eq(shot, self.timeline.shots.last().unwrap_or(shot));
+		let index = self
+			.timeline
+			.shots
+			.iter()
+			.position(|other| std::ptr::eq(other, shot));
+		let last = index.is_some_and(|index| index + 1 == self.timeline.shots.len());
 		let remaining = shot.duration() - local;
-		let cover = if !first && local < WIPE {
-			Some((0.0, w * (1.0 - smoothstep(local / WIPE))))
-		} else if !last && remaining < WIPE {
-			Some((w * smoothstep(remaining / WIPE), w))
-		} else {
-			None
-		};
 
-		if let Some((x0, x1)) = cover {
-			if x1 - x0 < 1.0 {
-				return;
+		// This page arriving.
+		if !first && local < WIPE {
+			let t = smoothstep(local / WIPE);
+
+			match shot.transition {
+				Transition::Wipe => sheet(svg, h, 0.0, w * (1.0 - t)),
+				Transition::Cut => {}
+				Transition::Dissolve => {
+					self.under_previous(svg, shot, 1.0 - t)?;
+				}
+				Transition::Fade => {
+					svg.fill_alpha(&Path::rect(0.0, 0.0, w, h), palette::PAPER, 1.0 - t);
+				}
+				Transition::Iris => self.iris(svg, w, h, shot, local, t)?,
+				// The slide itself wraps the whole frame; the old page sits underneath.
+				Transition::Push => self.under_previous(svg, shot, 1.0)?,
 			}
-
-			// The sheet runs from its wobbly leading edge to the far side of the screen.
-			let (edge, far) = if x0 > 0.0 { (x0, x1) } else { (x1, x0) };
-			let points: Vec<Pt> = (0..=12)
-				.map(|i| {
-					let y = i as f32 / 12.0 * (h + 20.0) - 10.0;
-					pt(edge + (y / h * 9.0).sin() * 14.0, y)
-				})
-				.collect();
-			let edge_line = Path::spline(&points);
-			let sheet = edge_line
-				.clone()
-				.line_to(pt(far, h + 10.0))
-				.line_to(pt(far, -10.0))
-				.close();
-			svg.fill(&sheet, palette::PAPER);
-			svg.stroke(&edge_line, palette::INK, svg.line * 1.5);
 		}
 
+		// This page leaving, the way the next one arrives.
+		if !last && remaining < WIPE {
+			let next = index
+				.and_then(|index| self.timeline.shots.get(index + 1))
+				.with_context(|| "a page turn needs a page after this one")?;
+			let leaving = smoothstep(remaining / WIPE);
+
+			match next.transition {
+				Transition::Wipe => sheet(svg, h, w * leaving, w),
+				Transition::Cut | Transition::Dissolve | Transition::Push => {}
+				Transition::Fade => {
+					svg.fill_alpha(&Path::rect(0.0, 0.0, w, h), palette::PAPER, 1.0 - leaving);
+				}
+				Transition::Iris => self.iris(svg, w, h, shot, local, leaving)?,
+			}
+		}
+
+		// The video's last moments fade to paper, as they always have.
 		if last && remaining < 0.6 {
 			let fade = 1.0 - remaining / 0.6;
 			svg.fill_alpha(&Path::rect(0.0, 0.0, w, h), palette::PAPER, fade);
 		}
+
+		Ok(())
 	}
+
+	/// An iris: a circle of the scene through paper, closing or opening on the page's subject.
+	fn iris(
+		&self,
+		svg: &mut Svg,
+		w: f32,
+		h: f32,
+		shot: &Shot,
+		local: f32,
+		fraction: f32,
+	) -> Result<()> {
+		let radius = w.hypot(h) * 0.6 * fraction;
+		let (cx, cy) = self.iris_centre(shot, shot.start + local);
+
+		if radius < 1.0 {
+			svg.fill(&Path::rect(0.0, 0.0, w, h), palette::PAPER);
+			return Ok(());
+		}
+
+		let hole = format!(
+			"M {:.2} {:.2} A {radius:.2} {radius:.2} 0 1 0 {:.2} {:.2} A {radius:.2} {radius:.2} 0 1 0 {:.2} {:.2} Z",
+			cx - radius,
+			cy,
+			cx + radius,
+			cy,
+			cx - radius,
+			cy
+		);
+		svg.raw(&format!(
+			r#"<path d="M0 0 H{w:.2} V{h:.2} H0 Z {hole}" fill="{}" fill-rule="evenodd"/>"#,
+			palette::PAPER
+		));
+
+		Ok(())
+	}
+
+	/// Where the iris pinches to: the page's star, or whoever spoke last, on screen.
+	fn iris_centre(&self, shot: &Shot, time: f32) -> (f32, f32) {
+		let centre = (self.width as f32 / 2.0, self.height as f32 / 2.0);
+		let scene = shot.scene_at(time);
+		let puppets = compose::puppets(scene, time, false);
+		let speaking = speakers_near(shot, time);
+		let star = self.story.meta.star.as_deref();
+
+		let subject = puppets
+			.iter()
+			.filter(|puppet| puppet.id != "wormsley")
+			.find(|puppet| speaking.len() == 1 && puppet.id == speaking[0])
+			.or_else(|| {
+				puppets
+					.iter()
+					.find(|puppet| Some(puppet.id.split('.').next().unwrap_or("")) == star)
+			})
+			.or_else(|| puppets.iter().filter(|puppet| puppet.id != "wormsley").next());
+
+		let Some(puppet) = subject else {
+			return centre;
+		};
+
+		let (head, _) = puppet.head();
+		let aspect = self.format.aspect();
+		let view = self.camera(shot, time);
+		let scale = self.height as f32 / view.height;
+		let x = (head.x - (view.centre.x - view.width(aspect) / 2.0)) * scale;
+
+		(x, (head.y - (view.centre.y - view.height / 2.0)) * scale)
+	}
+
+	/// The previous page's last frame, rendered and embedded, so a dissolve can run over it or a
+	/// push can slide over it.
+	fn under_previous(&self, svg: &mut Svg, shot: &Shot, opacity: f32) -> Result<()> {
+		if opacity <= 0.01 {
+			return Ok(());
+		}
+
+		let index = self
+			.timeline
+			.shots
+			.iter()
+			.position(|other| std::ptr::eq(other, shot))
+			.and_then(|index| index.checked_sub(1))
+			.and_then(|index| self.timeline.shots.get(index))
+			.with_context(|| "a transition needs a page before this one")?;
+		let renderer = Renderer {
+			timeline: self.timeline,
+			story: self.story,
+			format: self.format,
+			width: self.width,
+			height: self.height,
+		};
+		let previous = renderer.svg(index.end - 0.01, 0)?;
+		let pixmap = raster::render(&previous)?;
+		let data = BASE64.encode(raster::jpeg(&pixmap, 82)?);
+
+		svg.raw(&format!(
+			r#"<image x="0" y="0" width="{}" height="{}" opacity="{opacity:.3}" preserveAspectRatio="none" xlink:href="data:image/jpeg;base64,{data}"/>"#,
+			self.width, self.height
+		));
+
+		Ok(())
+	}
+}
+
+/// Opens a Gaussian-blur group; pair with [`close_blur`]. The `feGaussianBlur` runs in stage
+/// units, so the softening grows as the camera closes in.
+fn open_blur(svg: &mut Svg, deviation: f32) {
+	let id = svg.next_id("dof");
+	svg.define(&format!(
+		r#"<filter id="{id}" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="{deviation:.1}"/></filter>"#
+	));
+	svg.begin_opacity(1.0);
+	svg.raw(&format!(r#"<g filter="url(#{id})">"#));
+}
+
+fn close_blur(svg: &mut Svg) {
+	svg.raw("</g>");
+	svg.end();
+}
+
+/// A paper sheet from `x0` to `x1`, with a wobbly leading edge.
+fn sheet(svg: &mut Svg, h: f32, x0: f32, x1: f32) {
+	if x1 - x0 < 1.0 {
+		return;
+	}
+
+	// The sheet runs from its wobbly leading edge to the far side of the screen.
+	let (edge, far) = if x0 > 0.0 { (x0, x1) } else { (x1, x0) };
+	let points: Vec<Pt> = (0..=12)
+		.map(|i| {
+			let y = i as f32 / 12.0 * (h + 20.0) - 10.0;
+			pt(edge + (y / h * 9.0).sin() * 14.0, y)
+		})
+		.collect();
+	let edge_line = Path::spline(&points);
+	let cover = edge_line
+		.clone()
+		.line_to(pt(far, h + 10.0))
+		.line_to(pt(far, -10.0))
+		.close();
+	svg.fill(&cover, palette::PAPER);
+	svg.stroke(&edge_line, palette::INK, svg.line * 1.5);
 }
 
 /// Who is talking at `time` (lingering briefly after the line so listeners don't snap away).
@@ -745,74 +1080,12 @@ fn fit(format: Format, extent: (f32, f32, f32, f32), ground: f32) -> View {
 	let view_bottom = ground + height * (1.0 - ground_at);
 	let centre = pt(f32::midpoint(left, right), view_bottom - height / 2.0);
 
-	clamp(format, View { centre, height })
+	director::clamp(aspect, View { centre, height })
 }
 
 /// The tallest view that stays on drawn stage in both directions.
 fn tallest_view(format: Format) -> f32 {
-	let drawn = STAGE + OVERDRAW * 2.0;
-	drawn.min(drawn / format.aspect())
-}
-
-/// Keeps the view on drawn stage.
-fn clamp(format: Format, view: View) -> View {
-	let aspect = format.aspect();
-	let height = view.height.min(tallest_view(format));
-	let width = height * aspect;
-	let half_w = width / 2.0;
-	let half_h = height / 2.0;
-	let x = view
-		.centre
-		.x
-		.clamp(-OVERDRAW + half_w, STAGE + OVERDRAW - half_w);
-	let y = view
-		.centre
-		.y
-		.clamp(-OVERDRAW + half_h, STAGE + OVERDRAW - half_h);
-
-	View {
-		centre: pt(x, y),
-		height,
-	}
-}
-
-/// Rough stage-space bounds of puppets: (left, top, right, bottom).
-fn bounds(puppets: &[&Puppet]) -> Option<(f32, f32, f32, f32)> {
-	puppets
-		.iter()
-		.map(|p| extent(p))
-		.reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
-}
-
-fn extent(puppet: &Puppet) -> (f32, f32, f32, f32) {
-	let s = puppet.scale;
-	let (x, y) = (puppet.at.x, puppet.at.y);
-
-	match &puppet.kind {
-		Kind::Figure(look) => {
-			let frame = look.frame();
-			let lying = matches!(&puppet.body, Body::Figure(state) if state.lie > 0.5);
-
-			if lying {
-				let reach = frame.height() * s;
-				(
-					x - reach,
-					y - frame.head_r * 2.4 * s,
-					x + reach * 0.3,
-					y + 20.0,
-				)
-			} else {
-				let half = frame.head_r * 1.5 * s;
-				(x - half, y - frame.height() * s - 20.0, x + half, y + 20.0)
-			}
-		}
-		Kind::Bird(_) => (x - 90.0 * s, y - 70.0 * s, x + 90.0 * s, y + 70.0 * s),
-		Kind::Dog(_) => (x - 200.0 * s, y - 180.0 * s, x + 260.0 * s, y),
-		Kind::Toothbrush(_) => (x - 120.0 * s, y - 650.0 * s, x + 120.0 * s, y),
-		Kind::Tree(_) => (x - 400.0 * s, y - 1050.0 * s, x + 400.0 * s, y),
-		Kind::Flower(..) => (x - 110.0 * s, y - 520.0 * s, x + 110.0 * s, y),
-		Kind::Worm => (x - 40.0 * s, y - 120.0 * s, x + 40.0 * s, y),
-	}
+	director::tallest_view(format.aspect())
 }
 
 /// An actor arriving: walking in from the side they enter from, or popping into place.

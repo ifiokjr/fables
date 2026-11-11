@@ -5,6 +5,7 @@
 //! to the narration. Frames are rendered in parallel and piped straight into ffmpeg.
 
 pub mod audio;
+pub mod director;
 pub mod frames;
 pub mod lipsync;
 pub mod motion;

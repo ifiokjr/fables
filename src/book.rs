@@ -713,9 +713,28 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 
 	let puppets = compose::puppets(&page.scene, 0.0, true);
 	let zoom = page.scene.camera.zoom;
+	let camera = &page.scene.camera;
 	svg.begin_layer();
 
-	if (zoom - 1.0).abs() > 0.001 {
+	// A heading's `shot=` frames the still like the video would frame it: composed from the
+	// puppets, with headroom and lead room. It wins over a bare `zoom=`.
+	let shot_transform = camera
+		.shot
+		.and_then(|size| crate::video::director::still_view(&page.scene, &puppets, size, &camera.on));
+
+	if let Some(view) = shot_transform {
+		let centre = STAGE / 2.0;
+		svg.begin(&format!(
+			"translate({:.1} {:.1}) scale({:.3}) translate({:.1} {:.1})",
+			centre,
+			centre,
+			STAGE / view.height,
+			-view.centre.x,
+			-view.centre.y
+		));
+		compose::draw_scene(svg, &page.scene, &puppets, 0.0);
+		svg.end();
+	} else if (zoom - 1.0).abs() > 0.001 {
 		let (lx, ly) = page.scene.camera.look;
 		let focus = pt(lx * STAGE, ly * STAGE);
 		let centre = STAGE / 2.0;

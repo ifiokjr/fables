@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 
@@ -31,6 +32,7 @@ use crate::story::Page;
 use crate::story::Story;
 use crate::story::TextPlace;
 use crate::story::Token;
+use crate::story::Transition;
 
 /// Where an actor walks in from or off to (video only; stills just show or hide them).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,11 +157,130 @@ pub struct Traits {
 	pub mint: f32,
 }
 
-/// Camera framing as a zoom factor and a focus point (fractions of the stage).
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The size of a shot: how much of its subject the camera frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShotSize {
+	/// The whole setting, as wide as the format allows.
+	Wide,
+	/// The subjects head to toe, with margin.
+	Full,
+	/// The subjects from the waist up.
+	Medium,
+	/// Head and shoulders.
+	Close,
+	/// The face alone.
+	ExtremeClose,
+}
+
+impl ShotSize {
+	pub const ALL: [&'static str; 5] = ["wide", "full", "medium", "close", "extreme-close"];
+
+	pub fn parse(value: &str) -> Option<ShotSize> {
+		match value {
+			"wide" => Some(ShotSize::Wide),
+			"full" => Some(ShotSize::Full),
+			"medium" => Some(ShotSize::Medium),
+			"close" => Some(ShotSize::Close),
+			"extreme-close" => Some(ShotSize::ExtremeClose),
+			_ => None,
+		}
+	}
+
+	pub fn name(self) -> &'static str {
+		match self {
+			ShotSize::Wide => "wide",
+			ShotSize::Full => "full",
+			ShotSize::Medium => "medium",
+			ShotSize::Close => "close",
+			ShotSize::ExtremeClose => "extreme-close",
+		}
+	}
+}
+
+/// How the camera travels to a shot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Travel {
+	/// Arrive on the cut: film cuts between shots, it does not glide.
+	Cut,
+	/// Glide, the way the camera always moved.
+	Glide,
+	/// Glide in, tightening on the subject.
+	Push,
+	/// Glide out, widening away from the subject.
+	Pull,
+	/// Glide sideways, showing what is to the camera's left.
+	PanLeft,
+	/// Glide sideways, showing what is to the camera's right.
+	PanRight,
+	/// Glide up, showing what is above.
+	TiltUp,
+	/// Glide down, showing what is below.
+	TiltDown,
+	/// Follow the subject as it moves.
+	Track,
+}
+
+impl Travel {
+	pub const MOVES: [&'static str; 7] = [
+		"push",
+		"pull",
+		"pan-left",
+		"pan-right",
+		"tilt-up",
+		"tilt-down",
+		"track",
+	];
+
+	pub fn parse_move(value: &str) -> Option<Travel> {
+		match value {
+			"push" => Some(Travel::Push),
+			"pull" => Some(Travel::Pull),
+			"pan-left" => Some(Travel::PanLeft),
+			"pan-right" => Some(Travel::PanRight),
+			"tilt-up" => Some(Travel::TiltUp),
+			"tilt-down" => Some(Travel::TiltDown),
+			"track" => Some(Travel::Track),
+			_ => None,
+		}
+	}
+
+	pub fn name(self) -> &'static str {
+		match self {
+			Travel::Cut => "cut",
+			Travel::Glide => "ease",
+			Travel::Push => "push",
+			Travel::Pull => "pull",
+			Travel::PanLeft => "pan-left",
+			Travel::PanRight => "pan-right",
+			Travel::TiltUp => "tilt-up",
+			Travel::TiltDown => "tilt-down",
+			Travel::Track => "track",
+		}
+	}
+
+	/// Whether the travel is a named move whose length `over` measures.
+	pub fn is_move(self) -> bool {
+		!matches!(self, Travel::Cut | Travel::Glide)
+	}
+}
+
+/// Camera framing: a legacy zoom and look point, or a shot size framed on actors.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Camera {
 	pub zoom: f32,
 	pub look: (f32, f32),
+	/// A shot size framed on actors; `None` keeps the zoom and look framing.
+	pub shot: Option<ShotSize>,
+	/// Who the shot frames: actor ids. Empty means everyone on stage, or the current speaker
+	/// for a close shot.
+	pub on: Vec<String>,
+	/// How the camera travels here. `None` means the script did not say: a shot change cuts
+	/// (film grammar) and a legacy `zoom=` glides (as it always has).
+	pub travel: Option<Travel>,
+	/// Seconds a named move takes; zero means the rest of the shot.
+	pub over: f32,
+	/// A decaying camera shake when this direction lands (0 = none).
+	pub shake: f32,
 }
 
 impl Default for Camera {
@@ -167,7 +288,20 @@ impl Default for Camera {
 		Self {
 			zoom: 1.0,
 			look: (0.5, 0.5),
+			shot: None,
+			on: Vec::new(),
+			travel: None,
+			over: 0.0,
+			shake: 0.0,
 		}
+	}
+}
+
+impl Camera {
+	/// Whether this camera state names any of the shot vocabulary (`shot=`, `on=`, a move,
+	/// `cut`, `ease` or `shake=`), as opposed to the legacy `zoom=` and `look=`.
+	pub fn is_directed(&self) -> bool {
+		self.shot.is_some() || self.travel.is_some() || self.shake > 0.0 || !self.on.is_empty()
 	}
 }
 
@@ -199,6 +333,10 @@ impl Scene {
 		for token in &page.options {
 			match token.key.as_str() {
 				"text" | "video" | "book" => {}
+				// A page-level choice, not scene state: the timeline reads it from the heading.
+				"transition" => {
+					transition(token.value.as_deref(), page.line)?;
+				}
 				_ => scene.apply_scene_token(token, page.line)?,
 			}
 		}
@@ -278,10 +416,45 @@ impl Scene {
 			("impact", Some(v)) => self.weather.impact = number(token, v, line)?,
 			("zoom", Some(v)) => self.camera.zoom = number(token, v, line)?.max(0.5),
 			("look", Some(v)) => self.camera.look = pair(v, line)?,
+			("shot", Some(v)) => {
+				self.camera.shot = Some(ShotSize::parse(v).ok_or_else(|| {
+					anyhow::anyhow!(
+						"line {line}: unknown shot `{v}`; try {}",
+						ShotSize::ALL.join(", ")
+					)
+				})?);
+				// A new shot frames its default subjects unless this direction names them.
+				self.camera.on.clear();
+			}
+			("on", Some(v)) => {
+				self.camera.on = v
+					.split(',')
+					.map(str::trim)
+					.filter(|id| !id.is_empty())
+					.map(str::to_owned)
+					.collect();
+
+				if self.camera.on.is_empty() {
+					bail!("line {line}: `on=` names nobody; use actor ids like `on=stinky,mum`");
+				}
+			}
+			("move", Some(v)) => {
+				self.camera.travel = Some(Travel::parse_move(v).ok_or_else(|| {
+					anyhow::anyhow!(
+						"line {line}: unknown move `{v}`; try {}",
+						Travel::MOVES.join(", ")
+					)
+				})?);
+			}
+			("cut", None) => self.camera.travel = Some(Travel::Cut),
+			("ease", None) => self.camera.travel = Some(Travel::Glide),
+			("over", Some(v)) => self.camera.over = number(token, v, line)?.max(0.0),
+			("shake", Some(v)) => self.camera.shake = number(token, v, line)?.clamp(0.0, 1.0),
 			_ => {
 				bail!(
 					"line {line}: `{token}` is not a scene option; use night, day, wilt=, stink=, \
-					 mint=, tint=, speed=, impact=, zoom= or look=x,y"
+					 mint=, tint=, speed=, impact=, zoom=, look=x,y, shot=, on=, move=, over=, \
+					 shake=, cut or ease"
 				)
 			}
 		}
@@ -322,6 +495,23 @@ fn number(token: &Token, value: &str, line: usize) -> Result<f32> {
 		anyhow::anyhow!(
 			"line {line}: `{token}` needs a number, e.g. `{}=0.5`",
 			token.key
+		)
+	})
+}
+
+/// The page transition named in a heading (`transition=wipe|cut|dissolve|fade|iris|push`).
+pub fn transition(value: Option<&str>, line: usize) -> Result<Transition> {
+	let value = value.with_context(|| {
+		format!(
+			"line {line}: `transition` needs a name; try {}",
+			Transition::ALL.join(", ")
+		)
+	})?;
+
+	Transition::parse(value).ok_or_else(|| {
+		anyhow::anyhow!(
+			"line {line}: unknown transition `{value}`; try {}",
+			Transition::ALL.join(", ")
 		)
 	})
 }
@@ -646,6 +836,7 @@ fn hide_wormsley(scene: &mut Scene, page: &Page, cast: &Cast, index: usize) {
 mod tests {
 	use super::*;
 	use crate::story;
+	use crate::story::Direction;
 
 	fn cast() -> Cast {
 		Cast::parse("[stinky]\nname = \"Stinky\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n")
@@ -740,6 +931,107 @@ mod tests {
 
 		let message = format!("{:#}", run("# park\n@granny").unwrap_err());
 		assert!(message.contains("unknown actor `granny`"), "{message}");
+	}
+
+	#[test]
+	fn camera_vocabulary_parses_into_the_scene_camera() {
+		let scene = run(
+			"# park\n@camera shot=close on=stinky,mum move=push over=2.5 shake=0.5\n",
+		)
+		.unwrap();
+		let camera = &scene.camera;
+
+		assert_eq!(camera.shot, Some(ShotSize::Close));
+		assert_eq!(camera.on, vec!["stinky".to_owned(), "mum".to_owned()]);
+		assert_eq!(camera.travel, Some(Travel::Push));
+		assert!((camera.over - 2.5).abs() < f32::EPSILON);
+		assert!((camera.shake - 0.5).abs() < f32::EPSILON);
+	}
+
+	#[test]
+	fn a_new_shot_frames_its_default_subjects_again() {
+		let scene = run("# park\n@camera shot=close on=stinky\n@camera shot=wide\n").unwrap();
+
+		assert!(scene.camera.on.is_empty(), "a new shot names nobody");
+		assert_eq!(scene.camera.shot, Some(ShotSize::Wide));
+	}
+
+	#[test]
+	fn cut_and_ease_are_camera_words() {
+		let cut = run("# park\n@camera cut\n").unwrap();
+		assert_eq!(cut.camera.travel, Some(Travel::Cut));
+
+		let ease = run("# park\n@camera ease\n").unwrap();
+		assert_eq!(ease.camera.travel, Some(Travel::Glide));
+
+		let ease_over = run("# park\n@camera ease over=3\n").unwrap();
+		assert_eq!(ease_over.camera.travel, Some(Travel::Glide));
+		assert!((ease_over.camera.over - 3.0).abs() < f32::EPSILON);
+	}
+
+	#[test]
+	fn bad_camera_values_name_the_line_and_the_options() {
+		let message = format!("{:#}", run("# park\n@camera shot=cinematic").unwrap_err());
+		assert!(
+			message.contains("line 6") && message.contains("extreme-close"),
+			"{message}"
+		);
+
+		let message = format!("{:#}", run("# park\n@camera move=dolly").unwrap_err());
+		assert!(
+			message.contains("line 6") && message.contains("pan-left"),
+			"{message}"
+		);
+
+		let message = format!("{:#}", run("# park\n@camera shake=furious").unwrap_err());
+		assert!(
+			message.contains("line 6") && message.contains("needs a number"),
+			"{message}"
+		);
+
+		let message = format!("{:#}", run("# park\n@camera on=").unwrap_err());
+		assert!(message.contains("names nobody"), "{message}");
+
+		let message = format!("{:#}", run("# park transition=blink\n").unwrap_err());
+		assert!(
+			message.contains("line 5") && message.contains("iris"),
+			"{message}"
+		);
+	}
+
+	#[test]
+	fn transitions_and_shots_live_in_page_headings() {
+		let story = story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park transition=iris shot=medium \
+			 on=stinky\n@stinky\n# town transition=cut\n",
+		)
+		.unwrap();
+
+		assert_eq!(story.pages[0].transition(), Some(Transition::Iris));
+		assert_eq!(story.pages[1].transition(), Some(Transition::Cut));
+
+		let scene = Scene::for_page(&story.pages[0], &story.settings).unwrap();
+		assert_eq!(scene.camera.shot, Some(ShotSize::Medium));
+		assert_eq!(scene.camera.on, vec!["stinky".to_owned()]);
+	}
+
+	#[test]
+	fn the_video_table_defaults_to_the_new_camera() {
+		let story = story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n").unwrap();
+		assert_eq!(story.meta.video.direction, Direction::Auto);
+		assert!(story.meta.video.depth_of_field);
+
+		let locked = story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n[video]\ndirection = \"locked\"\n\
+			 depth-of-field = false\ntransition = \"dissolve\"\n+++\n# park\n",
+		)
+		.unwrap();
+		assert_eq!(locked.meta.video.direction, Direction::Locked);
+		assert!(!locked.meta.video.depth_of_field);
+		assert_eq!(
+			locked.meta.video.transition,
+			Some(Transition::Dissolve)
+		);
 	}
 
 	#[test]
