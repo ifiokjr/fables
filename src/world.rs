@@ -339,15 +339,11 @@ mod tests {
 	fn a_world_lights_its_books_unless_the_book_names_a_light() {
 		let dir = tempfile::tempdir().unwrap();
 		let golden = World::load(&world(dir.path(), "golden", "light = \"golden\"\n")).unwrap();
-		let story = &mut crate::story::parse(
-			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n",
-		)
-		.unwrap();
+		let story =
+			&mut crate::story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n")
+				.unwrap();
 		golden.furnish(story).unwrap();
-		assert_eq!(
-			story.light,
-			crate::art::Light::of(crate::art::light::Preset::Golden)
-		);
+		assert_eq!(story.light, Light::of(Preset::Golden));
 
 		// The book's own front matter wins over the world's default.
 		let dawn = &mut crate::story::parse(
@@ -355,15 +351,15 @@ mod tests {
 		)
 		.unwrap();
 		golden.furnish(dawn).unwrap();
-		assert_eq!(
-			dawn.light,
-			crate::art::Light::of(crate::art::light::Preset::Dawn)
-		);
+		assert_eq!(dawn.light, Light::of(Preset::Dawn));
 
 		let error = format!(
 			"{:#}",
 			World::load(&world(dir.path(), "odd", "light = \"sunset\"\n")).unwrap_err()
 		);
-		assert!(error.contains("sunset") && error.contains("candle"), "{error}");
+		assert!(
+			error.contains("sunset") && error.contains("candle"),
+			"{error}"
+		);
 	}
 }

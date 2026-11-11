@@ -985,7 +985,10 @@ mod tests {
 	#[test]
 	fn a_light_is_scene_state_that_can_change_mid_page() {
 		let scene = run("# park light=golden\n@stinky\n").unwrap();
-		assert_eq!(scene.weather.light.preset, crate::art::light::Preset::Golden);
+		assert_eq!(
+			scene.weather.light.preset,
+			crate::art::light::Preset::Golden
+		);
 
 		// A bare `night` keeps today's behaviour: no light preset comes with it.
 		let night = run("# park night\n@stinky\n").unwrap();
@@ -993,7 +996,10 @@ mod tests {
 		assert!(night.weather.light.is_day());
 
 		let eased = run("# park light=golden\n@stinky\n@scene light=moonlit\n").unwrap();
-		assert_eq!(eased.weather.light.preset, crate::art::light::Preset::Moonlit);
+		assert_eq!(
+			eased.weather.light.preset,
+			crate::art::light::Preset::Moonlit
+		);
 	}
 
 	#[test]

@@ -743,7 +743,11 @@ fn path_bounds(data: &str) -> Option<(f32, f32, f32, f32)> {
 		.split(|c: char| c.is_whitespace() || c == ',')
 		.filter(|word| !word.is_empty())
 	{
-		if word.chars().next().is_some_and(|c: char| c.is_ascii_alphabetic()) {
+		if word
+			.chars()
+			.next()
+			.is_some_and(|c: char| c.is_ascii_alphabetic())
+		{
 			take(&mut numbers);
 		} else if let Ok(value) = word.parse::<f32>() {
 			numbers.push(value);
@@ -912,20 +916,22 @@ pub fn backdrop_layer(svg: &mut Svg, setting: &Setting, weather: &Weather, layer
 			&& body_night.is_some()
 			&& weather.light.glow_strength > 0.01
 			&& part.night_only == body_night
+			&& let Some(bounds) = part.bounds
 		{
-			if let Some(bounds) = part.bounds {
-				let at = pt((bounds.0 + bounds.2) / 2.0, (bounds.1 + bounds.3) / 2.0);
-				let radius = 560.0 + 420.0 * weather.light.glow_strength;
-				let paint = radial_glow(
-					svg,
-					at,
-					radius,
-					weather.light.glow_colour,
-					weather.light.glow_strength * 0.9,
-				);
-				svg.fill_paint(&Path::circle(at, radius), &paint);
-				bloomed = true;
-			}
+			let at = pt(
+				f32::midpoint(bounds.0, bounds.2),
+				f32::midpoint(bounds.1, bounds.3),
+			);
+			let radius = 560.0 + 420.0 * weather.light.glow_strength;
+			let paint = radial_glow(
+				svg,
+				at,
+				radius,
+				weather.light.glow_colour,
+				weather.light.glow_strength * 0.9,
+			);
+			svg.fill_paint(&Path::circle(at, radius), &paint);
+			bloomed = true;
 		}
 	}
 }
@@ -941,7 +947,12 @@ pub fn foreground(svg: &mut Svg, setting: &Setting, weather: &Weather) {
 	super::fx::haze(svg, weather.mint * 0.6, palette::ICE, bounds);
 
 	if !weather.light.is_day() {
-		super::fx::haze(svg, weather.light.haze_amount, weather.light.haze_colour, bounds);
+		super::fx::haze(
+			svg,
+			weather.light.haze_amount,
+			weather.light.haze_colour,
+			bounds,
+		);
 		vignette(svg, weather.light.vignette);
 	}
 }
@@ -965,12 +976,7 @@ fn sky_gradient(svg: &mut Svg, light: &Light) -> String {
 }
 
 /// A vertical gradient over a part's own extent, for walls, water and floors.
-fn part_gradient(
-	svg: &mut Svg,
-	top: Color,
-	bottom: Color,
-	bounds: (f32, f32, f32, f32),
-) -> String {
+fn part_gradient(svg: &mut Svg, top: Color, bottom: Color, bounds: (f32, f32, f32, f32)) -> String {
 	let id = svg.next_id("grad");
 	svg.define(&format!(
 		r#"<linearGradient id="{id}" x1="0" y1="{:.1}" x2="0" y2="{:.1}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>"#,
@@ -1004,10 +1010,7 @@ fn vignette(svg: &mut Svg, strength: f32) {
 		r#"<radialGradient id="{id}" gradientUnits="userSpaceOnUse" cx="{centre}" cy="{centre}" r="{radius}"><stop offset="0.55" stop-color="{}" stop-opacity="0"/><stop offset="1" stop-color="{}" stop-opacity="{strength:.2}"/></radialGradient>"#,
 		palette::INK, palette::INK
 	));
-	svg.fill_paint(
-		&full_rect(-OVER, STAGE + OVER * 2.0),
-		&id,
-	);
+	svg.fill_paint(&full_rect(-OVER, STAGE + OVER * 2.0), &id);
 }
 
 /// A dot screen, defined once per document and referenced by id.
@@ -1154,12 +1157,18 @@ mod tests {
 		);
 
 		// Every preset renders without error, and none of them emit a bare flat sky.
-		for light in crate::art::light::ALL {
+		for light in Light::ALL {
 			if light.is_day() {
 				continue;
 			}
 
-			let document = draw_setting(source, &Weather { light, ..Weather::default() });
+			let document = draw_setting(
+				source,
+				&Weather {
+					light,
+					..Weather::default()
+				},
+			);
 			crate::raster::render(&document).unwrap();
 		}
 	}

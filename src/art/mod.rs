@@ -20,13 +20,12 @@ pub mod settings;
 pub mod shape;
 pub mod style;
 
-pub use light::Light;
-
 use std::fmt::Write as _;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Sub;
 
+pub use light::Light;
 pub use palette::Color;
 use shape::Shape;
 use style::Shading;

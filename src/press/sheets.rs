@@ -18,6 +18,7 @@ use crate::art::figure::Look;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::figure::Viseme;
+use crate::art::light::Light;
 use crate::art::palette;
 use crate::art::parts::FIGURE_PARTS;
 use crate::art::parts::Level;
@@ -481,6 +482,108 @@ struct Tile {
 	/// The box the drawing is fitted to, shared by a turning part's three tiles so the turn
 	/// reads as movement rather than rescaling.
 	fit: (Pt, Pt),
+}
+
+/// The world's colour script: one setting with one cast member standing in it, drawn once per
+/// light preset, labelled — the sky, the grade, the cast shadow's lean and the atmosphere in
+/// each. Reference sheet, so nothing here is graded but the scene.
+pub fn lights_sheet(
+	about: &str,
+	setting: &settings::Setting,
+	member: &Member,
+	style: Style,
+) -> Result<Pixmap> {
+	let cell = 600.0;
+	let columns = 5;
+	let presets = Light::ALL.len();
+	let rows = presets.div_ceil(columns);
+	let width = cell * columns as f32;
+	let height = (cell + 90.0) * rows as f32 + 46.0;
+	let mut svg = Svg::styled(style);
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::INK);
+
+	for (index, light) in Light::ALL.iter().enumerate() {
+		let x = (index % columns) as f32 * cell;
+		let y = (index / columns) as f32 * (cell + 90.0);
+		let clip = svg.next_id("lit");
+		svg.define(&format!(
+			r#"<clipPath id="{clip}"><rect x="0" y="0" width="{STAGE}" height="{STAGE}"/></clipPath>"#
+		));
+		svg.begin(&format!(
+			"translate({} {}) scale({:.4})",
+			x + 10.0,
+			y + 10.0,
+			(cell - 20.0) / STAGE
+		));
+		svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+		svg.set_light(*light);
+		svg.begin_layer();
+
+		let mut weather = Weather {
+			light: *light,
+			..Weather::default()
+		};
+		settings::backdrop(&mut svg, setting, &weather);
+		let mut puppet = sheet_puppet(member, pt(STAGE / 2.0, setting.ground()));
+
+		if let Body::Figure(state) = &mut puppet.body {
+			state.mood = Mood::Grin;
+		}
+
+		compose::draw_puppet(&mut svg, &puppet);
+		weather.time = 2.0;
+		settings::foreground(&mut svg, setting, &weather);
+		svg.end();
+		svg.clear_light();
+		svg.raw("</g>");
+		svg.end();
+
+		let caption = text::layout(
+			&[light.name()],
+			Area {
+				x,
+				y: y + cell,
+				w: cell,
+				h: 80.0,
+			},
+			40.0,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(
+			&caption,
+			Ink {
+				body: palette::PAPER,
+				shout: palette::SUNFLOWER,
+			},
+		));
+	}
+
+	let title_text = format!("**{about}** under every light · {}", setting.name());
+	let title = text::layout(
+		&[title_text.as_str()],
+		Area {
+			x: 10.0,
+			y: height - 42.0,
+			w: width,
+			h: 40.0,
+		},
+		28.0,
+		Anchor::Top,
+	);
+	svg.raw(&text::svg(
+		&title,
+		Ink {
+			body: palette::PAPER,
+			shout: palette::SUNFLOWER,
+		},
+	));
+
+	let doc = svg.finish((0.0, 0.0, width, height), width as u32, height as u32);
+
+	let mut pixmap = raster::render(&doc)?;
+	raster::finish(&mut pixmap, &style, 0.05, 0);
+
+	Ok(pixmap)
 }
 
 /// Every part of an authored puppet. A turning part is shown front-on, half-turned and

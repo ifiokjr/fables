@@ -83,7 +83,7 @@ impl Preset {
 
 	/// The names, for error messages that list the options.
 	pub fn names() -> String {
-		Preset::ALL.map(|preset| preset.name()).join(", ")
+		Preset::ALL.map(Preset::name).join(", ")
 	}
 }
 
@@ -144,190 +144,192 @@ const DAY: Light = Light {
 	ground_shadow: 1.0,
 };
 
-/// Every preset, in script order.
-pub const ALL: [Light; 10] = [
-	DAY,
-	Light {
-		preset: Preset::Dawn,
-		tint: Color(0xFF_D9_C0),
-		strength: 0.32,
-		shadow_tint: Color(0x6A_3E_5E),
-		saturation: 1.02,
-		contrast: 1.04,
-		key: pt(13.0, -6.0),
-		elevation: 0.28,
-		zenith: Color(0xB8_A8_D8),
-		horizon: Color(0xFF_D9_A8),
-		haze_colour: Color(0xFF_D2_B0),
-		haze_amount: 0.16,
-		vignette: 0.12,
-		glow_colour: Color(0xFF_CF_88),
-		glow_strength: 0.5,
-		body: Some(Body::Sun),
-		rim: false,
-		ground_shadow: 0.95,
-	},
-	Light {
-		preset: Preset::Golden,
-		tint: Color(0xFF_C9_8A),
-		strength: 0.36,
-		shadow_tint: Color(0x8A_5A_3C),
-		saturation: 1.08,
-		contrast: 1.05,
-		key: pt(-14.0, -5.0),
-		elevation: 0.24,
-		zenith: Color(0x8A_C4_E0),
-		horizon: Color(0xFF_DF_9E),
-		haze_colour: Color(0xFF_DB_A8),
-		haze_amount: 0.18,
-		vignette: 0.16,
-		glow_colour: Color(0xFF_CF_6E),
-		glow_strength: 0.6,
-		body: Some(Body::Sun),
-		rim: true,
-		ground_shadow: 1.0,
-	},
-	Light {
-		preset: Preset::Dusk,
-		tint: Color(0xC8_90_B8),
-		strength: 0.38,
-		shadow_tint: Color(0x4A_3A_6A),
-		saturation: 1.02,
-		contrast: 1.06,
-		key: pt(-16.0, -4.0),
-		elevation: 0.16,
-		zenith: Color(0x5A_5A_9E),
-		horizon: Color(0xFF_9E_6A),
-		haze_colour: Color(0xD8_A8_B0),
-		haze_amount: 0.2,
-		vignette: 0.22,
-		glow_colour: Color(0xFF_8A_5E),
-		glow_strength: 0.55,
-		body: Some(Body::Sun),
-		rim: true,
-		ground_shadow: 0.9,
-	},
-	Light {
-		preset: Preset::Night,
-		tint: Color(0x7A_86_C8),
-		strength: 0.42,
-		shadow_tint: Color(0x1A_22_48),
-		saturation: 0.82,
-		contrast: 1.08,
-		key: pt(4.0, -11.0),
-		elevation: 0.6,
-		zenith: Color(0x10_18_38),
-		horizon: Color(0x2E_3A_6E),
-		haze_colour: Color(0x2E_3A_6E),
-		haze_amount: 0.22,
-		vignette: 0.3,
-		glow_colour: Color(0xD8_E2_FF),
-		glow_strength: 0.3,
-		body: Some(Body::Moon),
-		rim: false,
-		ground_shadow: 0.45,
-	},
-	Light {
-		preset: Preset::Moonlit,
-		tint: Color(0x9A_B2_D8),
-		strength: 0.4,
-		shadow_tint: Color(0x1E_2C_52),
-		saturation: 0.72,
-		contrast: 1.1,
-		key: pt(9.0, -10.0),
-		elevation: 0.5,
-		zenith: Color(0x1A_2C_5E),
-		horizon: Color(0x4A_5E_8E),
-		haze_colour: Color(0x38_46_6E),
-		haze_amount: 0.18,
-		vignette: 0.26,
-		glow_colour: Color(0xE8_F0_FF),
-		glow_strength: 0.45,
-		body: Some(Body::Moon),
-		rim: true,
-		ground_shadow: 0.6,
-	},
-	Light {
-		preset: Preset::Overcast,
-		tint: Color(0xB8_BC_C0),
-		strength: 0.34,
-		shadow_tint: Color(0x4A_4E_58),
-		saturation: 0.6,
-		contrast: 0.96,
-		key: pt(2.0, -12.0),
-		elevation: 0.92,
-		zenith: Color(0x9A_A4_AC),
-		horizon: Color(0xCC_D2_D6),
-		haze_colour: Color(0xB8_C0_C6),
-		haze_amount: 0.24,
-		vignette: 0.08,
-		glow_colour: Color(0xE8_EC_EE),
-		glow_strength: 0.18,
-		body: Some(Body::Sun),
-		rim: false,
-		ground_shadow: 0.85,
-	},
-	Light {
-		preset: Preset::Storm,
-		tint: Color(0x88_92_A8),
-		strength: 0.44,
-		shadow_tint: Color(0x26_2C_3E),
-		saturation: 0.62,
-		contrast: 1.14,
-		key: pt(-13.0, -6.0),
-		elevation: 0.3,
-		zenith: Color(0x3E_46_58),
-		horizon: Color(0x6A_72_84),
-		haze_colour: Color(0x58_60_74),
-		haze_amount: 0.34,
-		vignette: 0.3,
-		glow_colour: Color(0xD8_DC_E4),
-		glow_strength: 0.16,
-		body: Some(Body::Sun),
-		rim: false,
-		ground_shadow: 0.7,
-	},
-	Light {
-		preset: Preset::Indoor,
-		tint: Color(0xFF_D2_A0),
-		strength: 0.3,
-		shadow_tint: Color(0x5E_42_32),
-		saturation: 1.04,
-		contrast: 1.02,
-		key: pt(0.0, -12.0),
-		elevation: 0.85,
-		zenith: Color(0xF2_D8_B8),
-		horizon: Color(0xE8_C8_A0),
-		haze_colour: Color(0xFF_E8_C8),
-		haze_amount: 0.1,
-		vignette: 0.2,
-		glow_colour: Color(0xFF_D9_A0),
-		glow_strength: 0.4,
-		body: None,
-		rim: false,
-		ground_shadow: 0.95,
-	},
-	Light {
-		preset: Preset::Candle,
-		tint: Color(0xE8_A8_60),
-		strength: 0.44,
-		shadow_tint: Color(0x40_24_20),
-		saturation: 1.06,
-		contrast: 1.12,
-		key: pt(3.0, -9.0),
-		elevation: 0.4,
-		zenith: Color(0x7A_4E_3A),
-		horizon: Color(0xC8_8A_58),
-		haze_colour: Color(0xFF_CF_98),
-		haze_amount: 0.12,
-		vignette: 0.38,
-		glow_colour: Color(0xFF_BF_6E),
-		glow_strength: 0.55,
-		body: None,
-		rim: true,
-		ground_shadow: 0.7,
-	},
-];
+impl Light {
+	/// Every preset, in script order.
+	pub const ALL: [Light; 10] = [
+		DAY,
+		Light {
+			preset: Preset::Dawn,
+			tint: Color(0xFF_D9_C0),
+			strength: 0.32,
+			shadow_tint: Color(0x6A_3E_5E),
+			saturation: 1.02,
+			contrast: 1.04,
+			key: pt(13.0, -6.0),
+			elevation: 0.28,
+			zenith: Color(0xB8_A8_D8),
+			horizon: Color(0xFF_D9_A8),
+			haze_colour: Color(0xFF_D2_B0),
+			haze_amount: 0.16,
+			vignette: 0.12,
+			glow_colour: Color(0xFF_CF_88),
+			glow_strength: 0.5,
+			body: Some(Body::Sun),
+			rim: false,
+			ground_shadow: 0.95,
+		},
+		Light {
+			preset: Preset::Golden,
+			tint: Color(0xFF_C9_8A),
+			strength: 0.36,
+			shadow_tint: Color(0x8A_5A_3C),
+			saturation: 1.08,
+			contrast: 1.05,
+			key: pt(-14.0, -5.0),
+			elevation: 0.24,
+			zenith: Color(0x8A_C4_E0),
+			horizon: Color(0xFF_DF_9E),
+			haze_colour: Color(0xFF_DB_A8),
+			haze_amount: 0.18,
+			vignette: 0.16,
+			glow_colour: Color(0xFF_CF_6E),
+			glow_strength: 0.6,
+			body: Some(Body::Sun),
+			rim: true,
+			ground_shadow: 1.0,
+		},
+		Light {
+			preset: Preset::Dusk,
+			tint: Color(0xC8_90_B8),
+			strength: 0.38,
+			shadow_tint: Color(0x4A_3A_6A),
+			saturation: 1.02,
+			contrast: 1.06,
+			key: pt(-16.0, -4.0),
+			elevation: 0.16,
+			zenith: Color(0x5A_5A_9E),
+			horizon: Color(0xFF_9E_6A),
+			haze_colour: Color(0xD8_A8_B0),
+			haze_amount: 0.2,
+			vignette: 0.22,
+			glow_colour: Color(0xFF_8A_5E),
+			glow_strength: 0.55,
+			body: Some(Body::Sun),
+			rim: true,
+			ground_shadow: 0.9,
+		},
+		Light {
+			preset: Preset::Night,
+			tint: Color(0x7A_86_C8),
+			strength: 0.42,
+			shadow_tint: Color(0x1A_22_48),
+			saturation: 0.82,
+			contrast: 1.08,
+			key: pt(4.0, -11.0),
+			elevation: 0.6,
+			zenith: Color(0x10_18_38),
+			horizon: Color(0x2E_3A_6E),
+			haze_colour: Color(0x2E_3A_6E),
+			haze_amount: 0.22,
+			vignette: 0.3,
+			glow_colour: Color(0xD8_E2_FF),
+			glow_strength: 0.3,
+			body: Some(Body::Moon),
+			rim: false,
+			ground_shadow: 0.45,
+		},
+		Light {
+			preset: Preset::Moonlit,
+			tint: Color(0x9A_B2_D8),
+			strength: 0.4,
+			shadow_tint: Color(0x1E_2C_52),
+			saturation: 0.72,
+			contrast: 1.1,
+			key: pt(9.0, -10.0),
+			elevation: 0.5,
+			zenith: Color(0x1A_2C_5E),
+			horizon: Color(0x4A_5E_8E),
+			haze_colour: Color(0x38_46_6E),
+			haze_amount: 0.18,
+			vignette: 0.26,
+			glow_colour: Color(0xE8_F0_FF),
+			glow_strength: 0.45,
+			body: Some(Body::Moon),
+			rim: true,
+			ground_shadow: 0.6,
+		},
+		Light {
+			preset: Preset::Overcast,
+			tint: Color(0xB8_BC_C0),
+			strength: 0.34,
+			shadow_tint: Color(0x4A_4E_58),
+			saturation: 0.6,
+			contrast: 0.96,
+			key: pt(2.0, -12.0),
+			elevation: 0.92,
+			zenith: Color(0x9A_A4_AC),
+			horizon: Color(0xCC_D2_D6),
+			haze_colour: Color(0xB8_C0_C6),
+			haze_amount: 0.24,
+			vignette: 0.08,
+			glow_colour: Color(0xE8_EC_EE),
+			glow_strength: 0.18,
+			body: Some(Body::Sun),
+			rim: false,
+			ground_shadow: 0.85,
+		},
+		Light {
+			preset: Preset::Storm,
+			tint: Color(0x88_92_A8),
+			strength: 0.44,
+			shadow_tint: Color(0x26_2C_3E),
+			saturation: 0.62,
+			contrast: 1.14,
+			key: pt(-13.0, -6.0),
+			elevation: 0.3,
+			zenith: Color(0x3E_46_58),
+			horizon: Color(0x6A_72_84),
+			haze_colour: Color(0x58_60_74),
+			haze_amount: 0.34,
+			vignette: 0.3,
+			glow_colour: Color(0xD8_DC_E4),
+			glow_strength: 0.16,
+			body: Some(Body::Sun),
+			rim: false,
+			ground_shadow: 0.7,
+		},
+		Light {
+			preset: Preset::Indoor,
+			tint: Color(0xFF_D2_A0),
+			strength: 0.3,
+			shadow_tint: Color(0x005D_4232),
+			saturation: 1.04,
+			contrast: 1.02,
+			key: pt(0.0, -12.0),
+			elevation: 0.85,
+			zenith: Color(0xF2_D8_B8),
+			horizon: Color(0xE8_C8_A0),
+			haze_colour: Color(0xFF_E8_C8),
+			haze_amount: 0.1,
+			vignette: 0.2,
+			glow_colour: Color(0xFF_D9_A0),
+			glow_strength: 0.4,
+			body: None,
+			rim: false,
+			ground_shadow: 0.95,
+		},
+		Light {
+			preset: Preset::Candle,
+			tint: Color(0xE8_A8_60),
+			strength: 0.44,
+			shadow_tint: Color(0x40_24_20),
+			saturation: 1.06,
+			contrast: 1.12,
+			key: pt(3.0, -9.0),
+			elevation: 0.4,
+			zenith: Color(0x7A_4E_3A),
+			horizon: Color(0xC8_8A_58),
+			haze_colour: Color(0xFF_CF_98),
+			haze_amount: 0.12,
+			vignette: 0.38,
+			glow_colour: Color(0xFF_BF_6E),
+			glow_strength: 0.55,
+			body: None,
+			rim: true,
+			ground_shadow: 0.7,
+		},
+	];
+}
 
 impl Light {
 	/// Flat daylight, the default.
@@ -339,13 +341,13 @@ impl Light {
 	/// The light named in a script (`light = "golden"`), or `None` if the name is not one.
 	#[must_use]
 	pub fn parse(value: &str) -> Option<Light> {
-		Preset::parse(value).map(|preset| ALL[preset as usize])
+		Preset::parse(value).map(|preset| Light::ALL[preset as usize])
 	}
 
 	/// A light by preset.
 	#[must_use]
 	pub fn of(preset: Preset) -> Light {
-		ALL[preset as usize]
+		Light::ALL[preset as usize]
 	}
 
 	pub fn name(&self) -> &'static str {
@@ -386,11 +388,7 @@ impl Light {
 		let luma = 0.3 * out[0] + 0.59 * out[1] + 0.11 * out[2];
 		let darkness = (1.0 - luma / 255.0).clamp(0.0, 1.0);
 		let (sr, sg, sb) = self.shadow_tint.rgb();
-		let shadowed = [
-			f32::from(sr),
-			f32::from(sg),
-			f32::from(sb),
-		];
+		let shadowed = [f32::from(sr), f32::from(sg), f32::from(sb)];
 
 		for (channel, tint) in out.iter_mut().zip(shadowed) {
 			*channel += (tint - *channel) * darkness * 0.45;
@@ -450,7 +448,8 @@ impl Light {
 	/// A stable identity for caches: two lights that grade or paint differently hash
 	/// differently, and the same light always hashes the same.
 	#[must_use]
-	pub fn cache_key(&self) -> u64 {		let mut key = super::seed_of(self.name());
+	pub fn cache_key(&self) -> u64 {
+		let mut key = super::seed_of(self.name());
 		let mix = |key: u64, value: f32| {
 			key.rotate_left(7) ^ u64::from(value.to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15)
 		};
@@ -479,7 +478,10 @@ impl Light {
 /// `light = "golden"`, as written in front matter, `world.toml` and page headings.
 pub fn parse_named(value: &str, line: usize) -> Result<Light> {
 	Light::parse(value).ok_or_else(|| {
-		anyhow::anyhow!("line {line}: unknown light `{value}`; try {}", Preset::names())
+		anyhow::anyhow!(
+			"line {line}: unknown light `{value}`; try {}",
+			Preset::names()
+		)
 	})
 }
 
@@ -493,7 +495,10 @@ mod tests {
 	#[test]
 	fn every_preset_parses_and_round_trips() {
 		for preset in Preset::ALL {
-			assert_eq!(Light::parse(preset.name()).map(|light| light.preset), Some(preset));
+			assert_eq!(
+				Light::parse(preset.name()).map(|light| light.preset),
+				Some(preset)
+			);
 		}
 
 		assert_eq!(Light::parse("Day"), Some(Light::day()));
@@ -504,7 +509,10 @@ mod tests {
 	fn a_bad_light_names_the_line_and_the_options() {
 		let error = format!("{:#}", parse_named("sunset", 12).unwrap_err());
 		assert!(error.contains("line 12"), "{error}");
-		assert!(error.contains("moonlit") && error.contains("candle"), "{error}");
+		assert!(
+			error.contains("moonlit") && error.contains("candle"),
+			"{error}"
+		);
 	}
 
 	#[test]
@@ -525,7 +533,10 @@ mod tests {
 		let golden = Light::of(Preset::Golden).grade(GREY);
 		let (r, g, b) = golden.rgb();
 		assert!(r > b, "golden warms grey: {golden}");
-		assert!(r >= g && g >= b, "an amber grade keeps the warm order: {golden}");
+		assert!(
+			r >= g && g >= b,
+			"an amber grade keeps the warm order: {golden}"
+		);
 
 		let moonlit = Light::of(Preset::Moonlit).grade(GREY);
 		let (r, g, b) = moonlit.rgb();
@@ -545,12 +556,15 @@ mod tests {
 		};
 		let plain = spread(palette::TOMATO);
 		let grey_day = spread(Light::of(Preset::Overcast).grade(palette::TOMATO));
-		assert!(grey_day < plain, "overcast desaturates: {plain} -> {grey_day}");
+		assert!(
+			grey_day < plain,
+			"overcast desaturates: {plain} -> {grey_day}"
+		);
 	}
 
 	#[test]
 	fn grade_stays_in_range_and_round_trips_extremes() {
-		for light in ALL {
+		for light in Light::ALL {
 			for colour in [Color(0x00_00_00), Color(0xFF_FF_FF), Color(0x0F_0F_0F)] {
 				let graded = light.grade(colour);
 				let _ = graded.rgb();
@@ -568,7 +582,7 @@ mod tests {
 
 		let middle = Light::blend(&a, &b, 0.5);
 		assert_eq!(middle.tint, a.tint.mix(b.tint, 0.5));
-		assert!((middle.elevation - (a.elevation + b.elevation) / 2.0).abs() < 1e-5);
+		assert!((middle.elevation - f32::midpoint(a.elevation, b.elevation)).abs() < 1e-5);
 	}
 
 	#[test]
