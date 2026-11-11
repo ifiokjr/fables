@@ -1257,7 +1257,13 @@ fn draw_head(svg: &mut Svg, look: &Look, frame: &Frame, state: &FigureState) {
 	}
 
 	let head = head_path(svg, look, frame);
-	let light = frame.head + pt(-r * 0.22, -r * 0.2);
+	// The crescent of light on the head follows the scene's key light when one is up, and
+	// comes from the top left as always in flat daylight.
+	let towards = svg.light.map_or(pt(-0.22, -0.2), |scene| {
+		let key = scene.key.norm();
+		pt(key.x * 0.3, key.y * 0.3)
+	});
+	let light = frame.head + pt(towards.x * r, towards.y * r);
 	let line = silhouette(svg);
 	svg.shaded(
 		&head,

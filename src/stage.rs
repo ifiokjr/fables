@@ -18,6 +18,7 @@ use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::figure::Prop;
 use crate::art::figure::Teeth;
+use crate::art::light::Light;
 use crate::art::pack::StylePack;
 use crate::art::rig::Gait;
 use crate::art::rig::Stance;
@@ -411,6 +412,14 @@ impl Scene {
 			("wilt", Some(v)) => self.weather.wilt = number(token, v, line)?,
 			("stink", Some(v)) => self.weather.stink = number(token, v, line)?,
 			("mint", Some(v)) => self.weather.mint = number(token, v, line)?,
+			("light", Some(v)) => {
+				self.weather.light = Light::parse(v).ok_or_else(|| {
+					anyhow::anyhow!(
+						"line {line}: unknown light `{v}`; try {}",
+						crate::art::light::Preset::names()
+					)
+				})?;
+			}
 			("tint", Some(v)) => self.weather.tint = colour(v, line)?,
 			("speed", Some(v)) => self.weather.speed = number(token, v, line)?,
 			("impact", Some(v)) => self.weather.impact = number(token, v, line)?,
@@ -452,9 +461,9 @@ impl Scene {
 			("shake", Some(v)) => self.camera.shake = number(token, v, line)?.clamp(0.0, 1.0),
 			_ => {
 				bail!(
-					"line {line}: `{token}` is not a scene option; use night, day, wilt=, stink=, \
-					 mint=, tint=, speed=, impact=, zoom=, look=x,y, shot=, on=, move=, over=, \
-					 shake=, cut or ease"
+					"line {line}: `{token}` is not a scene option; use night, day, light=, wilt=, \
+					 stink=, mint=, tint=, speed=, impact=, zoom=, look=x,y, shot=, on=, move=, \
+					 over=, shake=, cut or ease"
 				)
 			}
 		}
@@ -757,6 +766,12 @@ pub fn rehearse(story: &Story, cast: &Cast) -> Result<Vec<Rehearsal>> {
 
 	for (index, page) in story.pages.iter().enumerate() {
 		let mut scene = Scene::for_page(page, &story.settings)?;
+
+		// A page takes the book's (or world's) default light unless its heading names one.
+		if page.option("light").is_none() {
+			scene.weather.light = story.light;
+		}
+
 		hide_wormsley(&mut scene, page, cast, index);
 		let opening = scene.clone();
 		let mut after = Vec::with_capacity(page.beats.len());
@@ -965,6 +980,29 @@ mod tests {
 		let ease_over = run("# park\n@camera ease over=3\n").unwrap();
 		assert_eq!(ease_over.camera.travel, Some(Travel::Glide));
 		assert!((ease_over.camera.over - 3.0).abs() < f32::EPSILON);
+	}
+
+	#[test]
+	fn a_light_is_scene_state_that_can_change_mid_page() {
+		let scene = run("# park light=golden\n@stinky\n").unwrap();
+		assert_eq!(scene.weather.light.preset, crate::art::light::Preset::Golden);
+
+		// A bare `night` keeps today's behaviour: no light preset comes with it.
+		let night = run("# park night\n@stinky\n").unwrap();
+		assert!(night.weather.night);
+		assert!(night.weather.light.is_day());
+
+		let eased = run("# park light=golden\n@stinky\n@scene light=moonlit\n").unwrap();
+		assert_eq!(eased.weather.light.preset, crate::art::light::Preset::Moonlit);
+	}
+
+	#[test]
+	fn an_unknown_light_names_the_line_and_the_presets() {
+		let message = format!("{:#}", run("# park light=sunset\n").unwrap_err());
+		assert!(
+			message.contains("line 5") && message.contains("candle") && message.contains("moonlit"),
+			"{message}"
+		);
 	}
 
 	#[test]

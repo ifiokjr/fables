@@ -372,7 +372,9 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 	}
 }
 
-/// A soft shadow where a puppet meets the ground, so nobody floats.
+/// A shadow where a puppet meets the ground, so nobody floats. Under a scene light it becomes
+/// a cast shadow: it leans away from the key light, lengthens as the elevation drops and fades
+/// when the light is faint (a soft pool under overcast, barely there at night).
 fn draw_shadow(svg: &mut Svg, puppet: &Puppet) {
 	let airborne = matches!(&puppet.body, Body::Critter(state) if state.lively > 0.5)
 		&& matches!(puppet.kind, Kind::Bird(_));
@@ -385,6 +387,18 @@ fn draw_shadow(svg: &mut Svg, puppet: &Puppet) {
 		"translate({:.1} {:.1}) scale({:.3})",
 		puppet.at.x, puppet.at.y, puppet.scale
 	));
+
+	// The scene light leans and stretches the pool; flat daylight draws exactly the old
+	// contact shadow.
+	let cast = svg.light.map(|light| {
+		let (dx, stretch) = light.cast();
+		(dx, stretch, light.ground_shadow)
+	});
+
+	if let Some((dx, stretch, alpha)) = cast {
+		svg.begin(&format!("translate({dx:.1} 0) scale({stretch:.3} 1)"));
+		svg.begin_opacity(alpha);
+	}
 
 	match (&puppet.kind, &puppet.body) {
 		(Kind::Figure(look), Body::Figure(state)) => {
@@ -412,6 +426,11 @@ fn draw_shadow(svg: &mut Svg, puppet: &Puppet) {
 			);
 		}
 		_ => {}
+	}
+
+	if cast.is_some() {
+		svg.end();
+		svg.end();
 	}
 
 	svg.end();
