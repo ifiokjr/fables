@@ -195,6 +195,9 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("glove-cuff", Space::Hand).optional().kit(),
 	part("shoe", Space::Foot).turning().kit(),
 	part("shoe-lace", Space::Foot).turning().optional().kit(),
+	// A drawn sole (a toe cap and heel rising from it), inside the shoe. Without it the sole is
+	// a plain strip along the bottom.
+	part("shoe-sole", Space::Foot).turning().optional().kit(),
 	part("mouth-rest", Space::Feature).kit(),
 	part("mouth-mbp", Space::Feature).kit(),
 	part("mouth-mbp-lip", Space::Feature).kit(),

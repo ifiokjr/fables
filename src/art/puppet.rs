@@ -1219,18 +1219,24 @@ fn draw_leg(
 		);
 		svg.cel_shade(&shoe, pt(-6.0, -5.0), inks.finish.cel_shadow);
 		svg.begin_clip(&shoe.path());
-		// The sole runs under the whole shoe, however big it is drawn.
-		let (lo, hi) = shoe.bounds();
-		let (heel, toe) = ((lo.x - 2.0).min(-30.0), (hi.x + 2.0).max(50.0));
-		svg.fill(
-			&Path::rect(heel, 17.0, toe - heel, 12.0),
-			far(inks.kit.sole, is_far, inks.finish.far),
-		);
-		svg.brush_line(
-			&Path::new().move_to(pt(heel, 17.0)).line_to(pt(toe, 17.0)),
-			ink,
-			inks.finish.detail,
-		);
+		if let Some(sole) = puppet.view("shoe-sole", three_quarter) {
+			// A drawn sole, trimmed to the shoe: only its top edge shows as a line.
+			svg.fill(&sole.path(), far(inks.kit.sole, is_far, inks.finish.far));
+			svg.brush_line(&sole.path(), ink, inks.finish.detail);
+		} else {
+			// The sole runs under the whole shoe, however big it is drawn.
+			let (lo, hi) = shoe.bounds();
+			let (heel, toe) = ((lo.x - 2.0).min(-30.0), (hi.x + 2.0).max(50.0));
+			svg.fill(
+				&Path::rect(heel, 17.0, toe - heel, 12.0),
+				far(inks.kit.sole, is_far, inks.finish.far),
+			);
+			svg.brush_line(
+				&Path::new().move_to(pt(heel, 17.0)).line_to(pt(toe, 17.0)),
+				ink,
+				inks.finish.detail,
+			);
+		}
 		svg.end();
 
 		if let Some(lace) = puppet.view("shoe-lace", three_quarter) {
