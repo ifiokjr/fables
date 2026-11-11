@@ -21,7 +21,7 @@
 //! | `data-wilt` | The colour it turns as the scene wilts. |
 //! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides; `overcast` and `storm` hide the sun. |
 //! | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows, stars). |
-//! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). |
+//! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). Both colours wilt, fade with distance, darken at night and grade like a flat fill. |
 //! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line. |
 //! | `data-dots` | A riso dot screen over it: `colour spacing radius opacity`. |
 //! | `data-drift` | Units a second it drifts sideways, wrapping (clouds). |
@@ -612,10 +612,17 @@ impl Part {
 					let paint = sky_gradient(svg, &weather.light);
 					svg.fill_paint(path, &paint);
 				} else if let Some((top, bottom)) = self.gradient {
+					// Each end goes through the same colours as a flat fill (wilt, night,
+					// distance, the light's grade, then the page's), so a gradient wall dims
+					// at night and grades with the flat parts beside it.
+					let stop = |colour: Color| {
+						svg.graded(snap(svg, self.color(Paint::Color(colour), weather)))
+					};
+					let (top, bottom) = (stop(top), stop(bottom));
 					let paint = part_gradient(
 						svg,
-						weather.light.grade(top),
-						weather.light.grade(bottom),
+						top,
+						bottom,
 						self.bounds.unwrap_or((0.0, 0.0, STAGE, STAGE)),
 					);
 					svg.fill_paint(path, &paint);
@@ -1100,6 +1107,53 @@ mod tests {
 		assert!(
 			!overcast.contains("radialGradient id=\"glow"),
 			"a hidden sun has no bloom: {overcast}"
+		);
+	}
+
+	#[test]
+	fn a_gradient_wilts_darkens_and_grades_like_a_flat_fill() {
+		let source = r#"<svg data-ground="2000"><path id="near-lawn" d="M0 100 L100 100 L100 200 L0 200 Z" fill="leaf" data-gradient="meadow leaf" data-wilt="toffee" data-line="none"/></svg>"#;
+		let day = draw_setting(source, &Weather::default());
+		assert!(
+			day.contains(&palette::MEADOW.to_string()) && day.contains(&palette::LEAF.to_string()),
+			"the authored colours by day: {day}"
+		);
+
+		let wilted = draw_setting(
+			source,
+			&Weather {
+				wilt: 1.0,
+				..Weather::default()
+			},
+		);
+		assert!(
+			!wilted.contains(&palette::LEAF.to_string()),
+			"the lawn wilts: {wilted}"
+		);
+
+		let night = draw_setting(
+			source,
+			&Weather {
+				night: true,
+				..Weather::default()
+			},
+		);
+		assert!(
+			night.contains(&palette::LEAF.mix(palette::NIGHT, 0.35).to_string()),
+			"the lawn dims at night: {night}"
+		);
+
+		let dusk = Light::of(Preset::Dusk);
+		let lit = draw_setting(
+			source,
+			&Weather {
+				light: dusk,
+				..Weather::default()
+			},
+		);
+		assert!(
+			lit.contains(&dusk.grade(palette::LEAF).to_string()),
+			"the lawn grades with the light: {lit}"
 		);
 	}
 
