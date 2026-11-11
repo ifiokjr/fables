@@ -99,6 +99,7 @@ leg-width = [12.0, 10.0]
 forearm-width = [10.0, 8.0]
 hand-scale = 0.95
 reach = [52.0, 120.0]
+floor = true
 
 [bodies.kid.limbs]
 pelvis-y = -190.0
@@ -122,6 +123,7 @@ leg-width = [15.0, 12.0]
 forearm-width = [12.0, 9.0]
 hand-scale = 1.15
 reach = [70.0, 180.0]
+floor = true
 
 [bodies.grown-up.limbs]
 pelvis-y = -300.0
