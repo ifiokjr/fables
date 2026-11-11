@@ -17,6 +17,7 @@ use crate::raster::BODY_FAMILY;
 use crate::raster::DISPLAY_FAMILY;
 use crate::story::Story;
 use crate::story::plain_text;
+use crate::video::director;
 use crate::video::frames::Format;
 use crate::video::frames::Renderer;
 use crate::video::timeline::Framing;
@@ -172,7 +173,9 @@ fn label_stamp(label: &str, line: &str, width: u32, height: u32) -> Result<Pixma
 	raster::render(&stamp)
 }
 
-/// The panel's caption: page, shot size and subjects, hold, and the transition in.
+/// The panel's caption: page, shot size and subjects, hold, and the transition in. A hold the
+/// director only kept because the script wrote a cut there — under [`director::MIN_SHOT`] —
+/// is marked `· short`.
 fn caption(shot: &Shot, setup: &Setup, hold: f32, cast: &Cast) -> String {
 	let page = match shot.kind.page() {
 		Some(page) => format!("page {}", page + 1),
@@ -199,10 +202,16 @@ fn caption(shot: &Shot, setup: &Setup, hold: f32, cast: &Cast) -> String {
 		}
 	};
 
-	format!(
+	let mut label = format!(
 		"{page} · {framing} · {hold:.1}s · {} in",
 		shot.transition.name()
-	)
+	);
+
+	if hold + 0.01 < director::MIN_SHOT {
+		label.push_str(" · short");
+	}
+
+	label
 }
 
 /// The words spoken at `time`, or nothing.
@@ -279,5 +288,43 @@ mod tests {
 		let long = "a".repeat(200);
 		assert_eq!(truncate(&long, 20).chars().count(), 20);
 		assert!(truncate(&long, 20).ends_with('…'));
+	}
+
+	#[test]
+	fn a_hold_under_the_minimum_is_marked_short() {
+		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
+		let setup = || {
+			Setup {
+				time: 1.0,
+				anchor: 1.0,
+				framing: Framing::Auto,
+				travel: crate::stage::Travel::Cut,
+				over: 0.0,
+				shake: 0.0,
+			}
+		};
+		let shot = Shot {
+			kind: ShotKind::Page(0),
+			start: 0.0,
+			end: 10.0,
+			keys: Vec::new(),
+			lines: Vec::new(),
+			transition: crate::story::Transition::Cut,
+			setups: Vec::new(),
+			portrait_setups: Vec::new(),
+		};
+
+		let short = caption(&shot, &setup(), 0.5, &cast);
+		assert!(
+			short.ends_with(" · short"),
+			"a 0.5s hold reports as short: {short}"
+		);
+		assert!(
+			short.contains(" · 0.5s · "),
+			"the hold is still stated: {short}"
+		);
+
+		let fine = caption(&shot, &setup(), 1.2, &cast);
+		assert!(!fine.contains("short"), "a 1.2s hold is fine: {fine}");
 	}
 }
