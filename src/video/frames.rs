@@ -4,8 +4,6 @@
 //! easing, mouths driven by the narration, a camera that frames the action for the output
 //! shape, captions, and a paper wipe between pages.
 
-use std::f32::consts::PI;
-
 use anyhow::Context;
 use anyhow::Result;
 use base64::Engine as _;
@@ -20,18 +18,16 @@ use crate::art::lerp;
 use crate::art::noise;
 use crate::art::palette;
 use crate::art::pt;
-use crate::art::rig::Gait;
 use crate::art::seed_of;
 use crate::art::settings;
 use crate::art::settings::Layer;
 use crate::compose;
-use crate::compose::Body;
 use crate::compose::Puppet;
 use crate::raster;
 use crate::stage::Scene;
 use crate::stage::ShotSize;
-use crate::stage::Side;
 use crate::stage::Travel;
+use crate::story::Acting;
 use crate::story::RunStyle;
 use crate::story::Story;
 use crate::story::Transition;
@@ -39,6 +35,10 @@ use crate::text;
 use crate::text::Anchor;
 use crate::text::Area;
 use crate::text::Ink;
+use crate::video::acting;
+use crate::video::acting::TWEEN;
+use crate::video::acting::ease_out_back;
+use crate::video::acting::smoothstep;
 use crate::video::audio::Sound;
 use crate::video::director;
 use crate::video::director::View;
@@ -48,8 +48,6 @@ use crate::video::timeline::Shot;
 use crate::video::timeline::ShotKind;
 use crate::video::timeline::Timeline;
 
-/// How long stage-direction changes take to play out.
-const TWEEN: f32 = 0.6;
 /// Page-turn transition length at each end of a shot.
 const WIPE: f32 = 0.35;
 
@@ -127,35 +125,6 @@ const CARD_PAD_Y: f32 = 22.0;
 /// Clearance between the action band and the caption card, as a fraction of the frame height:
 /// shoes and shadows reach a little below the ground line, and hair a little above a head.
 const FOOT_ROOM: f32 = 0.02;
-
-fn ease_out_back(t: f32) -> f32 {
-	let c1 = 1.4;
-	let c3 = c1 + 1.0;
-	1.0 + c3 * (t - 1.0).powi(3) + c1 * (t - 1.0).powi(2)
-}
-
-fn ease_out_bounce(t: f32) -> f32 {
-	let n1 = 7.5625;
-	let d1 = 2.75;
-
-	if t < 1.0 / d1 {
-		n1 * t * t
-	} else if t < 2.0 / d1 {
-		let t = t - 1.5 / d1;
-		n1 * t * t + 0.75
-	} else if t < 2.5 / d1 {
-		let t = t - 2.25 / d1;
-		n1 * t * t + 0.9375
-	} else {
-		let t = t - 2.625 / d1;
-		n1 * t * t + 0.984_375
-	}
-}
-
-fn smoothstep(t: f32) -> f32 {
-	let t = t.clamp(0.0, 1.0);
-	t * t * (3.0 - 2.0 * t)
-}
 
 /// Everything needed to draw frames for one output shape.
 pub struct Renderer<'a> {
@@ -305,6 +274,7 @@ impl<'a> Renderer<'a> {
 	/// The scene at `time`, with puppets blended between keyframes and brought to life.
 	fn stage_at(&self, shot: &Shot, time: f32) -> (Scene, Vec<Puppet>) {
 		let motion = self.story.drawing.motion;
+		let on = self.story.meta.video.acting == Acting::Full;
 		let index = shot
 			.keys
 			.iter()
@@ -317,6 +287,12 @@ impl<'a> Renderer<'a> {
 		let fresh = index == 0;
 		let before = compose::puppets(&previous.scene, time, false);
 		let after = compose::puppets(&current.scene, time, false);
+		let cx = acting::Cx {
+			on,
+			motion,
+			lines: self.spoken_lines(shot),
+			key_time: current.time,
+		};
 		let mut puppets = Vec::with_capacity(after.len());
 
 		for puppet in &after {
@@ -333,24 +309,18 @@ impl<'a> Renderer<'a> {
 			let mut blended = match before.iter().find(|old| old.id == puppet.id) {
 				Some(old) if !fresh => {
 					let knocked_down = matches!((old_actor, new_actor), (Some(a), Some(b)) if b.knocked > a.knocked + 0.5);
-					// Falls bounce; every other change winds up, overshoots and settles.
-					let eased = if knocked_down {
-						ease_out_bounce(progress)
-					} else {
-						motion.ease(progress)
-					};
-					let mut moved = compose::blend(old, puppet, eased);
-					follow_through(&mut moved, old, since, motion.follow_through);
-					moved.smear = smear(old, puppet, progress, motion.smears);
-					moved
+					// Falls bounce; every other change is acted by the rules in `acting`.
+					acting::tween(old, puppet, since, progress, knocked_down, &cx)
 				}
 				_ if fresh => puppet.clone(),
 				_ => {
-					arrive(
+					acting::arrive(
 						puppet,
 						new_actor.and_then(|actor| actor.enter),
 						progress,
+						since,
 						time,
+						&cx,
 					)
 				}
 			};
@@ -359,13 +329,13 @@ impl<'a> Renderer<'a> {
 				&& new.hops > old.hops
 				&& !fresh
 			{
-				hop(&mut blended, since, motion.squash);
+				acting::hop(&mut blended, since, motion.squash);
 			}
 
 			puppets.push(blended);
 		}
 
-		if !fresh && progress < 1.0 {
+		if !fresh {
 			for old in before
 				.iter()
 				.filter(|old| !after.iter().any(|p| p.id == old.id))
@@ -376,15 +346,26 @@ impl<'a> Renderer<'a> {
 					.iter()
 					.find(|actor| actor.id == old.id)
 					.and_then(|actor| actor.exit);
-				puppets.push(leave(old, exit, progress, time));
+
+				if since < acting::exit_span(old, exit, &cx) {
+					puppets.push(acting::leave(old, exit, progress, since, time, &cx));
+				}
 			}
 		}
 
 		let speaking = speaker_at(shot, time)
-			.and_then(|id| puppets.iter().find(|p| p.id == id).map(|p| (id, p.at.x)));
+			.and_then(|id| puppets.iter().find(|p| p.id == id))
+			.map(|puppet| {
+				acting::Speaker {
+					id: puppet.id.clone(),
+					x: puppet.at.x,
+					heading: puppet.heading,
+					pointing: acting::pointing_at(puppet),
+				}
+			});
 
 		for puppet in &mut puppets {
-			self.animate(puppet, shot, time, speaking);
+			acting::animate(puppet, &cx, time, speaking.as_ref());
 		}
 
 		let mut scene = current.scene.clone();
@@ -417,78 +398,24 @@ impl<'a> Renderer<'a> {
 		(scene, puppets)
 	}
 
-	/// Acting between keyframes: speech, breath, listening, blinking.
-	fn animate(&self, puppet: &mut Puppet, shot: &Shot, time: f32, speaking: Option<(&str, f32)>) {
-		let mut breath: f32 = puppet.breath;
-		let mut mouth: f32 = 0.0;
-		let mut viseme = None;
-		let mut shouting = false;
-
-		for line in shot
-			.lines
+	/// The shot's lines, resolved to what the acting rules read.
+	fn spoken_lines<'s>(&'s self, shot: &'s Shot) -> Vec<acting::Spoken<'s>> {
+		shot.lines
 			.iter()
-			.filter(|line| line.speakers.contains(&puppet.id))
-		{
-			let speech = &self.timeline.speeches[line.speech];
-			let end = line.start + speech.duration();
-
-			if time >= line.start && time < end {
-				// Limited animation flaps the mouth a few times a second instead of every frame.
-				let t = self.story.drawing.motion.mouth_time(time - line.start);
-				mouth = mouth.max(speech.mouth(t) * 0.95);
-				viseme = Some(speech.track.at(t));
-				shouting |= line.text.contains("**");
-				breath = breath.max(smoothstep(t / 0.3));
-			} else if time >= end {
-				breath = breath.max(1.0 - (time - end) / 1.6);
-			}
-		}
-
-		puppet.breath = breath.clamp(0.0, 1.0);
-
-		let Body::Figure(state) = &mut puppet.body else {
-			return;
-		};
-
-		state.mouth_open = state.mouth_open.max(mouth);
-
-		if viseme.is_some() {
-			state.viseme = viseme;
-			// Speakers nod into stressed syllables and lift their brows to shout.
-			state.head_tilt += (mouth - 0.45) * 6.0 * puppet.heading;
-			state.brow_lift += if shouting { 0.09 } else { mouth * 0.035 };
-		} else if let Some((speaker, x)) = speaking
-			&& speaker != puppet.id
-			&& state.lie < 0.5
-		{
-			// Everyone else turns their eyes to whoever is talking, with a small listening tilt.
-			let towards = (x - puppet.at.x).signum();
-			state.gaze = towards * 0.9;
-			state.head_tilt += towards * 3.0;
-		}
-
-		let motion = self.story.drawing.motion;
-		let seed = seed_of(&puppet.id);
-
-		// An idle loop (a rubber-hose bounce) for everyone standing.
-		if state.lie < 0.5 && state.gait.is_none() {
-			let (lift, squash) = motion.idle_at(time, seed);
-			puppet.lift += lift * puppet.scale;
-			state.squash *= squash;
-		}
-
-		// A moving hold: a pose held for long drifts a little, so it never freezes dead.
-		if motion.moving_hold > 0.0 {
-			state.tilt += (time * 0.7 + (seed % 17) as f32).sin() * motion.moving_hold;
-			state.head_tilt += (time * 0.5 + (seed % 11) as f32).sin() * motion.moving_hold;
-		}
-
-		let period = motion.blink_every + (seed % 100) as f32 / 40.0;
-		let phase = (time + (seed % 13) as f32 * 0.37) % period;
-
-		if phase < 0.14 && state.lie < 0.5 {
-			state.blink = 1.0 - (phase - 0.07).abs() / 0.07;
-		}
+			.map(|line| {
+				let speech = &self.timeline.speeches[line.speech];
+				acting::Spoken {
+					start: line.start,
+					duration: speech.duration(),
+					speakers: &line.speakers,
+					text: &line.text,
+					envelope: &speech.envelope,
+					track: &speech.track,
+					peak: acting::peak_of(&speech.envelope),
+					question: acting::is_question(&line.text),
+				}
+			})
+			.collect()
 	}
 
 	/// The camera at `time`, reading the setups the director planned for this shot.
@@ -1203,124 +1130,8 @@ fn tallest_view(format: Format) -> f32 {
 	director::tallest_view(format.aspect())
 }
 
-/// An actor arriving: walking in from the side they enter from, or popping into place.
-fn arrive(puppet: &Puppet, enter: Option<Side>, progress: f32, time: f32) -> Puppet {
-	let mut arriving = puppet.clone();
-
-	if let Some(side) = enter {
-		let start = match side {
-			Side::Left => -400.0,
-			Side::Right => STAGE + 400.0,
-		};
-		let eased = smoothstep(progress * 1.3);
-		arriving.at.x = lerp(start, puppet.at.x, eased);
-		walk(&mut arriving, time, 1.0 - eased);
-	} else {
-		let pop = ease_out_back(progress);
-		arriving.scale *= pop.max(0.0);
-		arriving.opacity = (progress * 3.0).min(1.0);
-	}
-
-	arriving
-}
-
-/// An actor leaving: walking off their exit side, or shrinking away.
-fn leave(puppet: &Puppet, exit: Option<Side>, progress: f32, time: f32) -> Puppet {
-	let mut leaving = puppet.clone();
-
-	if let Some(side) = exit {
-		let end = match side {
-			Side::Left => -400.0,
-			Side::Right => STAGE + 400.0,
-		};
-		leaving.at.x = lerp(puppet.at.x, end, smoothstep(progress));
-		walk(&mut leaving, time, 1.0);
-	} else {
-		leaving.scale *= 1.0 - smoothstep(progress);
-		leaving.opacity = 1.0 - progress;
-	}
-
-	leaving
-}
-
-/// A walk: people use the rig's walk cycle; animals bob along.
-fn walk(puppet: &mut Puppet, time: f32, amount: f32) {
-	if amount <= 0.01 {
-		return;
-	}
-
-	let phase = time * Gait::Walk.rate();
-
-	if let Body::Figure(state) = &mut puppet.body {
-		// The rig plants and lifts the feet, bobs the pelvis and swings the arms.
-		state.gait = Some((Gait::Walk, phase));
-		state.facing = puppet.heading * 0.7;
-		state.sway = (phase * 2.0).sin() * 0.3 * amount;
-	} else {
-		puppet.lift += (phase * 2.0).sin().abs() * 24.0 * puppet.scale * amount;
-	}
-}
-
-/// A jump: stretch on the way up, squash on landing, then settle.
-/// Speed lines behind a puppet crossing the stage fast: strongest mid-move, and only for
-/// styles that smear.
-fn smear(old: &Puppet, new: &Puppet, progress: f32, amount: f32) -> f32 {
-	let travel = new.at.x - old.at.x;
-
-	if amount <= 0.0 || travel.abs() < 80.0 || !(0.0..1.0).contains(&progress) {
-		return 0.0;
-	}
-
-	travel.signum() * amount * (1.0 - (2.0 * progress - 1.0).abs())
-}
-
-fn hop(puppet: &mut Puppet, since: f32, squash: f32) {
-	let t = since / 0.5;
-
-	if !(0.0..1.5).contains(&t) {
-		return;
-	}
-
-	if t < 1.0 {
-		puppet.lift += (t * PI).sin() * 120.0 * puppet.scale;
-	}
-
-	if let Body::Figure(state) = &mut puppet.body {
-		state.squash = if t < 0.9 {
-			1.0 + 0.09 * squash * (t / 0.9 * PI).sin()
-		} else {
-			1.0 - 0.16 * squash * ((t - 0.9) / 0.6 * PI).sin()
-		};
-		state.sway = -((t * PI).sin()) * 0.6;
-	}
-}
-
-/// After a move, loose parts keep going and swing back: a damped spring, solved in closed form
-/// so any frame can be rendered on its own (frames are drawn in parallel).
-fn follow_through(puppet: &mut Puppet, before: &Puppet, since: f32, amount: f32) {
-	let Body::Figure(state) = &mut puppet.body else {
-		return;
-	};
-
-	let moved = puppet.at.x - before.at.x;
-	let Body::Figure(old) = &before.body else {
-		return;
-	};
-
-	let hands = (state.hands.0 - old.hands.0).len() + (state.hands.1 - old.hands.1).len();
-	let push = (moved.abs() / 500.0 + hands / 400.0).min(1.0);
-
-	if push < 0.02 || since < 0.0 {
-		return;
-	}
-
-	let direction = if moved.abs() > 1.0 {
-		-moved.signum()
-	} else {
-		1.0
-	};
-	state.sway += direction * push * (-3.2 * since).exp() * (11.0 * since).sin() * amount;
-}
+// Arrivals, leaves, walk cycles, hops, follow-through, smears and everything else between
+// keyframes live in [`acting`](crate::video::acting), the performance layer.
 
 /// Splits a paragraph into caption-sized pieces, preferring breaks after punctuation.
 fn chunk(text: &str, limit: usize) -> Vec<String> {
@@ -1498,7 +1309,7 @@ mod tests {
 	#[test]
 	fn easing_lands_on_target() {
 		assert!((ease_out_back(1.0) - 1.0).abs() < 1e-5);
-		assert!((ease_out_bounce(1.0) - 1.0).abs() < 1e-5);
+		assert!((acting::ease_out_bounce(1.0) - 1.0).abs() < 1e-5);
 		assert!(ease_out_back(0.0).abs() < 1e-5);
 		assert!(ease_out_back(0.6) > 1.0, "back easing overshoots");
 	}

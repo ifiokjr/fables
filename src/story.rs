@@ -124,6 +124,11 @@ pub struct VideoOptions {
 	/// How every page is entered, unless its heading says `transition=` (default wipe).
 	#[serde(default)]
 	pub transition: Option<Transition>,
+	/// The performance layer: `full` (the default) animates by the acting rules in
+	/// [`acting`](crate::video::acting); `plain` turns the whole layer off and reproduces the
+	/// plain tween exactly.
+	#[serde(default)]
+	pub acting: Acting,
 }
 
 impl Default for VideoOptions {
@@ -134,8 +139,20 @@ impl Default for VideoOptions {
 			direction: Direction::default(),
 			depth_of_field: true,
 			transition: None,
+			acting: Acting::default(),
 		}
 	}
+}
+
+/// Whether characters perform by the acting rules.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Acting {
+	/// The acting rules are on, tuned by the style's `[motion]` dials.
+	#[default]
+	Full,
+	/// The whole layer is off: parts blend with one easing curve and slide.
+	Plain,
 }
 
 fn default_true() -> bool {

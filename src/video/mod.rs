@@ -4,6 +4,7 @@
 //! paragraph, stage directions land as the narrator reaches them, and the characters lip-flap
 //! to the narration. Frames are rendered in parallel and piped straight into ffmpeg.
 
+pub mod acting;
 pub mod audio;
 pub mod director;
 pub mod frames;
