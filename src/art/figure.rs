@@ -12,6 +12,7 @@
 use std::f32::consts::PI;
 use std::f32::consts::TAU;
 
+use super::Bounds;
 use super::Color;
 use super::Path;
 use super::Pt;
@@ -28,6 +29,7 @@ use super::rig::Gait;
 use super::rig::Legs;
 use super::rig::Limbs;
 use super::rig::Stance;
+use super::union_bounds;
 
 /// Body proportions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -800,11 +802,12 @@ impl Posed {
 	}
 }
 
-/// Draws a figure with its feet at the current origin.
-pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
+/// Draws a figure with its feet at the current origin, and returns the bounds of its head —
+/// the head with its hair and anything riding on it, back hair included — in the document's
+/// units, for whoever is measuring (see [`Svg::begin_measure`]).
+pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) -> Option<Bounds> {
 	if let Some(authored) = &look.puppet {
-		puppet::draw(svg, look, authored, state);
-		return;
+		return puppet::draw(svg, look, authored, state);
 	}
 
 	let frame = look.frame();
@@ -825,32 +828,42 @@ pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
 		-lie_lift, lie_turn, state.tilt
 	));
 
+	svg.begin_measure();
 	svg.begin(&torso);
 	svg.begin(&head_turn);
 	draw_back_hair(svg, look, &frame, state);
 	svg.end();
 	svg.end();
+	let back_hair = svg.end_measure();
 
 	draw_legs(svg, look, &frame, state, &posed);
 
 	svg.begin(&torso);
 	draw_body(svg, look, &frame);
+	svg.begin_measure();
 	svg.begin(&head_turn);
 	draw_head(svg, look, &frame, state);
 	draw_face(svg, look, &frame, state);
 	draw_front_hair(svg, look, &frame, state);
 	draw_extras_on_head(svg, look, &frame, state);
 	svg.end();
+	let head = svg.end_measure();
 	svg.end();
 
 	draw_arms(svg, look, &frame, state, &posed);
+
+	// Dizzy stars are an effect a mood draws over the figure, not part of it.
+	let measuring = svg.pause_measure();
 
 	if matches!(state.mood, Mood::Fainted | Mood::Dizzy) {
 		let above = posed.torso(frame.head + pt(0.0, -frame.head_r * 1.15));
 		fx::dizzy_stars(svg, above, frame.head_r, state.time);
 	}
 
+	svg.resume_measure(measuring);
 	svg.end();
+
+	union_bounds(back_hair, head)
 }
 
 /// Draws the rig's bones and joints over a figure, for model sheets and rig checks.

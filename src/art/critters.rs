@@ -1,5 +1,6 @@
 //! Animals and plants. In Kerfuffle even the flowers have faces, so they can react.
 
+use super::Bounds;
 use super::Color;
 use super::Path;
 use super::Pt;
@@ -59,8 +60,10 @@ fn eye(svg: &mut Svg, c: Pt, r: f32, knocked: f32) {
 	);
 }
 
-/// A round little Kerfuffle bird ("a tweetle"). Origin is the middle of its body.
-pub fn bird(svg: &mut Svg, color: Color, state: CritterState, seed: u64) {
+/// A round little Kerfuffle bird ("a tweetle"). Origin is the middle of its body. The
+/// drawing has no separate head — its round body is its head — so the whole outline is
+/// reported as the head bounds, and the return is `None`.
+pub fn bird(svg: &mut Svg, color: Color, state: CritterState, seed: u64) -> Option<Bounds> {
 	let r = 46.0;
 	let flip = state.facing.signum();
 	let spin = state.knocked * 180.0;
@@ -138,10 +141,12 @@ pub fn bird(svg: &mut Svg, color: Color, state: CritterState, seed: u64) {
 	}
 
 	svg.end();
+	None
 }
 
-/// Biscuit, Kerfuffle's sausage dog. Origin is between its feet.
-pub fn dog(svg: &mut Svg, color: Color, state: CritterState, seed: u64) {
+/// Biscuit, Kerfuffle's sausage dog. Origin is between its feet. Returns the bounds of its
+/// head — the skull, snout, ear and eye — in the document's units, for whoever is measuring.
+pub fn dog(svg: &mut Svg, color: Color, state: CritterState, seed: u64) -> Option<Bounds> {
 	let flip = state.facing.signum();
 	let body_y = -78.0;
 
@@ -187,6 +192,7 @@ pub fn dog(svg: &mut Svg, color: Color, state: CritterState, seed: u64) {
 		palette::SUNFLOWER,
 	);
 
+	svg.begin_measure();
 	let head_c = pt(160.0, body_y - 62.0);
 	let head = Path::wobbly_ellipse(head_c, 66.0, 54.0, 0.04, svg.seed(seed + 1));
 	svg.inked(&head, color);
@@ -227,11 +233,14 @@ pub fn dog(svg: &mut Svg, color: Color, state: CritterState, seed: u64) {
 		svg.stroke(&smile, palette::INK, svg.line);
 	}
 
+	let head = svg.end_measure();
 	svg.end();
+	head
 }
 
 /// Wormsley, the worm in the bowler hat who hides on every page. Origin is his hole.
-pub fn worm(svg: &mut Svg, state: CritterState, seed: u64) {
+/// Returns the bounds of his head — face, hat and all — for whoever is measuring.
+pub fn worm(svg: &mut Svg, state: CritterState, seed: u64) -> Option<Bounds> {
 	let hole = Path::wobbly_ellipse(pt(0.0, 0.0), 46.0, 14.0, 0.08, svg.seed(seed));
 	svg.fill(&hole, palette::INK);
 
@@ -243,6 +252,7 @@ pub fn worm(svg: &mut Svg, state: CritterState, seed: u64) {
 		.quad_to(pt(-18.0, -40.0 * peek), top);
 	svg.inked_noodle(&body, palette::FLAMINGO, 30.0);
 
+	svg.begin_measure();
 	let face = top + pt(0.0, -10.0);
 	let head = Path::wobbly_ellipse(face, 24.0, 22.0, 0.05, svg.seed(seed + 1));
 	svg.inked(&head, palette::FLAMINGO);
@@ -270,6 +280,8 @@ pub fn worm(svg: &mut Svg, state: CritterState, seed: u64) {
 	);
 	svg.inked(&crown, palette::INK);
 	svg.inked(&brim, palette::INK);
+
+	svg.end_measure()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,7 +291,8 @@ pub enum FlowerKind {
 	Sunflower,
 }
 
-/// A flower with a face. Origin is where the stem meets the ground.
+/// A flower with a face. Origin is where the stem meets the ground. Returns the bounds of
+/// its bloom — the head, for whoever is measuring.
 pub fn flower(
 	svg: &mut Svg,
 	kind: FlowerKind,
@@ -287,7 +300,7 @@ pub fn flower(
 	height: f32,
 	state: CritterState,
 	seed: u64,
-) {
+) -> Option<Bounds> {
 	let wilt = state.wilt.clamp(0.0, 1.0);
 	let sway = (state.time * 1.7 + seed as f32 * 0.37).sin() * 0.04 * (1.0 - wilt);
 	let droop = wilt * 1.35 + sway;
@@ -320,6 +333,7 @@ pub fn flower(
 	let r = 34.0 + height * 0.04;
 	let tilt = lean * wilt * 110.0;
 
+	svg.begin_measure();
 	svg.begin(&format!(
 		"translate({:.1} {:.1}) rotate({tilt:.1})",
 		head.x, head.y
@@ -381,6 +395,9 @@ pub fn flower(
 
 	face(svg, r * 0.5, wilt, state.time);
 	svg.end();
+	let bloom = svg.end_measure();
+	svg.end();
+	bloom
 }
 
 /// A tiny face for plants: smiling when well, frowning with X eyes when wilted.
@@ -412,8 +429,9 @@ fn face(svg: &mut Svg, size: f32, wilt: f32, time: f32) {
 	svg.stroke(&mouth, palette::INK, svg.line * 0.8);
 }
 
-/// A lollipop tree. Origin is the bottom of the trunk.
-pub fn tree(svg: &mut Svg, color: Color, height: f32, state: CritterState, seed: u64) {
+/// A lollipop tree. Origin is the bottom of the trunk. The tree has no head, so the whole
+/// outline is its head bounds for framing, and the return is `None`.
+pub fn tree(svg: &mut Svg, color: Color, height: f32, state: CritterState, seed: u64) -> Option<Bounds> {
 	let wilt = state.wilt.clamp(0.0, 1.0);
 	let trunk = Path::wobbly_poly(
 		&[
@@ -461,6 +479,8 @@ pub fn tree(svg: &mut Svg, color: Color, height: f32, state: CritterState, seed:
 			svg.inked(&leaf, leaves);
 		}
 	}
+
+	None
 }
 
 /// A starry knock-out burst, used when something keels over.
@@ -470,8 +490,8 @@ pub fn bonk(svg: &mut Svg, c: Pt, size: f32) {
 }
 
 /// A toothbrush standing in its cup, with eyes. It only ever looks hopeful. Origin is the
-/// bottom of the cup.
-pub fn toothbrush_buddy(svg: &mut Svg, color: Color, state: CritterState, seed: u64) {
+/// bottom of the cup. The whole buddy is its head for framing, and the return is `None`.
+pub fn toothbrush_buddy(svg: &mut Svg, color: Color, state: CritterState, seed: u64) -> Option<Bounds> {
 	let lean = (state.time * 1.5).sin() * 3.0 + state.lively * (state.time * 9.0).sin() * 6.0;
 
 	svg.begin(&format!("rotate({lean:.1})"));
@@ -528,4 +548,6 @@ pub fn toothbrush_buddy(svg: &mut Svg, color: Color, state: CritterState, seed: 
 	svg.inked(&cup, palette::BUBBLEGUM);
 	let stripe = Path::rect(-100.0, -150.0, 200.0, 30.0);
 	svg.fill(&stripe, palette::WHITE);
+
+	None
 }

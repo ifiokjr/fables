@@ -4,6 +4,7 @@
 //! that into puppets with concrete positions and puppet parameters. Puppets are plain numbers,
 //! so video can blend two of them to animate between stage directions.
 
+use crate::art::Bounds;
 use crate::art::Path;
 use crate::art::Pt;
 use crate::art::STAGE;
@@ -55,6 +56,17 @@ pub enum Body {
 	Critter(CritterState),
 }
 
+/// What a puppet's own drawing covers, in stage units, measured from the drawing itself.
+#[derive(Clone, Copy, Debug)]
+pub struct Extents {
+	/// Everything the puppet draws for itself: its head's hair, raised arms, held props and
+	/// all — but not its ground shadow, breath or speed lines, which are not the subject.
+	pub subject: Bounds,
+	/// The head with its hair and anything riding on it; a critter's whole outline where
+	/// its drawing has no separate head.
+	pub head: Bounds,
+}
+
 impl Puppet {
 	/// Where the mouth is on stage (for breath effects), if this puppet has one worth using.
 	pub fn mouth(&self) -> Option<Pt> {
@@ -85,6 +97,36 @@ impl Puppet {
 			_ => (self.at + pt(0.0, -80.0 * self.scale), 60.0 * self.scale),
 		}
 	}
+
+	/// Measures what this puppet draws, in stage units, by drawing it into a scratch
+	/// document exactly the way [`draw_puppet`] draws it into a frame — heading, scale,
+	/// lift, lie, pose, hair, head extras, held prop and a critter's own outline all in
+	/// force — and taking the bounding box of the path data it emits. The measurement
+	/// cannot drift from the drawing, because it is the drawing.
+	///
+	/// Framing reads this several times per camera setup (and every frame of a tracking
+	/// move), so callers that measure the same setup again and again cache the view, not
+	/// the puppet.
+	pub fn extents(&self) -> Extents {
+		let mut svg = Svg::new();
+		svg.measuring(true);
+		svg.begin(&subject_transform(self));
+		svg.begin_measure();
+		let head = draw_subject(&mut svg, self);
+		let subject = svg.end_measure().unwrap_or_else(|| missing(self));
+		svg.end();
+
+		Extents {
+			subject,
+			head: head.unwrap_or(subject),
+		}
+	}
+}
+
+/// What to say about a puppet whose drawing emitted nothing. Every drawing emits paths, so
+/// this is a bug in the drawing, and the box it gives is the puppet's own origin.
+fn missing(puppet: &Puppet) -> Bounds {
+	(puppet.at.x, puppet.at.y, puppet.at.x, puppet.at.y)
 }
 
 /// Resolves every visible actor in a scene to a puppet at `time` seconds.
@@ -326,8 +368,6 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 		return;
 	}
 
-	let seed = seed_of(&puppet.id);
-
 	if puppet.opacity < 0.99 {
 		svg.begin_opacity(puppet.opacity);
 	}
@@ -341,12 +381,34 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 	}
 
 	draw_shadow(svg, puppet);
-	svg.begin(&format!(
+	svg.begin(&subject_transform(puppet));
+	draw_subject(svg, puppet);
+	svg.end();
+
+	if puppet.opacity < 0.99 {
+		svg.end();
+	}
+}
+
+/// The group transform that places a puppet's drawing on stage: where it stands, lifted
+/// for a hop, at its scale. Mirroring happens inside the drawing (the heading turns the
+/// parts), so this is the same however the puppet faces.
+fn subject_transform(puppet: &Puppet) -> String {
+	format!(
 		"translate({:.1} {:.1}) scale({:.3})",
 		puppet.at.x,
 		puppet.at.y - puppet.lift,
 		puppet.scale
-	));
+	)
+}
+
+/// Draws the puppet itself — the subject: a figure or critter in full, inside the group
+/// transform that places it. The ground shadow, breath, stink and speed lines a frame adds
+/// around it are drawn by [`draw_shadow`] and [`draw_breath`], and count for nothing here.
+/// Returns the bounds of the subject's head (whole outline where the drawing has no
+/// separate head), for whoever is measuring.
+fn draw_subject(svg: &mut Svg, puppet: &Puppet) -> Option<Bounds> {
+	let seed = seed_of(&puppet.id);
 
 	match (&puppet.kind, &puppet.body) {
 		(Kind::Figure(look), Body::Figure(state)) => figure::draw(svg, look, state),
@@ -354,21 +416,15 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 		(Kind::Dog(color), Body::Critter(state)) => critters::dog(svg, *color, *state, seed),
 		(Kind::Worm, Body::Critter(state)) => critters::worm(svg, *state, seed),
 		(Kind::Flower(kind, color), Body::Critter(state)) => {
-			critters::flower(svg, *kind, *color, 480.0, *state, seed);
+			critters::flower(svg, *kind, *color, 480.0, *state, seed)
 		}
 		(Kind::Tree(color), Body::Critter(state)) => {
-			critters::tree(svg, *color, 1000.0, *state, seed);
+			critters::tree(svg, *color, 1000.0, *state, seed)
 		}
 		(Kind::Toothbrush(color), Body::Critter(state)) => {
-			critters::toothbrush_buddy(svg, *color, *state, seed);
+			critters::toothbrush_buddy(svg, *color, *state, seed)
 		}
-		_ => {}
-	}
-
-	svg.end();
-
-	if puppet.opacity < 0.99 {
-		svg.end();
+		_ => None,
 	}
 }
 

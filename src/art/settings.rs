@@ -693,9 +693,10 @@ impl Part {
 						let kind = kinds[(*seed % 3) as usize];
 						critters::flower(svg, kind, color, *height, state, *seed);
 					}
-					Critter::Tree => critters::tree(svg, color, *height, state, *seed),
+					Critter::Tree => {
+						critters::tree(svg, color, *height, state, *seed);
+					}
 				}
-
 				svg.end();
 			}
 		}
