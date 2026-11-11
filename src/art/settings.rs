@@ -19,7 +19,7 @@
 //! | `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
 //! | `data-night` | The colour at night. Parts without one are dimmed. |
 //! | `data-wilt` | The colour it turns as the scene wilts. |
-//! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides. |
+//! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides; `overcast` and `storm` hide the sun. |
 //! | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows, stars). |
 //! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). |
 //! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line. |
@@ -1060,6 +1060,47 @@ mod tests {
 				crate::raster::render(&doc).unwrap();
 			}
 		}
+	}
+
+	#[test]
+	fn overcast_and_storm_hide_the_sun() {
+		let source = r#"<svg data-ground="2000"><path id="far-sun" d="M100 100 C100 110 110 110 110 100 C110 90 100 90 100 100 Z" fill="sunflower" data-time="day"/></svg>"#;
+		let sun_shows = |preset: Preset| {
+			let light = Light::of(preset);
+			let document = draw_setting(
+				source,
+				&Weather {
+					light,
+					..Weather::default()
+				},
+			);
+			document.contains(&format!("fill=\"{}\"", light.grade(palette::SUNFLOWER)))
+		};
+
+		for preset in [Preset::Day, Preset::Dawn, Preset::Golden, Preset::Dusk] {
+			assert!(sun_shows(preset), "the sun is out at {}", preset.name());
+		}
+
+		for preset in [
+			Preset::Overcast,
+			Preset::Storm,
+			Preset::Night,
+			Preset::Indoor,
+		] {
+			assert!(!sun_shows(preset), "no sun at {}", preset.name());
+		}
+
+		let overcast = draw_setting(
+			source,
+			&Weather {
+				light: Light::of(Preset::Overcast),
+				..Weather::default()
+			},
+		);
+		assert!(
+			!overcast.contains("radialGradient id=\"glow"),
+			"a hidden sun has no bloom: {overcast}"
+		);
 	}
 
 	#[test]
