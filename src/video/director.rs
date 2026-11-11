@@ -16,6 +16,7 @@
 use anyhow::Result;
 use anyhow::bail;
 
+use crate::art::Bounds;
 use crate::art::Pt;
 use crate::art::STAGE;
 use crate::art::figure::Mood;
@@ -23,6 +24,7 @@ use crate::art::lerp;
 use crate::art::pt;
 use crate::cast::Kind;
 use crate::compose::Body;
+use crate::compose::Extents;
 use crate::compose::Puppet;
 use crate::stage::Camera;
 use crate::stage::Scene;
@@ -204,14 +206,19 @@ fn full_view(aspect: f32, band: (f32, f32), subjects: &[&Puppet], ground: f32) -
 }
 
 /// A medium, close or extreme-close shot: measured off the subjects' heads, cropped at the
-/// waist, the shoulders or the chin. The whole head — hair and all, taken from the puppet's
-/// drawn extent, the whole animal for a critter — stays inside the frame with headroom and
+/// waist, the shoulders or the chin. The whole head — hair and all, measured from what the
+/// puppet draws, the whole animal for a critter — stays inside the frame with headroom and
 /// side margins, and lead room shifts the frame only as far as those margins allow.
 fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet]) -> Option<View> {
-	let heads: Vec<(Pt, f32)> = subjects.iter().map(|puppet| puppet.head()).collect();
+	let measured: Vec<Extents> = subjects.iter().map(|puppet| puppet.extents()).collect();
+	// The head as a disc, from its measured bounds: hair and head-wear included.
+	let heads: Vec<(Pt, f32)> = measured
+		.iter()
+		.map(|e| head_disc(e.head))
+		.collect();
 	let radius = heads.iter().map(|(_, r)| *r).fold(0.0, f32::max);
 	let lowest_head = heads.iter().map(|(h, _)| h.y).fold(0.0, f32::max);
-	let extent = bounds(subjects)?;
+	let extent = union_all(measured.iter().map(|e| e.subject))?;
 
 	// The crop line: the waist for a medium, the shoulders for a close, the chin for an
 	// extreme close.
@@ -220,18 +227,23 @@ fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet
 	if size == ShotSize::Medium {
 		crop = subjects
 			.iter()
-			.map(|puppet| waist(puppet))
+			.zip(&measured)
+			.map(|(puppet, extents)| waist(puppet, extents))
 			.fold(0.0, f32::max);
 	}
 
-	// The highest point the frame must show: the top of the drawn extent — the hair, or the
-	// critter's whole outline. An extreme close-up is the one exception: it may crop hair
-	// above the brow line, so it measures to just above the brow instead.
+	// The highest point the frame must show: the top of the drawn subject — the hair, or
+	// the critter's whole outline. An extreme close-up is the one exception: it may crop
+	// hair above the brow line, so it measures to just above the brow instead, from the
+	// rig's own head (the face, not the hairdo).
 	let head_top = match size {
 		ShotSize::ExtremeClose => {
-			heads
+			subjects
 				.iter()
-				.map(|(h, r)| h.y - r * 0.85)
+				.map(|puppet| {
+					let (head, head_r) = puppet.head();
+					head.y - head_r * 0.85
+				})
 				.fold(f32::INFINITY, f32::min)
 		}
 		_ => extent.1,
@@ -274,15 +286,28 @@ fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet
 }
 
 /// The subject's waist line: mid-body for a person, a little under the head for other beasts.
-fn waist(puppet: &Puppet) -> f32 {
-	let (head, radius) = puppet.head();
-
+fn waist(puppet: &Puppet, extents: &Extents) -> f32 {
 	if puppet.kind.is_figure() {
-		let extent = extent_of(puppet);
+		let extent = extents.subject;
 		extent.3 - (extent.3 - extent.1) * 0.45
 	} else {
-		head.y + radius * 1.2
+		let head = extents.head;
+		head.3 + (head.3 - head.1) * 0.2
 	}
+}
+
+/// The disc that stands in for a measured head: its centre line and half its greater side,
+/// so a tall hairdo reads as the head it is.
+fn head_disc(bounds: Bounds) -> (Pt, f32) {
+	(
+		pt(f32::midpoint(bounds.0, bounds.2), f32::midpoint(bounds.1, bounds.3)),
+		((bounds.2 - bounds.0).max(bounds.3 - bounds.1)) / 2.0,
+	)
+}
+
+/// The bounds covering every one of them.
+fn union_all(bounds: impl Iterator<Item = Bounds>) -> Option<Bounds> {
+	bounds.reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
 }
 
 /// Frames a still illustration from a shot: the square page's view of a shot size on its
@@ -323,16 +348,19 @@ pub fn still_view(
 	shot_view(1.0, (0.04, 0.96), size, &subjects, scene.setting.ground())
 }
 
-/// Rough stage-space bounds of puppets: (left, top, right, bottom).
-pub(crate) fn bounds(puppets: &[&Puppet]) -> Option<(f32, f32, f32, f32)> {
+/// Measured stage-space bounds of puppets: (left, top, right, bottom), taken from what
+/// they actually draw — hair, raised arms, held props and all.
+pub(crate) fn bounds(puppets: &[&Puppet]) -> Option<Bounds> {
 	puppets
 		.iter()
-		.map(|p| extent_of(p))
+		.map(|p| p.extents().subject)
 		.reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
 }
 
-/// Rough stage-space bounds of one puppet.
-pub(crate) fn extent_of(puppet: &Puppet) -> (f32, f32, f32, f32) {
+/// The old rough guess at a puppet's bounds: one hard-coded box per kind, whichever way it
+/// faces. Kept only for the `locked` camera, which must keep producing exactly the frames
+/// it always has; every other framing measures the puppet instead (see [`bounds`]).
+pub(crate) fn rough_extent(puppet: &Puppet) -> Bounds {
 	let s = puppet.scale;
 	let (x, y) = (puppet.at.x, puppet.at.y);
 
@@ -361,6 +389,14 @@ pub(crate) fn extent_of(puppet: &Puppet) -> (f32, f32, f32, f32) {
 		Kind::Flower(..) => (x - 110.0 * s, y - 520.0 * s, x + 110.0 * s, y),
 		Kind::Worm => (x - 40.0 * s, y - 120.0 * s, x + 40.0 * s, y),
 	}
+}
+
+/// Rough bounds of puppets, for the `locked` camera only (see [`rough_extent`]).
+pub(crate) fn rough_bounds(puppets: &[&Puppet]) -> Option<Bounds> {
+	puppets
+		.iter()
+		.map(|p| rough_extent(p))
+		.reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
 }
 
 /// Plans the camera for one shot, in both frame shapes. `explicit` marks a page the script
@@ -1306,7 +1342,7 @@ mod tests {
 					let puppets = puppets_of(&script);
 					assert_eq!(puppets.len(), 1, "{script}");
 					let cast: Vec<&Puppet> = puppets.iter().collect();
-					let extent = extent_of(&puppets[0]);
+					let extent = puppets[0].extents().subject;
 					let (head, head_radius) = puppets[0].head();
 
 					for size in [

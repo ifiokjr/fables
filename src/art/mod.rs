@@ -569,12 +569,15 @@ impl Linear {
 					},
 					"rotate" => {
 						let (sin, cos) = arg(0).unwrap_or(0.0).to_radians().sin_cos();
+						let (cx, cy) = (arg(1).unwrap_or(0.0), arg(2).unwrap_or(0.0));
+						// A pivoted turn is a translate, a rotation and a translate back.
 						Linear {
 							a: cos,
 							b: sin,
 							c: -sin,
 							d: cos,
-							..Linear::IDENTITY
+							e: cx - (cos * cx - sin * cy),
+							f: cy - (sin * cx + cos * cy),
 						}
 					}
 					"scale" => {
@@ -719,12 +722,14 @@ impl Svg {
 	}
 
 	/// The brush's register offset in the current group's units: the same slip on the page,
-	/// however the group is turned, scaled or mirrored.
+	/// however the group is turned, scaled or mirrored. The register is an offset, not a
+	/// point, so it moves with each frame's turn and scale but never with its place.
 	fn register_here(&self) -> Pt {
-		let register = self.brush.frame.apply(self.brush.line.register);
+		let moved = |frame: Linear, offset: Pt| frame.apply(offset) - frame.apply(Pt::default());
+		let register = moved(self.brush.frame, self.brush.line.register);
 		self.frame()
 			.inverse()
-			.map_or(self.brush.line.register, |into| into.apply(register))
+			.map_or(self.brush.line.register, |into| moved(into, register))
 	}
 
 	/// Switches style for everything drawn from now on.
@@ -790,8 +795,10 @@ impl Svg {
 		};
 
 		let frame = self.frame();
-		// A stroke of `bleed` units around the path bleeds by the transform of that vector.
-		let swell = frame.apply(pt(bleed, bleed)).len();
+		// A stroke of `bleed` units around the path bleeds by the transform of that
+		// vector — moved by the frame's turn and scale, never by its place.
+		let moved = |v: Pt| frame.apply(v) - frame.apply(Pt::default());
+		let swell = moved(pt(bleed, bleed)).len();
 		let a = frame.apply(pt(left, top) + shift);
 		let b = frame.apply(pt(right, bottom) + shift);
 		let (min, max) = (
@@ -1348,8 +1355,11 @@ mod tests {
 			"translate(4 9) rotate(120) scale(1.6 0.7)",
 		] {
 			svg.begin(transform);
-			let slip = svg.frame().apply(svg.register_here());
-			let page = Linear::of_transform("scale(0.5)").apply(pt(7.0, 5.0));
+			// The register is an offset: it moves with each frame's turn and scale, never
+			// with its place.
+			let moved = |frame: Linear, offset: Pt| frame.apply(offset) - frame.apply(Pt::default());
+			let slip = moved(svg.frame(), svg.register_here());
+			let page = moved(Linear::of_transform("scale(0.5)"), pt(7.0, 5.0));
 			assert!(
 				(slip - page).len() < 1e-3,
 				"{transform}: {slip:?} vs {page:?}"

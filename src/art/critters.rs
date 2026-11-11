@@ -396,7 +396,6 @@ pub fn flower(
 	face(svg, r * 0.5, wilt, state.time);
 	svg.end();
 	let bloom = svg.end_measure();
-	svg.end();
 	bloom
 }
 

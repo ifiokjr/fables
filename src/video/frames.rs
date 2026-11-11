@@ -32,6 +32,7 @@ use crate::stage::Scene;
 use crate::stage::ShotSize;
 use crate::stage::Side;
 use crate::stage::Travel;
+use crate::story::Direction;
 use crate::story::RunStyle;
 use crate::story::Story;
 use crate::story::Transition;
@@ -167,6 +168,11 @@ pub struct Renderer<'a> {
 	/// Blurred backdrop images, one per setting, depth layer and weather, built once and
 	/// reused for every frame of a depth-of-field shot.
 	blur_cache: std::sync::Mutex<std::collections::HashMap<u64, String>>,
+	/// Views already worked out, keyed by the setup (or shot) and the moment they were read
+	/// at. The camera reads the same framing at the same anchor again and again, once per
+	/// frame, and each read measures its subjects' drawn bounds — so the first read is
+	/// remembered and the rest just look it up.
+	view_cache: std::sync::Mutex<std::collections::HashMap<(usize, u32), View>>,
 }
 
 impl<'a> Renderer<'a> {
@@ -184,7 +190,25 @@ impl<'a> Renderer<'a> {
 			width,
 			height,
 			blur_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+			view_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
 		}
+	}
+
+	/// The view the frame at `time` is drawn with, without rendering it: where the camera
+	/// stands once its travel, the slow push and any shake have had their say.
+	pub fn view_at(&self, time: f32) -> View {
+		let shot = self.timeline.shot_at(time);
+		self.camera(shot, time)
+	}
+
+	/// Reads the view cache, however busy the frame renderers are.
+	fn cached<T>(&self, with: impl FnOnce(&mut std::collections::HashMap<(usize, u32), View>) -> T) -> T {
+		with(
+			&mut self
+				.view_cache
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner()),
+		)
 	}
 
 	/// Renders the frame at `time` seconds. `frame` drives line boil and grain.
@@ -596,8 +620,23 @@ impl<'a> Renderer<'a> {
 		view
 	}
 
-	/// The view a setup's framing names, read at its anchor (or at `time`, for a tracking shot).
+	/// The view a setup's framing names, read at its anchor (or at `time`, for a tracking
+	/// shot). A framing that is not tracking reads at the same moment every frame, so the
+	/// view is measured once and remembered.
 	fn framing_view(&self, shot: &Shot, setup: &Setup, time: f32) -> View {
+		let key = (setup as *const Setup as usize, time.to_bits());
+
+		if let Some(view) = self.cached(|cache| cache.get(&key).copied()) {
+			return view;
+		}
+
+		let view = self.framing_view_now(shot, setup, time);
+		self.cached(|cache| cache.insert(key, view));
+		view
+	}
+
+	/// The view a setup's framing names, worked out fresh.
+	fn framing_view_now(&self, shot: &Shot, setup: &Setup, time: f32) -> View {
 		let aspect = self.format.aspect();
 
 		match &setup.framing {
@@ -774,8 +813,22 @@ impl<'a> Renderer<'a> {
 		Ok(encoded)
 	}
 
-	/// Where the camera wants to be once everything settles after `time` (the automatic framing).
+	/// Where the camera wants to be once everything settles after `time` (the automatic
+	/// framing), measured once and remembered per shot and moment.
 	fn target(&self, shot: &Shot, time: f32) -> View {
+		let key = (shot as *const Shot as usize, time.to_bits());
+
+		if let Some(view) = self.cached(|cache| cache.get(&key).copied()) {
+			return view;
+		}
+
+		let view = self.target_now(shot, time);
+		self.cached(|cache| cache.insert(key, view));
+		view
+	}
+
+	/// Where the camera wants to be once everything settles after `time`, worked out fresh.
+	fn target_now(&self, shot: &Shot, time: f32) -> View {
 		let scene = shot.scene_at(time);
 		let ground = scene.setting.ground();
 		let aspect = self.format.aspect();
@@ -815,7 +868,14 @@ impl<'a> Renderer<'a> {
 			visible.clone()
 		};
 
-		match director::bounds(&focus) {
+		// The locked camera must keep producing exactly the frames it always has, so it
+		// keeps framing from the old rough extents; the automatic director measures.
+		let extent = match self.story.meta.video.direction {
+			Direction::Auto => director::bounds(&focus),
+			Direction::Locked => director::rough_bounds(&focus),
+		};
+
+		match extent {
 			Some(extent) => fit(self.format, extent, ground),
 			None => {
 				director::clamp(
