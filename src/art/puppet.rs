@@ -189,6 +189,13 @@ impl Proportions {
 /// puppet shows its full three-quarter drawing there.
 const STAGED_FACING: f32 = 0.35;
 
+/// How far down a `fist` drawn for a kid's hand, from the wrist, a held thing sits: a little
+/// past halfway, so a bigger hand holds it further from the wrist. That is 17 of the cartoon
+/// fist's 32 units (a fraction exact in binary), where the cartoon's props have always been.
+fn grip(fist: &Shape) -> f32 {
+	fist.bounds().1.y * (17.0 / 32.0)
+}
+
 /// A character's authored puppet: their part file over their style's kit, read and checked once.
 #[derive(Clone, Debug)]
 pub struct Authored {
@@ -1769,11 +1776,12 @@ impl Arm<'_> {
 			svg.end();
 		}
 
-		// Held things sit in the fist, under the fingers.
+		// Held things sit in the fist, under the fingers: a little past halfway down it, so a
+		// bigger hand holds them further from the wrist.
 		let along = (wrist - elbow).norm();
 
 		if let Some(held) = held {
-			let fist = wrist + along * 17.0 * held.scale;
+			let fist = wrist + along * grip(&puppet.required("hand-fist", 0.0)) * held.scale;
 			draw_prop(svg, puppet, ink, held, fist, along, side);
 		}
 
@@ -3047,6 +3055,26 @@ mod tests {
 		);
 		assert!(!behind(Pose::HoldNose));
 		assert!(!behind(Pose::ArmsCrossed));
+	}
+
+	#[test]
+	fn held_things_sit_in_the_fist_however_big_the_hand() {
+		let fist = |style: &str| {
+			StylePack::named(style)
+				.unwrap_or_else(|error| unreachable!("{error}"))
+				.kit
+				.get("hand-fist")
+				.cloned()
+				.unwrap_or_else(|| unreachable!("every kit has a fist"))
+		};
+		let (cartoon, anime) = (fist("cartoon"), fist("anime"));
+		assert_eq!(
+			grip(&cartoon),
+			17.0,
+			"the cartoon's props stay where they were"
+		);
+		// The anime fist is nearly three times as long, so its grip is further down it.
+		assert!(grip(&anime) > 40.0 && grip(&anime) < anime.bounds().1.y * 0.6);
 	}
 
 	/// Every stance, solved on `body`, three-quarters turned.
