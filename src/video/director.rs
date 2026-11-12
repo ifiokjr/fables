@@ -32,6 +32,7 @@ use crate::stage::ShotSize;
 use crate::stage::Travel;
 use crate::story::Direction;
 use crate::story::Story;
+use crate::story::TextPlace;
 use crate::video::timeline::Framing;
 use crate::video::timeline::Setup;
 use crate::video::timeline::Shot;
@@ -78,6 +79,9 @@ const PAN: f32 = 0.3;
 const TILT: f32 = 0.25;
 /// How far past the frame's bottom edge a tight shot crops, as a fraction of the view height.
 const CROP: f32 = 0.08;
+/// A small margin between the page's text card and the part of the page a still may frame
+/// its subject into.
+const CARD_MARGIN: f32 = 90.0;
 
 /// A camera view: centre and height in stage units (width follows from the aspect).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -316,13 +320,92 @@ fn union_all(bounds: impl Iterator<Item = Bounds>) -> Option<Bounds> {
 	bounds.reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
 }
 
+/// The part of the page a framed still may place its subject in, in page coordinates: the
+/// page minus the laid-out text card (`card`, as [`crate::book`] measures it from the page's
+/// own text layout), plus a small margin on the card's side, top or bottom as the page says.
+/// The whole page when there is no card.
+fn clear_area(text: TextPlace, card: Option<Bounds>) -> Bounds {
+	match (card, text) {
+		(None, _) => (0.0, 0.0, STAGE, STAGE),
+		(Some(card), TextPlace::Bottom) => (0.0, 0.0, STAGE, card.1 - CARD_MARGIN),
+		(Some(card), _) => (0.0, card.3 + CARD_MARGIN, STAGE, STAGE),
+	}
+}
+
+/// The clear area as the vertical band of the frame [`shot_view`] reads: the head line keeps
+/// the framing's headroom inside the clear area, and the ground line sits on its floor. A
+/// square view maps onto the square page one to one, so a fraction of the frame is the same
+/// fraction of the page.
+fn clear_band(clear: Bounds) -> (f32, f32) {
+	(
+		(clear.1 + (clear.3 - clear.1) * HEADROOM) / STAGE,
+		clear.3 / STAGE,
+	)
+}
+
+/// Whether every subject's measured head sits inside the clear area: the framing's headroom
+/// above it, [`SIDE_MARGIN`] of the page width either side, and no part of it off the page.
+/// An extreme close-up may crop hair above the brow, as in video, so for it the brow line
+/// stands in for the top of the head. A wide or full shot's head is small enough to clear
+/// the card's far edge whole, and must; a tighter shot's head fills the frame, so there the
+/// line above the card is the one that must hold.
+fn heads_are_clear(view: View, subjects: &[&Puppet], clear: Bounds, size: ShotSize) -> bool {
+	let scale = STAGE / view.height;
+	let to_page = |x: f32, y: f32| {
+		(
+			STAGE / 2.0 + (x - view.centre.x) * scale,
+			STAGE / 2.0 + (y - view.centre.y) * scale,
+		)
+	};
+	let (_, top, _, bottom) = clear;
+	let headroom = (bottom - top) * HEADROOM;
+	let margin = (clear.2 - clear.0) * SIDE_MARGIN;
+	let chin_clears = matches!(size, ShotSize::Wide | ShotSize::Full);
+
+	subjects.iter().all(|puppet| {
+		let (head_l, head_t, head_r, head_b) = puppet.extents().head;
+		let (left_at, mut top_at) = to_page(head_l, head_t);
+		let (right_at, bottom_at) = to_page(head_r, head_b);
+
+		if size == ShotSize::ExtremeClose {
+			let (centre, radius) = puppet.head();
+			top_at = to_page(centre.x, centre.y - radius * 0.85).1;
+		}
+
+		top_at >= top + headroom - 0.5
+			&& (!chin_clears || bottom_at <= bottom + 0.5)
+			&& left_at >= margin - 0.5
+			&& right_at <= clear.2 - margin + 0.5
+	})
+}
+
+/// The sizes tighter than the one the page asked for, widest first: the order a still falls
+/// back through when the text card leaves too little room for a framing.
+fn tighter_than(size: ShotSize) -> Vec<ShotSize> {
+	let all = [
+		ShotSize::Wide,
+		ShotSize::Full,
+		ShotSize::Medium,
+		ShotSize::Close,
+		ShotSize::ExtremeClose,
+	];
+	let from = all
+		.iter()
+		.position(|candidate| *candidate == size)
+		.unwrap_or(0);
+	all[from..].to_vec()
+}
+
 /// Frames a still illustration from a shot: the square page's view of a shot size on its
-/// subjects. `None` when nobody named is on stage, which draws the page as usual.
+/// subjects. `card` is the page's laid-out text card in page coordinates, whose band the
+/// subject keeps clear of — `None` when the page has no card. `None` comes back when nobody
+/// named is on stage, which draws the page as usual.
 pub fn still_view(
 	scene: &Scene,
 	puppets: &[Puppet],
 	size: ShotSize,
 	on: &[String],
+	card: Option<Bounds>,
 ) -> Option<View> {
 	let subjects: Vec<&Puppet> = if on.is_empty() {
 		// A close still finds whoever spoke on the page; everyone else shares the frame.
@@ -351,7 +434,24 @@ pub fn still_view(
 			.collect()
 	};
 
-	shot_view(1.0, (0.04, 0.96), size, &subjects, scene.setting.ground())
+	let ground = scene.setting.ground();
+	let clear = clear_area(scene.text, card);
+	let band = clear_band(clear);
+	let mut widest = None;
+
+	// The widest framing that keeps every head inside the part of the page the card leaves
+	// clear wins; when even the tightest cannot manage it, the tightest still draws, best
+	// it can — a framing never hides a head under the card.
+	for candidate in tighter_than(size) {
+		let view = shot_view(1.0, band, candidate, &subjects, ground)?;
+		widest = Some(view);
+
+		if heads_are_clear(view, &subjects, clear, candidate) {
+			break;
+		}
+	}
+
+	widest
 }
 
 /// Measured stage-space bounds of puppets: (left, top, right, bottom), taken from what
@@ -1286,6 +1386,11 @@ mod tests {
 	}
 
 	fn puppets_of(script: &str) -> Vec<Puppet> {
+		scene_of(script).1
+	}
+
+	/// The page's scene and puppets, after its stage directions.
+	fn scene_of(script: &str) -> (Scene, Vec<Puppet>) {
 		let source = format!("+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n{script}");
 		let story = story::parse(&source).unwrap();
 		let cast =
@@ -1301,7 +1406,159 @@ mod tests {
 			}
 		}
 
-		compose::puppets(&scene, 0.0, false)
+		let puppets = compose::puppets(&scene, 0.0, false);
+		(scene, puppets)
+	}
+
+	/// A text card as `book.rs` draws it: the laid-out text block plus its padding, ending
+	/// at `bottom`. Top cards hang from the top of the page; a bottom card is a line or two
+	/// of text hugging the foot of the page.
+	fn card_at(bottom: f32) -> Bounds {
+		(crate::book::SAFE, 105.0, STAGE - crate::book::SAFE, bottom)
+	}
+
+	fn bottom_card() -> Bounds {
+		(crate::book::SAFE, 2095.0, STAGE - crate::book::SAFE, 2353.0)
+	}
+
+	/// Maps a stage point onto the page through `view`, as `book.rs` draws it: a square view
+	/// fills the square page exactly.
+	fn to_page(view: View, x: f32, y: f32) -> (f32, f32) {
+		let scale = STAGE / view.height;
+
+		(
+			STAGE / 2.0 + (x - view.centre.x) * scale,
+			STAGE / 2.0 + (y - view.centre.y) * scale,
+		)
+	}
+
+	/// The framing rule on a book page: every measured head bound sits inside the part of
+	/// the page the card leaves clear, at least [`HEADROOM`] of the clear height above it
+	/// and [`SIDE_MARGIN`] of the page width each side, nothing under the card or off it.
+	/// An extreme close-up may crop hair above the brow, as in video: where the whole head
+	/// does not clear the card's line, the brow line must.
+	fn assert_heads_in_clear(view: View, subjects: &[&Puppet], clear: Bounds, what: &str) {
+		let (_, clear_t, _, clear_b) = clear;
+		let headroom = (clear_b - clear_t) * HEADROOM;
+		let margin = (clear.2 - clear.0) * SIDE_MARGIN;
+
+		for puppet in subjects {
+			let (hl, ht, hr, hb) = puppet.extents().head;
+			let (left_at, top_at) = to_page(view, hl, ht);
+			let (right_at, bottom_at) = to_page(view, hr, hb);
+			let brow_at = {
+				let (centre, radius) = puppet.head();
+				to_page(view, centre.x, centre.y - radius * 0.85).1
+			};
+
+			assert!(
+				top_at >= clear_t + headroom - 0.5 || brow_at >= clear_t - 0.5,
+				"{what}: head top at {top_at:.0} (brow {brow_at:.0}) sits under the clear area's \
+				 head line {:.0}",
+				clear_t + headroom
+			);
+			assert!(
+				bottom_at <= clear_b + 0.5,
+				"{what}: head bottom at {bottom_at:.0} hangs below the clear area's floor \
+				 {clear_b:.0}"
+			);
+			assert!(
+				left_at >= margin - 0.5 && right_at <= STAGE - margin + 0.5,
+				"{what}: head spans {left_at:.0}..{right_at:.0}, inside the page's {margin:.0} \
+				 unit side margins"
+			);
+		}
+	}
+
+	/// Every shot size, a top card of three heights, a bottom card and no card, on a figure
+	/// and on two: the heads stay in the area the card leaves clear, and the framing keeps
+	/// the video rules it is built with.
+	#[test]
+	fn still_shots_keep_heads_in_the_area_the_card_leaves_clear() {
+		let cases: [(&str, Option<Bounds>); 5] = [
+			("text=top", Some(card_at(350.0))),
+			("text=top", Some(card_at(700.0))),
+			("text=top", Some(card_at(1010.0))),
+			("text=bottom", Some(bottom_card())),
+			("text=none", None),
+		];
+
+		for (text, card) in cases {
+			for actors in ["@kid x=0.5", "@kid x=0.3\n@mum x=0.7"] {
+				let (scene, puppets) = scene_of(&format!("# park {text}\n{actors}\n"));
+				let subjects: Vec<&Puppet> = puppets.iter().collect();
+				let clear = clear_area(scene.text, card);
+				let band = clear_band(clear);
+				let ground = scene.setting.ground();
+
+				for size in [
+					ShotSize::Wide,
+					ShotSize::Full,
+					ShotSize::Medium,
+					ShotSize::Close,
+					ShotSize::ExtremeClose,
+				] {
+					let what = format!("{text} · {actors:?} · {size:?}");
+					let view = still_view(&scene, &puppets, size, &[], card)
+						.unwrap_or_else(|| panic!("{what}: no framing"));
+					assert_heads_in_clear(view, &subjects, clear, &what);
+
+					// The framing still keeps the whole subject inside its own headroom and
+					// side margins, as the video guarantees — the one exception being an
+					// extreme close-up, whose crop may take the hair above the brow.
+					let extent = bounds(&subjects).unwrap();
+					let (left, top) = (
+						view.centre.x - view.width(1.0) / 2.0,
+						view.centre.y - view.height / 2.0,
+					);
+					let cropped = shot_view(1.0, band, ShotSize::ExtremeClose, &subjects, ground)
+						.as_ref() == Some(&view);
+					assert!(
+						extent.1 >= top + HEADROOM * view.height - 1e-3 || cropped,
+						"{what}: subject top {:.0} above the frame's headroom line {:.0}",
+						extent.1,
+						top + HEADROOM * view.height
+					);
+					assert!(
+						extent.0 >= left + SIDE_MARGIN * view.width(1.0) - 1e-3
+							&& extent.2 <= left + view.width(1.0) * (1.0 - SIDE_MARGIN) + 1e-3,
+						"{what}: subject {:.0}..{:.0} breaks the frame's side margins",
+						extent.0,
+						extent.2
+					);
+				}
+			}
+		}
+	}
+
+	/// A grown-up under a page-deep card: a full shot has no room left to keep her head
+	/// below the card, so the still falls back to the widest framing that does — which
+	/// still shows the whole head.
+	#[test]
+	fn a_full_shot_falls_back_when_the_card_leaves_no_room() {
+		let card = card_at(1010.0);
+		let (scene, puppets) = scene_of("# park text=top\n@mum x=0.5\n");
+		let subjects: Vec<&Puppet> = puppets.iter().collect();
+		let clear = clear_area(scene.text, Some(card));
+		let band = clear_band(clear);
+
+		// The plain full shot cannot keep her head in the clear area.
+		let full = shot_view(1.0, band, ShotSize::Full, &subjects, scene.setting.ground())
+			.expect("a subject");
+		assert!(
+			!heads_are_clear(full, &subjects, clear, ShotSize::Full),
+			"the card leaves room for a plain full shot; there would be no fallback to test"
+		);
+
+		let view =
+			still_view(&scene, &puppets, ShotSize::Full, &[], Some(card)).expect("a subject");
+		assert!(
+			view.height < full.height,
+			"the still fell back to a tighter framing: {} vs the full shot's {}",
+			view.height,
+			full.height
+		);
+		assert_heads_in_clear(view, &subjects, clear, "the fallback");
 	}
 
 	#[test]
@@ -1493,7 +1750,7 @@ mod tests {
 		}
 
 		let puppets = compose::puppets(&scene, 0.0, true);
-		let view = still_view(&scene, &puppets, ShotSize::Close, &scene.camera.on)
+		let view = still_view(&scene, &puppets, ShotSize::Close, &scene.camera.on, None)
 			.expect("a close shot on a speaking kid frames the still");
 
 		// A real close-up: much tighter than the whole stage, centred on the kid, square.
@@ -1507,7 +1764,14 @@ mod tests {
 
 		// An unknown subject leaves the page to draw as usual.
 		assert!(
-			still_view(&scene, &puppets, ShotSize::Close, &["ghost".to_owned()]).is_none(),
+			still_view(
+				&scene,
+				&puppets,
+				ShotSize::Close,
+				&["ghost".to_owned()],
+				None
+			)
+			.is_none(),
 			"nobody named, no framing"
 		);
 	}
