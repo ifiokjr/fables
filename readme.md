@@ -139,6 +139,7 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 
 | Tool | What it does |
 | --- | --- |
+| `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, workflow. |
 | `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences and a style, or read one back with its cast and books. |
 | `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space and the drawing rules; the kit as an image. |
 | `character_create` | A new cast member from who they are and their colours, drawn from the style's template. |
