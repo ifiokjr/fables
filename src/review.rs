@@ -192,7 +192,7 @@ fn long_runs(story: &Story, rehearsals: &[Rehearsal]) -> Vec<Finding> {
 	let mut run: Vec<usize> = Vec::new();
 
 	let flush = |run: &[usize], findings: &mut Vec<Finding>| {
-		if run.len() > 3 {
+		if run.len() > 3 && run.iter().all(|&index| quiet(story, rehearsals, index)) {
 			let index = run[3];
 			let page = &story.pages[index];
 			let setting = page.setting.as_str();
@@ -230,6 +230,32 @@ fn long_runs(story: &Story, rehearsals: &[Rehearsal]) -> Vec<Finding> {
 
 	flush(&run, &mut findings);
 	findings
+}
+
+/// Whether a page leaves its run visually quiet: no shot of its own, and nobody's mood
+/// changed since the page before it (the first page of a run is quiet by definition).
+fn quiet(story: &Story, rehearsals: &[Rehearsal], index: usize) -> bool {
+	let page = &story.pages[index];
+
+	if page.option("shot").is_some() || page.directed_by_camera() {
+		return false;
+	}
+
+	let Some(before) = index.checked_sub(1).and_then(|last| rehearsals.get(last)) else {
+		return true;
+	};
+	let here = rehearsals[index].finale();
+	let before = before.finale();
+
+	before
+		.actors
+		.iter()
+		.filter(|actor| !actor.hidden)
+		.all(|actor| {
+			here.actors
+				.iter()
+				.any(|other| other.id == actor.id && other.mood == actor.mood)
+		})
 }
 
 /// The star's mood never changes across the book, or ends where it began.
