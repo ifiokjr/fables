@@ -936,6 +936,8 @@ impl Svg {
 
 	/// An inked shape with one tone of shadow: light comes from the top left (`light`, within
 	/// `reach`), so the shadow lands on the far side. Each style paints that tone its own way.
+	/// Every colour is graded once, where it is emitted; a gradient's stops are written into
+	/// defs directly, so they pick up the grade there instead.
 	pub fn shaded(
 		&mut self,
 		path: &Path,
@@ -945,8 +947,6 @@ impl Svg {
 		reach: f32,
 		line: f32,
 	) {
-		let base = self.graded(base);
-		let shade = self.graded(shade);
 		self.cast_shadow(path);
 
 		let clip = self.next_id("shade");
@@ -960,6 +960,8 @@ impl Svg {
 
 		match self.style.shading {
 			Shading::Gradient => {
+				let base = self.graded(base);
+				let shade = self.graded(shade);
 				let gradient = self.next_id("glow");
 				self.define(&format!(
 					r#"<radialGradient id="{gradient}" gradientUnits="userSpaceOnUse" cx="{:.1}" cy="{:.1}" r="{:.1}"><stop offset="0" stop-color="{}"/><stop offset="0.6" stop-color="{base}"/><stop offset="1" stop-color="{shade}"/></radialGradient>"#,
@@ -1279,6 +1281,52 @@ mod tests {
 			!svg.body.contains("fill-opacity=\"0.38\""),
 			"no rim band in daylight: {}",
 			svg.body
+		);
+	}
+
+	/// A puppet part reaches the page through the light's grade exactly once, whichever way
+	/// its style shades: the crescent's colours where they are emitted, a gradient's stops
+	/// where they are written into defs.
+	#[test]
+	fn a_puppet_part_is_graded_exactly_once() {
+		let square = Shape::parse(
+			"M10 10 C40 10 70 10 90 10 C90 40 90 70 90 90 C70 90 40 90 10 90 C10 70 10 40 10 10 Z",
+		);
+		let dusk = Light::of(light::Preset::Dusk);
+		let (base, shade) = (Color(0xE2_56_4E), Color(0x8A_3A_2E));
+
+		let mut svg = Svg::styled(Style::named(style::StyleName::Riso));
+		svg.set_light(dusk);
+		svg.shaded(&square.path(), base, shade, pt(-20.0, -20.0), 60.0, 4.0);
+		let riso = svg.finish((0.0, 0.0, 100.0, 100.0), 64, 64);
+		assert!(
+			riso.contains(&format!("fill=\"{}\"", dusk.grade(shade))),
+			"the crescent is graded once: {riso}"
+		);
+		assert!(
+			riso.contains(&format!("fill=\"{}\"", dusk.grade(base))),
+			"the lit side is graded once: {riso}"
+		);
+		assert!(
+			!riso.contains(&dusk.grade(dusk.grade(base)).to_string()),
+			"the base is never graded twice: {riso}"
+		);
+
+		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
+		svg.set_light(dusk);
+		svg.shaded(&square.path(), base, shade, pt(-20.0, -20.0), 60.0, 4.0);
+		let tv = svg.finish((0.0, 0.0, 100.0, 100.0), 64, 64);
+		assert!(
+			tv.contains(&format!("stop-color=\"{}\"", dusk.grade(base))),
+			"the gradient's base stop is graded once: {tv}"
+		);
+		assert!(
+			tv.contains(&format!("stop-color=\"{}\"", dusk.grade(shade))),
+			"the gradient's shade stop is graded once: {tv}"
+		);
+		assert!(
+			!tv.contains(&dusk.grade(dusk.grade(base)).to_string()),
+			"the base is never graded twice: {tv}"
 		);
 	}
 

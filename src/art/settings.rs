@@ -17,11 +17,11 @@
 //! | `fill` | The colour; `tint` is the scene's tint (the `plain` blob); `sky` is the scene light's sky gradient; `none` for a line. |
 //! | `stroke`, `stroke-width` | A line's colour and weight; `data-noodle` makes it a thick inked tube. |
 //! | `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
-//! | `data-night` | The colour at night. Parts without one are dimmed. |
+//! | `data-night` | The colour on a bare night (a page with no `light=`). Parts without one are dimmed. Under a scene light the light alone makes the night: every part keeps its day colour and the light grades it. |
 //! | `data-wilt` | The colour it turns as the scene wilts. |
 //! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides; `overcast` and `storm` hide the sun. |
 //! | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows, stars). |
-//! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). Both colours wilt, fade with distance, darken at night and grade like a flat fill. |
+//! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). Both colours wilt, fade with distance, darken on a bare night and grade like a flat fill; on a bare night a part with a `data-night` colour turns that flat colour, and under a scene light both stops keep the gradient. |
 //! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line. |
 //! | `data-dots` | A riso dot screen over it: `colour spacing radius opacity`. |
 //! | `data-drift` | Units a second it drifts sideways, wrapping (clouds). |
@@ -550,7 +550,9 @@ impl Part {
 		}))
 	}
 
-	/// The part's colour in this weather, through the scene light's grade.
+	/// The part's colour in this weather, before the scene light's grade: wilt, night and the
+	/// fade with distance resolve here, so that every route a colour takes to the page is
+	/// graded exactly once, where its paint is emitted.
 	fn color(&self, paint: Paint, weather: &Weather) -> Color {
 		let mut color = paint.resolve(weather);
 
@@ -558,7 +560,10 @@ impl Part {
 			color = color.mix(wilted, weather.wilt * 0.8);
 		}
 
-		if weather.night {
+		// The night swap and dim belong to a bare night. Under a scene light the light alone
+		// makes the night: it grades the day colour, repaints the sky and washes the air, so
+		// a night colour authored for the flat dim would only sit darkly underneath it.
+		if weather.night && weather.light.is_day() {
 			color = match self.night {
 				Some(night) => night.resolve(weather),
 				None => color.mix(palette::NIGHT, 0.35),
@@ -575,7 +580,7 @@ impl Part {
 		} else {
 			weather.light.horizon
 		};
-		weather.light.grade(color.mix(haze, self.depth * 0.45))
+		color.mix(haze, self.depth * 0.45)
 	}
 
 	fn draw(&self, svg: &mut Svg, weather: &Weather) {
@@ -626,9 +631,9 @@ impl Part {
 					let paint = sky_gradient(svg, &weather.light);
 					svg.fill_paint(path, &paint);
 				} else if let Some((top, bottom)) = self.gradient {
-					// Each end goes through the same colours as a flat fill (wilt, night,
-					// distance, the light's grade, then the page's), so a gradient wall dims
-					// at night and grades with the flat parts beside it.
+					// Each end goes through the same weather as a flat fill (wilt, night,
+					// distance), and picks up the light's grade once here, where the stop is
+					// written into defs; the paint itself is placed by id, not graded again.
 					let stop = |colour: Color| {
 						svg.graded(snap(svg, self.color(Paint::Color(colour), weather)))
 					};
@@ -661,6 +666,8 @@ impl Part {
 						ink = ink.darken(0.2);
 					}
 
+					// The dot screen is a pattern def, outside the emit path: graded once here.
+					let ink = svg.graded(ink);
 					let pattern = halftone(svg, ink, dots.spacing, dots.radius);
 					fill_pattern(svg, path, &pattern, dots.opacity);
 				}
@@ -680,7 +687,8 @@ impl Part {
 				}
 			}
 			Mark::Sparkle { at, size, color } => {
-				let color = weather.light.grade(color.resolve(weather));
+				// fx::sparkle paints through Svg::fill, which grades once at the emit.
+				let color = color.resolve(weather);
 				super::fx::sparkle(svg, *at, *size, color, weather.time + at.x * 0.01);
 			}
 			Mark::Glow {
@@ -689,7 +697,8 @@ impl Part {
 				color,
 				opacity,
 			} => {
-				let color = weather.light.grade(color.resolve(weather));
+				// The glow is a gradient def, outside the emit path: graded once here.
+				let color = svg.graded(color.resolve(weather));
 				let paint = radial_glow(svg, *at, *radius, color, *opacity);
 				svg.fill_paint(&Path::circle(*at, *radius), &paint);
 			}
@@ -705,16 +714,15 @@ impl Part {
 					time: weather.time,
 					..CritterState::default()
 				};
-				let color = weather.light.grade(*color);
 				svg.begin(&format!("translate({:.1} {:.1})", at.x, at.y));
 
 				match kind {
 					Critter::Flower => {
 						let kinds = [FlowerKind::Daisy, FlowerKind::Tulip, FlowerKind::Sunflower];
 						let kind = kinds[(*seed % 3) as usize];
-						critters::flower(svg, kind, color, *height, state, *seed);
+						critters::flower(svg, kind, *color, *height, state, *seed);
 					}
-					Critter::Tree => critters::tree(svg, color, *height, state, *seed),
+					Critter::Tree => critters::tree(svg, *color, *height, state, *seed),
 				}
 
 				svg.end();
@@ -1289,13 +1297,266 @@ mod tests {
 		);
 	}
 
-	/// Parses a tiny setting and draws it under a weather, returning the SVG document.
+	/// Parses a tiny setting and draws it under a weather, returning the SVG document. The
+	/// document draws under the weather's light, the way every page and frame sets it up.
 	fn draw_setting(source: &str, weather: &Weather) -> String {
 		let setting = Setting::parse("test", source).unwrap();
 		let mut svg = Svg::new();
+		svg.set_light(weather.light);
 		backdrop(&mut svg, &setting, weather);
 		foreground(&mut svg, &setting, weather);
 		svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64)
+	}
+
+	/// Every route a colour takes from a part file to the page is graded exactly once: where
+	/// the paint is emitted, or where a gradient, dot screen or glow is written into defs.
+	#[test]
+	fn a_setting_part_is_graded_exactly_once() {
+		let source = r##"<svg data-ground="2000"><path id="near-lawn" d="M0 0 L100 0 L100 100 L0 100 Z" fill="#7fba31" data-line="none"/><path id="front-post" d="M0 0 L20 0 L20 200 L0 200 Z" fill="#3e6b22"/><path id="near-fence" d="M0 250 L100 250" fill="none" stroke="#6b5a33" stroke-width="7"/></svg>"##;
+		let dusk = Light::of(Preset::Dusk);
+		let document = draw_setting(
+			source,
+			&Weather {
+				light: dusk,
+				..Weather::default()
+			},
+		);
+
+		for (attribute, authored, note) in [
+			("fill", Color(0x7F_BA_31), "the flat lawn"),
+			("fill", Color(0x3E_6B_22), "the outlined post"),
+			("stroke", Color(0x6B_5A_33), "the fence line"),
+		] {
+			let once = dusk.grade(authored);
+			let twice = dusk.grade(once);
+			assert!(
+				document.contains(&format!("{attribute}=\"{once}\"")),
+				"{note} is graded once: {document}"
+			);
+			assert!(
+				!document.contains(&twice.to_string()),
+				"{note} is not graded twice: {document}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_gradient_s_stops_are_graded_exactly_once() {
+		let source = r##"<svg data-ground="2000"><path id="near-sea" d="M0 100 L100 100 L100 200 L0 200 Z" fill="cornflower" data-gradient="#8ed0e8 #2e628e" data-line="none"/></svg>"##;
+		let dusk = Light::of(Preset::Dusk);
+		let document = draw_setting(
+			source,
+			&Weather {
+				light: dusk,
+				..Weather::default()
+			},
+		);
+
+		for authored in [Color(0x8E_D0_E8), Color(0x2E_62_8E)] {
+			let once = dusk.grade(authored);
+			assert!(
+				document.contains(&format!("stop-color=\"{once}\"")),
+				"the stop is graded once: {document}"
+			);
+			assert!(
+				!document.contains(&dusk.grade(once).to_string()),
+				"the stop is not graded twice: {document}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_dot_screen_is_graded_exactly_once() {
+		let source = r##"<svg data-ground="2000"><path id="near-roof" d="M0 0 L100 0 L100 100 Z" fill="tomato" data-dots="#f2d9a6 40 6 0.5"/></svg>"##;
+		let dusk = Light::of(Preset::Dusk);
+		let document = draw_setting(
+			source,
+			&Weather {
+				light: dusk,
+				..Weather::default()
+			},
+		);
+		let once = dusk.grade(palette::SAND);
+		let twice = dusk.grade(once);
+		assert!(
+			document.contains(&format!("fill=\"{once}\"")),
+			"the dot screen is graded once: {document}"
+		);
+		assert!(
+			!document.contains(&twice.to_string()),
+			"the dot screen is not graded twice: {document}"
+		);
+	}
+
+	#[test]
+	fn the_sky_s_stops_are_the_light_s_own_colours_never_graded() {
+		let source = r#"<svg data-ground="2000"><path id="far-sky" d="M0 0 L100 0 L100 100 Z" fill="sky" data-line="none"/></svg>"#;
+		let storm = Light::of(Preset::Storm);
+		let document = draw_setting(
+			source,
+			&Weather {
+				light: storm,
+				..Weather::default()
+			},
+		);
+		assert!(
+			document.contains(&format!("stop-color=\"{}\"", storm.zenith))
+				&& document.contains(&format!("stop-color=\"{}\"", storm.horizon)),
+			"the sky paints the light's own zenith and horizon: {document}"
+		);
+		assert!(
+			!document.contains(&storm.grade(storm.zenith).to_string()),
+			"the light's sky colours are not graded again: {document}"
+		);
+	}
+
+	#[test]
+	fn a_glow_and_a_sparkle_are_graded_exactly_once() {
+		let source = r#"<svg data-ground="2000"><circle id="near-lamp" cx="50" cy="50" data-glow="60 #ffd98f 0.5"/><circle id="far-mote" cx="200" cy="200" data-sparkle="20 #ffecc8"/></svg>"#;
+		let dusk = Light::of(Preset::Dusk);
+		let document = draw_setting(
+			source,
+			&Weather {
+				light: dusk,
+				..Weather::default()
+			},
+		);
+
+		let glow_once = dusk.grade(Color(0xFF_D9_8F));
+		assert!(
+			document.contains(&format!("stop-color=\"{glow_once}\"")),
+			"the glow is graded once: {document}"
+		);
+		assert!(
+			!document.contains(&dusk.grade(glow_once).to_string()),
+			"the glow is not graded twice: {document}"
+		);
+
+		let star_once = dusk.grade(palette::CREAM);
+		assert!(
+			document.contains(&format!("fill=\"{star_once}\"")),
+			"the sparkle is graded once: {document}"
+		);
+		assert!(
+			!document.contains(&dusk.grade(star_once).to_string()),
+			"the sparkle is not graded twice: {document}"
+		);
+	}
+
+	#[test]
+	fn a_setting_critter_is_graded_exactly_once() {
+		let source = r##"<svg data-ground="2000"><circle id="near-flower" cx="100" cy="300" data-critter="flower" r="300" data-colour="#e2564e" data-seed="1"/></svg>"##;
+		let dusk = Light::of(Preset::Dusk);
+		let document = draw_setting(
+			source,
+			&Weather {
+				light: dusk,
+				..Weather::default()
+			},
+		);
+		let once = dusk.grade(Color(0xE2_56_4E));
+		let twice = dusk.grade(once);
+		assert!(
+			document.contains(&format!("fill=\"{once}\"")),
+			"the petals take the graded colour: {document}"
+		);
+		assert!(
+			!document.contains(&twice.to_string()),
+			"the petals are not graded twice: {document}"
+		);
+	}
+
+	/// A part's own `data-night` colour belongs to a bare night, where it has always painted
+	/// exactly as authored. Under a scene light the light alone makes the night: the day
+	/// colour is graded once, and gradients keep both their stops.
+	#[test]
+	fn a_parts_own_night_colour_belongs_to_a_bare_night() {
+		let source = r##"<svg data-ground="2000"><path id="near-wall" d="M0 0 L100 0 L100 100 L0 100 Z" fill="#aabb77" data-night="#1c2a4a" data-line="none"/></svg>"##;
+
+		let bare = draw_setting(
+			source,
+			&Weather {
+				night: true,
+				..Weather::default()
+			},
+		);
+		assert!(
+			bare.contains("fill=\"#1c2a4a\""),
+			"the bare night paints the authored colour exactly: {bare}"
+		);
+
+		let night = Light::of(Preset::Night);
+		let once = night.grade(Color(0xAA_BB_77));
+		let lit = draw_setting(
+			source,
+			&Weather {
+				light: night,
+				..Weather::default()
+			},
+		);
+		assert!(
+			lit.contains(&format!("fill=\"{once}\"")),
+			"the light grades the day colour: {lit}"
+		);
+		assert!(
+			!lit.contains("#1c2a4a"),
+			"the bare-night colour waits for a bare night: {lit}"
+		);
+
+		// Even a `night` heading under a lit book follows the light.
+		let both = draw_setting(
+			source,
+			&Weather {
+				night: true,
+				light: night,
+				..Weather::default()
+			},
+		);
+		assert!(
+			both.contains(&format!("fill=\"{once}\"")),
+			"the light wins over the night flag: {both}"
+		);
+		assert!(!both.contains("#1c2a4a"), "{both}");
+	}
+
+	/// Under a bare night a gradient part with a `data-night` colour paints that flat colour
+	/// at both stops, exactly as it always did; under a light both stops keep the gradient
+	/// and grade like a flat fill.
+	#[test]
+	fn a_night_gradient_follows_the_bare_night_and_a_light_keeps_the_stops() {
+		let source = r##"<svg data-ground="2000"><path id="near-sea" d="M0 100 L100 100 L100 200 L0 200 Z" fill="cornflower" data-gradient="#8ed0e8 #2e628e" data-night="#1c2a4a" data-line="none"/></svg>"##;
+		let night = Light::of(Preset::Night);
+
+		let bare = draw_setting(
+			source,
+			&Weather {
+				night: true,
+				..Weather::default()
+			},
+		);
+		assert_eq!(
+			bare.matches("stop-color=\"#1c2a4a\"").count(),
+			2,
+			"the bare night turns both stops to the flat night colour: {bare}"
+		);
+
+		let lit = draw_setting(
+			source,
+			&Weather {
+				light: night,
+				..Weather::default()
+			},
+		);
+		for authored in [Color(0x8E_D0_E8), Color(0x2E_62_8E)] {
+			assert!(
+				lit.contains(&format!("stop-color=\"{}\"", night.grade(authored))),
+				"both stops keep the gradient and grade once: {lit}"
+			);
+		}
+		assert!(
+			!lit.contains("#1c2a4a"),
+			"the night colour waits for a bare night: {lit}"
+		);
 	}
 
 	#[test]
