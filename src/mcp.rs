@@ -25,6 +25,7 @@ use serde::Serialize;
 
 use crate::studio::Audition;
 use crate::studio::CharacterBrief;
+use crate::studio::Frames;
 use crate::studio::Image;
 use crate::studio::Output;
 use crate::studio::PartData;
@@ -213,6 +214,29 @@ pub struct VideoParams {
 	/// Half size at 15 frames a second, for checking timing quickly.
 	#[serde(default)]
 	pub preview: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StoryboardParams {
+	pub world: String,
+	pub story: String,
+	/// `landscape` (16:9, the default) or `portrait` (9:16).
+	#[serde(default)]
+	pub shape: Option<VideoShape>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VideoFramesParams {
+	pub world: String,
+	pub story: String,
+	/// Seconds to look at, from the start of the video, e.g. [3.5, 12].
+	#[serde(default)]
+	pub times: Vec<f32>,
+	/// Look every n seconds instead of naming times. At most 12 frames come back.
+	pub every: Option<f32>,
+	/// `portrait` (9:16, the default) or `landscape` (16:9).
+	#[serde(default)]
+	pub shape: VideoShape,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -597,6 +621,15 @@ impl StudioServer {
 	}
 
 	#[tool(
+		description = "Critique a book the way a director would: findings with a severity (`fix` \
+		               or `consider`), the script line, an observation and a suggestion in script \
+		               vocabulary. Advice, never a refusal; run it before rendering video."
+	)]
+	fn story_review(&self, Parameters(params): Parameters<StoryParams>) -> CallToolResult {
+		json(self.studio.review_story(&params.world, &params.story))
+	}
+
+	#[tool(
 		description = "Make a book's outputs: proofs (every page, returned as a contact sheet \
 		               image), the ePub, and KDP print files. Returns the files written."
 	)]
@@ -643,6 +676,69 @@ impl StudioServer {
 			self.studio
 				.render_video(&params.world, &params.story, params.shape, params.preview),
 		)
+	}
+
+	#[tool(
+		description = "The storyboard as images: the video's camera plan as a comic strip, one \
+		               labelled panel per setup. Never records a voice or encodes a video, so it \
+		               runs offline in a second or two."
+	)]
+	fn storyboard_render(
+		&self,
+		Parameters(params): Parameters<StoryboardParams>,
+	) -> CallToolResult {
+		let shape = params.shape.unwrap_or(VideoShape::Landscape);
+
+		images(
+			self.studio
+				.storyboard_images(&params.world, &params.story, shape),
+		)
+	}
+
+	#[tool(
+		description = "Frames from a story's video at named times (`times`) or every n seconds \
+		               (`every`), as one tiled image. Rendered straight from the frame renderer \
+		               with estimated timings, so no voice is recorded and no video encoded. At \
+		               most 12 frames."
+	)]
+	fn video_frames(&self, Parameters(params): Parameters<VideoFramesParams>) -> CallToolResult {
+		let sample = match (params.every, params.times.is_empty()) {
+			(Some(every), _) => Frames::Every(every),
+			(None, false) => Frames::Times(params.times),
+			(None, true) => {
+				return failed(&anyhow::anyhow!(
+					"name moments to look at (`times`: seconds from the start) or an interval \
+					 (`every`: seconds between frames)"
+				));
+			}
+		};
+
+		images(
+			self.studio
+				.video_frames(&params.world, &params.story, &sample, params.shape)
+				.map(|image| vec![image]),
+		)
+	}
+
+	#[tool(description = "The light presets, with a sentence on what each feels like.")]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn light_list(&self) -> CallToolResult {
+		json(Ok(Studio::lights()))
+	}
+
+	#[tool(
+		description = "The camera vocabulary: shot sizes, moves, how a camera arrives (`cut`, \
+		               `ease`), and page transitions, with a sentence on what each says."
+	)]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn shot_list(&self) -> CallToolResult {
+		json(Ok(Studio::shots()))
 	}
 
 	#[tool(
@@ -719,9 +815,14 @@ mod tests {
 			"story_write",
 			"story_read",
 			"story_check",
+			"story_review",
 			"book_render",
 			"page_render",
 			"video_render",
+			"storyboard_render",
+			"video_frames",
+			"light_list",
+			"shot_list",
 			"setting_list",
 			"setting_create",
 			"setting_parts",

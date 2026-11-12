@@ -200,3 +200,216 @@ fn an_agent_designs_a_character_without_touching_files() {
 			.contains("world_list")
 	);
 }
+
+/// The seeing and directing tools, over the protocol.
+#[test]
+fn an_agent_reads_the_guide_reviews_and_sees_the_video() {
+	let root = tempfile::tempdir().unwrap();
+	let mut session = Session::start(root.path());
+
+	// The guide: overview with the topic list, one topic, an unknown topic's error.
+	let overview = session.call("guide", &json!({}));
+	let text = overview[0]["text"].as_str().unwrap();
+	assert!(text.contains("three passes"), "{text}");
+	assert!(text.contains("Topics:"), "{text}");
+
+	let topic = session.call("guide", &json!({ "topic": "mixing" }));
+	assert!(
+		topic[0]["text"].as_str().unwrap().contains("guests"),
+		"{}",
+		topic[0]["text"]
+	);
+
+	let bad = session.request(
+		"tools/call",
+		&json!({ "name": "guide", "arguments": { "topic": "lenses" } }),
+	);
+	assert_eq!(bad["isError"], true);
+	assert!(
+		bad["content"][0]["text"]
+			.as_str()
+			.unwrap()
+			.contains("workflow")
+	);
+
+	// A world, a character, a book: then review it and see it.
+	session.json(
+		"world_create",
+		&json!({ "name": "Nibbleton", "about": "A town of small habits." }),
+	);
+	session.json(
+		"character_create",
+		&json!({
+			"world": "nibbleton",
+			"character": {
+				"id": "nell", "name": "Nell Nibbles", "habit": "Nibbles her nails.",
+				"colours": {
+					"skin": "#f4c766", "hair": "#7a4a35", "top": "#ec7aa6", "trim": "#fff8ef",
+					"bottom": "#2e9a90", "shoes": "#7a5cb8", "eyes": "#5d9e5a"
+				}
+			}
+		}),
+	);
+	session.json(
+		"story_write",
+		&json!({
+			"world": "nibbleton",
+			"story": "nell-nibbles",
+			"script": "+++\ntitle = \"Nell Nibbles\"\nauthor = \"A\"\nstar = \"nell\"\n+++\n# park\n@nell x=0.5 happy wave\nNell nibbled her nails.\n"
+		}),
+	);
+
+	let findings = session.json(
+		"story_review",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles" }),
+	);
+	let list = findings.as_array().unwrap();
+	assert!(!list.is_empty(), "a four-word book has something to say");
+	assert!(list[0]["line"].as_u64().unwrap() > 0, "{list:?}");
+	assert!(
+		list[0]["suggestion"]
+			.as_str()
+			.unwrap()
+			.contains(char::is_alphabetic)
+	);
+
+	let board = session.call(
+		"storyboard_render",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles" }),
+	);
+	assert!(
+		board.iter().any(|block| {
+			block["type"] == "image" && block["data"].as_str().unwrap().len() > 10_000
+		}),
+		"the board comes back as an image"
+	);
+
+	let frames = session.call(
+		"video_frames",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles", "every": 2 }),
+	);
+	assert!(frames.iter().any(|block| block["type"] == "image"));
+
+	// Frames outside the video are an error that says where the video ends.
+	let outside = session.request(
+		"tools/call",
+		&json!({ "name": "video_frames", "arguments": {
+			"world": "nibbleton", "story": "nell-nibbles", "times": [999.0]
+		}}),
+	);
+	assert_eq!(outside["isError"], true);
+	assert!(
+		outside["content"][0]["text"]
+			.as_str()
+			.unwrap()
+			.contains("outside the video")
+	);
+
+	let lights = session.json("light_list", &json!({}));
+	assert_eq!(lights.as_array().unwrap().len(), 10);
+	assert!(
+		lights[9]["name"] == "candle" && lights[9]["about"].as_str().unwrap().contains("light"),
+		"{lights:?}"
+	);
+
+	let shots = session.json("shot_list", &json!({}));
+	assert_eq!(shots["sizes"].as_array().unwrap().len(), 5);
+	assert_eq!(shots["moves"].as_array().unwrap().len(), 7);
+	assert_eq!(shots["transitions"].as_array().unwrap().len(), 6);
+	assert_eq!(shots["sizes"][4]["name"], "extreme-close");
+}
+
+/// A guest from another world, invited over the protocol and drawn in the host's book.
+#[test]
+fn an_agent_invites_a_guest_from_another_world() {
+	let root = tempfile::tempdir().unwrap();
+	let mut session = Session::start(root.path());
+
+	session.json(
+		"world_create",
+		&json!({ "name": "Harbour", "about": "Kites.", "style": "anime" }),
+	);
+	session.json(
+		"character_create",
+		&json!({
+			"world": "harbour",
+			"character": {
+				"id": "hana", "name": "Hana", "habit": "Holds the string.",
+				"colours": {
+					"skin": "#f8dcc8", "hair": "#2b2f5e", "top": "#ffffff", "trim": "#2f6fb8",
+					"bottom": "#2f4f8a", "shoes": "#7a3b2e", "eyes": "#3f8fd0"
+				}
+			}
+		}),
+	);
+	session.json("world_create", &json!({ "name": "Hill", "about": "Wind." }));
+	session.json(
+		"character_create",
+		&json!({
+			"world": "hill",
+			"character": {
+				"id": "mo", "name": "Mo", "habit": "Mumbles.",
+				"colours": {
+					"skin": "#d99a6c", "hair": "#3b2a24", "top": "#008080", "trim": "#fff8ef",
+					"bottom": "#3a4a7a", "shoes": "#ff8a3d", "eyes": "#4a3426"
+				}
+			}
+		}),
+	);
+
+	// The host world lists its neighbour and who could be invited.
+	let described = session.json("world_describe", &json!({ "world": "hill" }));
+	assert_eq!(described["visitors"].as_array().unwrap().len(), 1);
+	let visitor = &described["visitors"][0];
+	assert_eq!(visitor["folder"], "harbour");
+	assert_eq!(visitor["style"], "anime");
+	assert!(
+		visitor["cast"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.any(|m| m["id"] == "hana")
+	);
+
+	// A script with a guest is checked against both casts and renders.
+	let report = session.json(
+		"story_write",
+		&json!({
+			"world": "hill",
+			"story": "the-visitor",
+			"script": "+++\ntitle = \"The Visitor\"\nauthor = \"A\"\nstar = \"mo\"\nguests = [\"harbour/hana\"]\n+++\n# park\n@mo x=0.3 worried\n@hana enter=right x=0.7 wave talk\n\"Hello!\" said Hana.\n@mo shocked\nMo had never met anybody from the harbour.\n"
+		}),
+	);
+	assert_eq!(report["script_pages"], 1);
+
+	let page = session.call(
+		"page_render",
+		&json!({ "world": "hill", "story": "the-visitor", "page": 4 }),
+	);
+	assert!(
+		page.iter().any(|block| block["type"] == "image"),
+		"the guest's page comes back as an image"
+	);
+
+	// A guest nobody can find is refused, naming the worlds that exist.
+	let refused = session.request(
+		"tools/call",
+		&json!({ "name": "story_write", "arguments": {
+			"world": "hill",
+			"story": "nobody",
+			"script": "+++\ntitle = \"Nobody\"\nauthor = \"A\"\nguests = [\"atlantis/pip\"]\n+++\n# park\n@pip x=0.5\nHi.\n"
+		}}),
+	);
+	assert_eq!(refused["isError"], true);
+	let error = refused["content"][0]["text"].as_str().unwrap();
+	assert!(
+		error.contains("atlantis") && error.contains("harbour"),
+		"{error}"
+	);
+
+	let kept = session.request(
+		"tools/call",
+		&json!({ "name": "story_read", "arguments": { "world": "hill", "story": "nobody" } }),
+	);
+	assert_eq!(kept["isError"], true, "the refused story is not kept");
+}

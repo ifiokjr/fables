@@ -140,7 +140,7 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | Tool | What it does |
 | --- | --- |
 | `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, workflow. |
-| `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences and a style, or read one back with its cast and books. |
+| `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences and a style, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
 | `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space and the drawing rules; the kit as an image. |
 | `character_create` | A new cast member from who they are and their colours, drawn from the style's template. |
 | `character_parts` | A character's parts as path data, their own or the kit's. |
@@ -149,6 +149,9 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `voice_providers`, `voice_list` | Which voice providers can speak now, and the offline macOS voices. |
 | `voice_cast`, `voice_audition` | Give a character their voice, and hear a line in it, delivered in a mood, as audio. |
 | `story_write`, `story_read`, `story_check` | Write a book's script into a world, checked against the cast (a script that doesn't rehearse is refused, with the line to fix), or read and check one. |
+| `story_review` | A director's critique of a book: findings with a severity, the script line and a suggestion. Advice, never a refusal. |
+| `storyboard_render`, `video_frames` | The storyboard as an image, one labelled panel per camera setup; and sampled frames of the video as one tiled image, rendered offline with estimated timings. |
+| `light_list`, `shot_list` | The light presets and the camera vocabulary (shot sizes, moves, arrivals, transitions), with a sentence on each. |
 | `page_render`, `book_render` | One page as an image, or the proofs (with a contact sheet image), ePub and KDP print files under `<root>/out/`. |
 | `video_render` | The narrated, lip-synced MP4, 9:16 or 16:9, or a quick preview. |
 | `setting_list`, `setting_create` | A world's settings, built-in and its own; start one, blank or from a setting to repaint. |
