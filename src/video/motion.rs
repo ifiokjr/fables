@@ -29,6 +29,7 @@ use crate::cast::Kind;
 use crate::compose::Body;
 use crate::compose::Puppet;
 use crate::raster;
+use crate::text;
 use crate::video::Clip;
 use crate::video::acting;
 use crate::video::lipsync::Track;
@@ -192,6 +193,90 @@ fn at(look: &Look, time: f32, motion: &Motion) -> (FigureState, &'static str) {
 	(state, current.label)
 }
 
+/// One laid-out label over a rig frame: its text and the box it draws in (frame pixels:
+/// x, top, width, height).
+struct Label {
+	text: String,
+	rect: (f32, f32, f32, f32),
+}
+
+/// The characters' first names: `"Stinky McStinkbreath & Bogey McBogeyface"` becomes
+/// `"Stinky & Bogey"`.
+fn first_names(name: &str) -> String {
+	name.split(" & ")
+		.map(|part| part.split_whitespace().next().unwrap_or_default())
+		.collect::<Vec<_>>()
+		.join(" & ")
+}
+
+/// The two labels over a rig frame: the title at the top left and the beat or rule label
+/// beside it, measured with the page text's real metrics so the two never overlap. A title
+/// too wide to share the line drops the characters' surnames; a pair still too wide puts
+/// the rule label on its own line under the title.
+fn rig_labels(w: f32, h: f32, name: &str, what: &str, label: &str) -> [Label; 2] {
+	let size = h * 0.06;
+	let left = w * 0.04;
+	let right = w * 0.96;
+	let baseline = h * 0.1;
+	let gap = size;
+	let label_width = text::display_width(label, size);
+	// The two share the line when a gutter of `gap` still fits between them.
+	let shares = |title: &str| left + text::display_width(title, size) + gap + label_width <= right;
+
+	let full = format!("{name} — {what}");
+	let short = format!("{} — {what}", first_names(name));
+	let (title, under) = if shares(&full) {
+		(full, false)
+	} else if shares(&short) {
+		(short, false)
+	} else if left + text::display_width(&full, size) <= right {
+		(full, true)
+	} else {
+		(short, true)
+	};
+	let title_width = text::display_width(&title, size);
+
+	let rule = if under {
+		Label {
+			text: label.to_owned(),
+			rect: (left, baseline + size * 0.3, label_width, size),
+		}
+	} else {
+		Label {
+			text: label.to_owned(),
+			rect: (right - label_width, baseline - size, label_width, size),
+		}
+	};
+
+	[
+		Label {
+			text: title,
+			rect: (left, baseline - size, title_width, size),
+		},
+		rule,
+	]
+}
+
+/// The two labels drawn over a rig frame, as [`rig_labels`] laid them out.
+fn labels_svg(w: f32, h: f32, name: &str, what: &str, label: &str) -> String {
+	let laid = rig_labels(w, h, name, what, label);
+	let size = h * 0.06;
+
+	format!(
+		r##"<text x="{:.1}" y="{:.1}" font-family="{}" font-size="{:.1}" fill="#2a2238">{}</text><text x="{:.1}" y="{:.1}" font-family="{}" font-size="{:.1}" fill="#f2543d">{}</text>"##,
+		laid[0].rect.0,
+		laid[0].rect.1 + laid[0].rect.3,
+		raster::DISPLAY_FAMILY,
+		size,
+		escape(&laid[0].text),
+		laid[1].rect.0,
+		laid[1].rect.1 + laid[1].rect.3,
+		raster::DISPLAY_FAMILY,
+		size,
+		escape(&laid[1].text)
+	)
+}
+
 /// One frame: the character on the left, the same pose with its skeleton on the right.
 fn frame_svg(
 	look: &Look,
@@ -229,19 +314,7 @@ fn frame_svg(
 		svg.end();
 	}
 
-	svg.raw(&format!(
-		r##"<text x="{:.1}" y="{:.1}" font-family="{}" font-size="{:.1}" fill="#2a2238">{} — rig test</text><text x="{:.1}" y="{:.1}" font-family="{}" font-size="{:.1}" fill="#f2543d" text-anchor="end">{}</text>"##,
-		w * 0.04,
-		h * 0.1,
-		raster::DISPLAY_FAMILY,
-		h * 0.06,
-		escape(name),
-		w * 0.96,
-		h * 0.1,
-		raster::DISPLAY_FAMILY,
-		h * 0.06,
-		escape(label)
-	));
+	svg.raw(&labels_svg(w, h, name, "rig test", label));
 
 	svg.finish((0.0, 0.0, w, h), width, height)
 }
@@ -563,19 +636,7 @@ fn acting_frame_svg(
 
 	svg.end();
 
-	svg.raw(&format!(
-		r##"<text x="{:.1}" y="{:.1}" font-family="{}" font-size="{:.1}" fill="#2a2238">{} — acting test</text><text x="{:.1}" y="{:.1}" font-family="{}" font-size="{:.1}" fill="#f2543d" text-anchor="end">{}</text>"##,
-		w * 0.04,
-		h * 0.1,
-		raster::DISPLAY_FAMILY,
-		h * 0.06,
-		escape(name),
-		w * 0.96,
-		h * 0.1,
-		raster::DISPLAY_FAMILY,
-		h * 0.06,
-		escape(label)
-	));
+	svg.raw(&labels_svg(w, h, name, "acting test", label));
 
 	svg.finish((0.0, 0.0, w, h), width, height)
 }
@@ -697,5 +758,46 @@ mod tests {
 		let (crouching, label) = at(&look, 3.5, &Motion::default());
 		assert_eq!(label, "crouch · hands on hips");
 		assert!(crouching.legs.crouch > standing.legs.crouch);
+	}
+
+	/// The acting clip's two labels never overlap, for the longest rule label and a long
+	/// pair of names: the title drops the surnames or the rule label takes its own line,
+	/// measured with the real display face.
+	#[test]
+	fn the_rig_labels_never_overlap() {
+		let (w, h) = (1280.0, 720.0);
+		let label = ACTING
+			.iter()
+			.max_by_key(|beat| text::display_width(beat.label, h * 0.06).to_bits())
+			.map(|beat| beat.label)
+			.unwrap();
+
+		for name in [
+			"Stinky McStinkbreath & Bogey McBogeyface",
+			"Persephone Fitzwilliam McBogeyface & Bartholomew Jeremiah Stinkbreath",
+		] {
+			let [title, rule] = rig_labels(w, h, name, "acting test", label);
+			let (tx, ty, tw, th) = title.rect;
+			let (rx, ry, rw, rh) = rule.rect;
+
+			assert!(
+				tx + tw <= rx || rx + rw <= tx || ty + th <= ry || ry + rh <= ty,
+				"{name:?} with {label:?}: {:?} runs into {:?}",
+				title.rect,
+				rule.rect
+			);
+
+			for laid in [&title, &rule] {
+				assert!(
+					laid.rect.0 >= 0.0
+						&& laid.rect.0 + laid.rect.2 <= w
+						&& laid.rect.1 >= 0.0
+						&& laid.rect.1 + laid.rect.3 <= h,
+					"{:?} at {:?} leaves the {w}×{h} frame",
+					laid.text,
+					laid.rect
+				);
+			}
+		}
 	}
 }

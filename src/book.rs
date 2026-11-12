@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
+use crate::art::Bounds;
 use crate::art::Path;
 use crate::art::STAGE;
 use crate::art::Svg;
@@ -721,9 +722,13 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 	svg.begin_layer();
 
 	// A heading's `shot=` frames the still like the video would frame it: composed from the
-	// puppets, with headroom and lead room. It wins over a bare `zoom=`.
+	// puppets, with headroom and lead room, and inside the part of the page the text card
+	// leaves clear. It wins over a bare `zoom=`.
 	let shot_transform = camera.shot.and_then(|size| {
-		crate::video::director::still_view(&page.scene, &puppets, size, &camera.on)
+		let card = card_rects(page)
+			.into_iter()
+			.reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)));
+		crate::video::director::still_view(&page.scene, &puppets, size, &camera.on, card)
 	});
 
 	if let Some(view) = shot_transform {
@@ -775,27 +780,37 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 		));
 	}
 
-	for spec in page
-		.texts
-		.iter()
-		.filter(|spec| spec.card && !spec.block.pieces.is_empty())
-	{
-		let b = spec.block.bounds;
-		let pad_x = 80.0;
-		let pad_y = 60.0;
+	for (x, top, right, bottom) in card_rects(page) {
 		let card = Path::wobbly_poly(
-			&[
-				pt(b.x - pad_x, b.y - pad_y),
-				pt(b.x + b.w + pad_x, b.y - pad_y),
-				pt(b.x + b.w + pad_x, b.y + b.h + pad_y * 0.8),
-				pt(b.x - pad_x, b.y + b.h + pad_y * 0.8),
-			],
+			&[pt(x, top), pt(right, top), pt(right, bottom), pt(x, bottom)],
 			46.0,
 			5.0,
 			crate::art::seed_of(&page.label),
 		);
 		svg.inked(&card, palette::PAPER);
 	}
+}
+
+/// The paper card behind each text block, as it is drawn: the block's bounds plus the
+/// card's padding. Still framing reads this to keep its subject in the part of the page the
+/// card leaves clear, so the rectangle here is the rectangle the drawn card covers.
+pub fn card_rects(page: &BookPage) -> Vec<Bounds> {
+	const PAD_X: f32 = 80.0;
+	const PAD_Y: f32 = 60.0;
+
+	page.texts
+		.iter()
+		.filter(|spec| spec.card && !spec.block.pieces.is_empty())
+		.map(|spec| {
+			let b = spec.block.bounds;
+			(
+				b.x - PAD_X,
+				b.y - PAD_Y,
+				b.x + b.w + PAD_X,
+				b.y + b.h + PAD_Y * 0.8,
+			)
+		})
+		.collect()
 }
 
 /// The lettering layer.

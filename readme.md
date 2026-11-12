@@ -247,7 +247,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
 | `size=0.9` | Scales the page's text. |
 | `zoom=1.5 look=0.5,0.6` | A close-up on the point (x, y), as fractions of the page. |
-| `shot=… on=…` | A shot size that frames the still illustration: `wide`, `full`, `medium`, `close` or `extreme-close` on the actors named by `on=` (comma-separated ids; empty means everyone on stage, or whoever speaks for a close shot). Framing is measured from what the puppets actually draw — hair, raised arms, held props and all — with headroom and lead room, so a page can be a close-up without typing coordinates. |
+| `shot=… on=…` | A shot size that frames the still illustration: `wide`, `full`, `medium`, `close` or `extreme-close` on the actors named by `on=` (comma-separated ids; empty means everyone on stage, or whoever speaks for a close shot). Framing is measured from what the puppets actually draw — hair, raised arms, held props and all — with headroom and lead room, so a page can be a close-up without typing coordinates. A still is framed into the part of the page its text card leaves clear, falling back to a tighter shot when a long card leaves no room, so a head is never hidden under the words. |
 | `transition=wipe` | How the page is entered in the video: `wipe` (the paper sheet), `cut`, `dissolve`, `fade`, `iris` or `push`. `[video] transition = "…"` sets a book's default. |
 | `video=skip`, `book=skip` | Leave the page out of one format. |
 | `no-wormsley` | Don't hide Wormsley on this page. |
