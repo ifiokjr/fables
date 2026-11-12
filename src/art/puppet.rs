@@ -27,6 +27,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use anyhow::ensure;
 
+use super::Bounds;
 use super::Brush;
 use super::Color;
 use super::Path;
@@ -1008,8 +1009,10 @@ fn hang(puppet: &Authored, body: &Proportions, t: f32) -> f32 {
 		.fold(0.0, f32::max)
 }
 
-/// Draws an authored figure with its soles at the current origin.
-pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
+/// Draws an authored figure with its soles at the current origin, and returns the bounds of
+/// its head — hair and anything riding on it — in the document's units, for whoever is
+/// measuring (see [`Svg::begin_measure`]).
+pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) -> Option<Bounds> {
 	let frame = look.frame();
 	let body = puppet.style.body(look.build);
 	let posed = Posed::of(state, &puppet.style, look.build);
@@ -1062,12 +1065,14 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 
 	svg.begin(&solved.torso_transform());
 	draw_torso(svg, puppet, look, &inks, &solved);
+	svg.begin_measure();
 	svg.begin(&format!(
 		"translate({:.1} {:.1}) rotate({:.2}) translate(0 {:.1})",
 		body.neck.x, body.neck.y, posed.head_tilt, -body.head_above_neck
 	));
 	draw_head(svg, puppet, look, &inks, &posed, state.time);
 	svg.end();
+	let head = svg.end_measure();
 	svg.end();
 
 	// Arms that fold across the body draw the lower arm last so it sits on top.
@@ -1083,13 +1088,19 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 		}
 	}
 
+	// Dizzy stars are an effect a mood draws over the figure, not part of it.
+	let measuring = svg.pause_measure();
+
 	if matches!(state.mood, Mood::Fainted | Mood::Dizzy) {
 		let above = solved.torso(frame.head + pt(0.0, -frame.head_r * 1.2));
 		fx::dizzy_stars(svg, above, frame.head_r, state.time);
 	}
 
+	svg.resume_measure(measuring);
 	svg.end();
 	svg.brush = saved;
+
+	head
 }
 
 /// A soft contact shadow under the feet, so the figure stands on the ground.

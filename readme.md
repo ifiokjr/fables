@@ -242,7 +242,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
 | `size=0.9` | Scales the page's text. |
 | `zoom=1.5 look=0.5,0.6` | A close-up on the point (x, y), as fractions of the page. |
-| `shot=… on=…` | A shot size that frames the still illustration: `wide`, `full`, `medium`, `close` or `extreme-close` on the actors named by `on=` (comma-separated ids; empty means everyone on stage, or whoever speaks for a close shot). Framing is computed from the puppets, with headroom and lead room, so a page can be a close-up without typing coordinates. |
+| `shot=… on=…` | A shot size that frames the still illustration: `wide`, `full`, `medium`, `close` or `extreme-close` on the actors named by `on=` (comma-separated ids; empty means everyone on stage, or whoever speaks for a close shot). Framing is measured from what the puppets actually draw — hair, raised arms, held props and all — with headroom and lead room, so a page can be a close-up without typing coordinates. |
 | `transition=wipe` | How the page is entered in the video: `wipe` (the paper sheet), `cut`, `dissolve`, `fade`, `iris` or `push`. `[video] transition = "…"` sets a book's default. |
 | `video=skip`, `book=skip` | Leave the page out of one format. |
 | `no-wormsley` | Don't hide Wormsley on this page. |
@@ -274,7 +274,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `[video] acting = "plain"` turns the acting layer off and reproduces the plain motion; every style's `[motion]` dials tune it, and [`docs/animation.md`](docs/animation.md) has the whole story.
 
-A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Setups on directed pages follow the same 1.2 s floor: one that would flash by is merged into its neighbour, but a cut the script wrote is honoured — the storyboard marks the hold it leaves under 1.2 s with `· short`. Every shot frames its subject's whole head, hair and all, with headroom above and room beside it; only an extreme close-up may crop hair above the brow line, and lead room never pushes a head out of frame. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
+A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Setups on directed pages follow the same 1.2 s floor: one that would flash by is merged into its neighbour, but a cut the script wrote is honoured — the storyboard marks the hold it leaves under 1.2 s with `· short`. Every shot frames its subject's whole head, hair and all — measured from the puppet's own drawing, so a tall hairdo, a raised hand or a held prop is never guessed at — with headroom above and room beside it (room enough to survive the slow push a long hold rides in on); only an extreme close-up may crop hair above the brow line, and lead room never pushes a head out of frame. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
 
 Teeth, stink and mint **carry over from page to page** until changed, so grotty teeth stay grotty. Actors without an `x` are spaced out automatically.
 

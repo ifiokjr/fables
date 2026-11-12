@@ -387,6 +387,75 @@ impl Path {
 	}
 }
 
+/// Drawn bounds as `(left, top, right, bottom)` in stage units — the shape a camera frames.
+pub type Bounds = (f32, f32, f32, f32);
+
+/// The bounds covering both drawings, or whichever of them drew something.
+#[must_use]
+pub fn union_bounds(a: Option<Bounds>, b: Option<Bounds>) -> Option<Bounds> {
+	match (a, b) {
+		(Some(a), Some(b)) => Some((a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))),
+		(Some(one), None) | (None, Some(one)) => Some(one),
+		(None, None) => None,
+	}
+}
+
+/// A bounds measurement under way: everything drawn since its [`Svg::begin_measure`],
+/// as the box of the points the drawing emits.
+#[derive(Clone, Copy)]
+struct Measured {
+	left: f32,
+	top: f32,
+	right: f32,
+	bottom: f32,
+}
+
+impl Measured {
+	const OPEN: Measured = Measured {
+		left: f32::INFINITY,
+		top: f32::INFINITY,
+		right: f32::NEG_INFINITY,
+		bottom: f32::NEG_INFINITY,
+	};
+
+	fn note(&mut self, p: Pt) {
+		self.left = self.left.min(p.x);
+		self.top = self.top.min(p.y);
+		self.right = self.right.max(p.x);
+		self.bottom = self.bottom.max(p.y);
+	}
+
+	fn bounds(self) -> Option<Bounds> {
+		(self.left <= self.right).then_some((self.left, self.top, self.right, self.bottom))
+	}
+}
+
+/// The bounding box of a path's written points. Control points count, so the box always
+/// contains every curve the path draws, not just where it bends.
+fn path_bounds(data: &str) -> Option<Bounds> {
+	let mut spaced = String::with_capacity(data.len() + 16);
+
+	for ch in data.chars() {
+		// Every command letter becomes its own token; `e` is an exponent, not a command.
+		if ch.is_ascii_alphabetic() && !matches!(ch, 'e' | 'E') {
+			spaced.extend([' ', ch, ' ']);
+		} else {
+			spaced.push(ch);
+		}
+	}
+
+	let mut numbers = spaced
+		.split_whitespace()
+		.filter_map(|token| token.parse::<f32>().ok());
+	let mut measured = Measured::OPEN;
+
+	while let (Some(x), Some(y)) = (numbers.next(), numbers.next()) {
+		measured.note(pt(x, y));
+	}
+
+	measured.bounds()
+}
+
 /// An SVG document under construction.
 ///
 /// `boil` is mixed into every wobble seed. Video frames bump it a few times a second so ink
@@ -416,16 +485,27 @@ pub struct Svg {
 	/// How each open group's units map to the document's, innermost last, so an offset can be
 	/// kept the same on the page however a part is turned.
 	frames: Vec<Linear>,
+	/// Whether anyone is asking for bounds (see [`Svg::measuring`]). Off, drawing draws
+	/// exactly as before and measuring costs nothing.
+	measuring: bool,
+	/// Bounds measurements under way, innermost last (the head inside the puppet).
+	measure: Vec<Measured>,
+	/// Clip paths under way: the box of each, and the group depth it was opened at, so
+	/// what a clipped fill adds to the bounds is what will actually show.
+	clips: Vec<(Measured, usize)>,
 }
 
-/// The linear part of an SVG transform (translation dropped): how a vector in a group's own
-/// units maps into the units outside it.
+/// An SVG group's transform: how a point in the group's own units maps into the units
+/// outside it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Linear {
 	a: f32,
 	b: f32,
 	c: f32,
 	d: f32,
+	/// Translation, in the units outside the group.
+	e: f32,
+	f: f32,
 }
 
 impl Linear {
@@ -434,10 +514,15 @@ impl Linear {
 		b: 0.0,
 		c: 0.0,
 		d: 1.0,
+		e: 0.0,
+		f: 0.0,
 	};
 
 	fn apply(self, v: Pt) -> Pt {
-		pt(self.a * v.x + self.c * v.y, self.b * v.x + self.d * v.y)
+		pt(
+			self.a * v.x + self.c * v.y + self.e,
+			self.b * v.x + self.d * v.y + self.f,
+		)
 	}
 
 	/// This frame with `inner` nested inside it.
@@ -447,6 +532,8 @@ impl Linear {
 			b: self.b * inner.a + self.d * inner.b,
 			c: self.a * inner.c + self.c * inner.d,
 			d: self.b * inner.c + self.d * inner.d,
+			e: self.a * inner.e + self.c * inner.f + self.e,
+			f: self.b * inner.e + self.d * inner.f + self.f,
 		}
 	}
 
@@ -459,6 +546,8 @@ impl Linear {
 				b: -self.b / det,
 				c: -self.c / det,
 				d: self.a / det,
+				e: -(self.d * self.e - self.c * self.f) / det,
+				f: -(self.b * self.e - self.a * self.f) / det,
 			}
 		})
 	}
@@ -476,13 +565,24 @@ impl Linear {
 					.collect();
 				let arg = |i: usize| n.get(i).copied();
 				let step = match name.trim() {
+					"translate" => {
+						Linear {
+							e: arg(0).unwrap_or(0.0),
+							f: arg(1).unwrap_or(0.0),
+							..Linear::IDENTITY
+						}
+					}
 					"rotate" => {
 						let (sin, cos) = arg(0).unwrap_or(0.0).to_radians().sin_cos();
+						let (cx, cy) = (arg(1).unwrap_or(0.0), arg(2).unwrap_or(0.0));
+						// A pivoted turn is a translate, a rotation and a translate back.
 						Linear {
 							a: cos,
 							b: sin,
 							c: -sin,
 							d: cos,
+							e: cx - (cos * cx - sin * cy),
+							f: cy - (sin * cx + cos * cy),
 						}
 					}
 					"scale" => {
@@ -492,6 +592,7 @@ impl Linear {
 							b: 0.0,
 							c: 0.0,
 							d: arg(1).unwrap_or(x),
+							..Linear::IDENTITY
 						}
 					}
 					"matrix" => {
@@ -500,6 +601,8 @@ impl Linear {
 							b: arg(1).unwrap_or(0.0),
 							c: arg(2).unwrap_or(0.0),
 							d: arg(3).unwrap_or(1.0),
+							e: arg(4).unwrap_or(0.0),
+							f: arg(5).unwrap_or(0.0),
 						}
 					}
 					"skewX" => {
@@ -590,6 +693,9 @@ impl Svg {
 			brush: Brush::default(),
 			light: None,
 			frames: Vec::new(),
+			measuring: false,
+			measure: Vec::new(),
+			clips: Vec::new(),
 		}
 	}
 
@@ -622,12 +728,14 @@ impl Svg {
 	}
 
 	/// The brush's register offset in the current group's units: the same slip on the page,
-	/// however the group is turned, scaled or mirrored.
+	/// however the group is turned, scaled or mirrored. The register is an offset, not a
+	/// point, so it moves with each frame's turn and scale but never with its place.
 	fn register_here(&self) -> Pt {
-		let register = self.brush.frame.apply(self.brush.line.register);
+		let moved = |frame: Linear, offset: Pt| frame.apply(offset) - frame.apply(Pt::default());
+		let register = moved(self.brush.frame, self.brush.line.register);
 		self.frame()
 			.inverse()
-			.map_or(self.brush.line.register, |into| into.apply(register))
+			.map_or(self.brush.line.register, |into| moved(into, register))
 	}
 
 	/// Switches style for everything drawn from now on.
@@ -645,6 +753,83 @@ impl Svg {
 	/// A seed that changes when the line boils.
 	pub fn seed(&self, base: u64) -> u64 {
 		base ^ self.boil.wrapping_mul(0x2545_F491_4F6C_DD1D)
+	}
+
+	/// Turns bounds measurement on or off. Only a caller that asks for it pays for it:
+	/// with measurement off, [`Svg::begin_measure`] and [`Svg::end_measure`] do nothing and
+	/// the document draws exactly as before.
+	pub fn measuring(&mut self, want: bool) {
+		self.measuring = want;
+	}
+
+	/// Starts remembering the bounds of everything drawn until [`Svg::end_measure`], in the
+	/// document's units. Measures nest (a head inside its puppet) and every drawing counts
+	/// towards each open measure, so the inner bounds always lie inside the outer ones.
+	pub fn begin_measure(&mut self) {
+		if self.measuring {
+			self.measure.push(Measured::OPEN);
+		}
+	}
+
+	/// Stops the innermost measure and returns its bounds; `None` when measurement is off or
+	/// nothing was drawn inside it.
+	pub fn end_measure(&mut self) -> Option<Bounds> {
+		self.measure.pop().and_then(Measured::bounds)
+	}
+
+	/// Suspends measurement for a drawing that is not part of the subject (an effect a mood
+	/// draws over the figure). Returns what [`Svg::resume_measure`] should put back.
+	pub fn pause_measure(&mut self) -> bool {
+		std::mem::replace(&mut self.measuring, false)
+	}
+
+	/// Puts measurement back how [`Svg::pause_measure`] found it.
+	pub fn resume_measure(&mut self, was: bool) {
+		self.measuring = was;
+	}
+
+	/// Remembers a path about to be drawn. `shift` moves it in the current group's units (a
+	/// fill's registration offset), `bleed` widens the box by the width a stroke adds
+	/// around its path. Whatever a clip path will cut away is not remembered.
+	fn note(&mut self, path: &Path, shift: Pt, bleed: f32) {
+		if self.measure.is_empty() {
+			return;
+		}
+
+		let Some((left, top, right, bottom)) = path_bounds(path.as_str()) else {
+			return;
+		};
+
+		let frame = self.frame();
+		// A stroke of `bleed` units around the path bleeds by the transform of that
+		// vector — moved by the frame's turn and scale, never by its place.
+		let moved = |v: Pt| frame.apply(v) - frame.apply(Pt::default());
+		let swell = moved(pt(bleed, 0.0)).len().max(moved(pt(0.0, bleed)).len());
+		let a = frame.apply(pt(left, top) + shift);
+		let b = frame.apply(pt(right, bottom) + shift);
+		let (mut min, mut max) = (
+			pt(a.x.min(b.x), a.y.min(b.y)),
+			pt(a.x.max(b.x), a.y.max(b.y)),
+		);
+
+		for (clip, _) in &self.clips {
+			min.x = min.x.max(clip.left);
+			min.y = min.y.max(clip.top);
+			max.x = max.x.min(clip.right);
+			max.y = max.y.min(clip.bottom);
+		}
+
+		if min.x > max.x || min.y > max.y {
+			return;
+		}
+
+		let min = pt(min.x - swell, min.y - swell);
+		let max = pt(max.x + swell, max.y + swell);
+
+		for measured in &mut self.measure {
+			measured.note(min);
+			measured.note(max);
+		}
 	}
 
 	/// Opens a `<g>` with an SVG transform; pair with [`Svg::end`].
@@ -684,14 +869,24 @@ impl Svg {
 	pub fn end(&mut self) {
 		self.body.push_str("</g>");
 		self.frames.pop();
+		// Clips opened inside the group just closed stop bounding what is drawn.
+		let depth = self.frames.len();
+		self.clips.truncate(
+			self.clips
+				.iter()
+				.position(|(_, at)| *at > depth)
+				.unwrap_or(usize::MAX),
+		);
 	}
 
 	pub fn fill(&mut self, path: &Path, color: Color) {
+		self.note(path, Pt::default(), 0.0);
 		let color = self.graded(color);
 		let _ = write!(self.body, r#"<path d="{}" fill="{color}"/>"#, path.as_str());
 	}
 
 	pub fn fill_alpha(&mut self, path: &Path, color: Color, opacity: f32) {
+		self.note(path, Pt::default(), 0.0);
 		let color = self.graded(color);
 		let _ = write!(
 			self.body,
@@ -718,6 +913,7 @@ impl Svg {
 	}
 
 	fn plain_stroke(&mut self, path: &Path, color: Color, width: f32, opacity: f32) {
+		self.note(path, Pt::default(), width / 2.0);
 		let color = self.graded(color);
 		let _ = write!(
 			self.body,
@@ -733,6 +929,8 @@ impl Svg {
 			self.plain_stroke(path, color, width, opacity);
 			return;
 		};
+
+		self.note(path, Pt::default(), width / 2.0 + drift);
 
 		for pass in 0..passes {
 			let seed = self.seed(u64::from(pass) * 7919 + u64::from(self.ids));
@@ -769,10 +967,25 @@ impl Svg {
 		);
 		let _ = write!(self.body, r#"<g clip-path="url(#{id})">"#);
 		self.frames.push(self.frame());
+
+		if self.measuring {
+			let mut clip = Measured::OPEN;
+
+			if let Some((left, top, right, bottom)) = path_bounds(path.as_str()) {
+				let frame = self.frame();
+
+				for point in [pt(left, top), pt(right, bottom)] {
+					clip.note(frame.apply(point));
+				}
+			}
+
+			self.clips.push((clip, self.frames.len()));
+		}
 	}
 
 	/// A fill painted with a gradient or pattern from the document's defs, by id.
 	pub fn fill_paint(&mut self, path: &Path, paint: &str) {
+		self.note(path, Pt::default(), 0.0);
 		let _ = write!(
 			self.body,
 			r#"<path d="{}" fill="url(#{paint})"/>"#,
@@ -815,6 +1028,7 @@ impl Svg {
 		match self.brush.line.stroke {
 			dials::Stroke::None => {}
 			dials::Stroke::Broken => {
+				self.note(path, Pt::default(), weight / 2.0);
 				let _ = write!(
 					self.body,
 					r#"<path d="{}" fill="none" stroke="{line}" stroke-width="{weight:.1}" stroke-linecap="round" stroke-dasharray="{:.1} {:.1}"/>"#,
@@ -878,8 +1092,9 @@ impl Svg {
 
 	/// One band of cel shadow: the shape minus itself moved towards the light, multiplied.
 	fn shadow_band(&mut self, shape: &Shape, light: Pt, shadow: Color) {
-		let shadow = self.graded(shadow);
 		let path = shape.path();
+		self.note(&path, Pt::default(), 0.0);
+		let shadow = self.graded(shadow);
 		let lit = Path::new().append(&path).append(&shape.shift(light).path());
 		let id = self.next_id("cel");
 		let _ = write!(
@@ -949,11 +1164,6 @@ impl Svg {
 		let shade = self.graded(shade);
 		self.cast_shadow(path);
 
-		let clip = self.next_id("shade");
-		self.define(&format!(
-			r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-			path.as_str()
-		));
 		let offset = self.registration;
 		let opacity = self.style.fill_opacity;
 		self.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
@@ -982,7 +1192,7 @@ impl Svg {
 					shade
 				};
 				self.fill_alpha(path, shade, opacity);
-				self.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+				self.begin_clip(path);
 				self.fill_alpha(
 					&Path::circle(light, reach),
 					base,
@@ -1002,7 +1212,7 @@ impl Svg {
 					self.fill_alpha(&shine, palette::WHITE, 0.55);
 				}
 
-				self.raw("</g>");
+				self.end();
 			}
 		}
 
@@ -1055,6 +1265,7 @@ impl Svg {
 
 	/// The flat fill, offset by the style's registration.
 	fn paint(&mut self, path: &Path, fill: Color) {
+		self.note(path, self.registration, 0.0);
 		let fill = self.graded(fill);
 		let offset = self.registration;
 		let opacity = self.style.fill_opacity;
@@ -1072,6 +1283,7 @@ impl Svg {
 		let offset = self.registration;
 
 		if let Some(texture) = self.texture(fill) {
+			self.note(path, offset, 0.0);
 			let _ = write!(
 				self.body,
 				r#"<path d="{}" fill="url(#{texture})" transform="translate({:.1} {:.1})"/>"#,
@@ -1165,6 +1377,43 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn measurement_follows_the_drawing_through_turns_and_clips() {
+		let mut svg = Svg::new();
+		svg.measuring(true);
+		svg.begin("translate(100 200)");
+		svg.begin_measure();
+		svg.begin("rotate(90)");
+		svg.fill(&Path::rect(0.0, 0.0, 40.0, 10.0), palette::INK);
+		svg.end();
+		assert_eq!(svg.end_measure(), Some((90.0, 200.0, 100.0, 240.0)));
+
+		// What a clip cuts away is not measured.
+		svg.begin_measure();
+		svg.begin_clip(&Path::rect(0.0, 0.0, 50.0, 50.0));
+		svg.fill(&Path::rect(0.0, 0.0, 200.0, 10.0), palette::INK);
+		svg.end();
+		svg.fill(&Path::rect(0.0, 0.0, 20.0, 20.0), palette::INK);
+		assert_eq!(svg.end_measure(), Some((100.0, 200.0, 150.0, 220.0)));
+		svg.end();
+
+		// A stroke counts for its width around the path.
+		svg.begin_measure();
+		svg.stroke_alpha(
+			&Path::new().move_to(pt(0.0, 0.0)).line_to(pt(10.0, 0.0)),
+			palette::WHITE,
+			8.0,
+			1.0,
+		);
+		assert_eq!(svg.end_measure(), Some((-4.0, -4.0, 14.0, 4.0)));
+
+		// Nobody asking, nothing measured.
+		let mut plain = Svg::new();
+		plain.begin_measure();
+		plain.fill(&Path::rect(0.0, 0.0, 40.0, 10.0), palette::INK);
+		assert_eq!(plain.end_measure(), None);
+	}
+
+	#[test]
 	fn the_register_slips_the_same_way_on_the_page_however_a_part_is_turned() {
 		let mut svg = Svg::new();
 		svg.begin("translate(300 200) scale(0.5)");
@@ -1180,8 +1429,12 @@ mod tests {
 			"translate(4 9) rotate(120) scale(1.6 0.7)",
 		] {
 			svg.begin(transform);
-			let slip = svg.frame().apply(svg.register_here());
-			let page = Linear::of_transform("scale(0.5)").apply(pt(7.0, 5.0));
+			// The register is an offset: it moves with each frame's turn and scale, never
+			// with its place.
+			let moved =
+				|frame: Linear, offset: Pt| frame.apply(offset) - frame.apply(Pt::default());
+			let slip = moved(svg.frame(), svg.register_here());
+			let page = moved(Linear::of_transform("scale(0.5)"), pt(7.0, 5.0));
 			assert!(
 				(slip - page).len() < 1e-3,
 				"{transform}: {slip:?} vs {page:?}"

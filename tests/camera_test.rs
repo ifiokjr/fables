@@ -264,3 +264,125 @@ fn every_page_opens_on_an_establishing_shot() {
 		);
 	}
 }
+
+/// The head pixels of a rendered shot's subject sit clear of the frame's edges: at least
+/// `HEADROOM` (6% of the height) below the top and `SIDE_MARGIN` (5% of the width) inside
+/// each side, measured on the rasterised puppet alone, at the midpoint of the shots the
+/// review saw crop — the medium on the left-facing dog, and the medium on Mo, hair and
+/// all. Framing measures the puppet's drawn bounds; the pixels are the ground truth.
+#[test]
+fn measured_framing_keeps_heads_inside_rendered_frames() {
+	let (story, cast) = camera_test();
+	let timeline = estimated(&story, &cast);
+	let format = Format::Landscape;
+	let (w, h) = (960, 540);
+	let renderer = Renderer::new(&timeline, &story, format, w, h);
+	let aspect = format.aspect();
+
+	for (page, subject, what) in [
+		(1usize, "dog", "page 2 · medium on dog"),
+		(0, "mo", "page 1 · medium on Mo Mumble"),
+	] {
+		let shot = timeline
+			.shots
+			.iter()
+			.find(|shot| shot.kind.page() == Some(page))
+			.unwrap_or_else(|| panic!("{what}: the page is in the video"));
+		let setups = shot.setups_for(false);
+		let index = setups
+			.iter()
+			.position(|setup| {
+				matches!(&setup.framing,
+					Framing::Shot { size: stage::ShotSize::Medium, on }
+						if on.len() == 1 && on[0] == subject)
+			})
+			.unwrap_or_else(|| panic!("{what}: no such setup"));
+		let end = setups.get(index + 1).map_or(shot.end, |next| next.time);
+		let mid = f32::midpoint(setups[index].time, end);
+
+		// The frame, as the renderer draws it.
+		let frame = renderer.render(mid, 4).unwrap();
+		assert_eq!((frame.width(), frame.height()), (w, h));
+		let view = renderer.view_at(mid);
+
+		// The subject's own pixels, through the same camera, alone on transparent paper.
+		let scene = shot.scene_at(mid);
+		let puppets = fables::compose::puppets(scene, mid, false);
+		let puppet = puppets
+			.iter()
+			.find(|puppet| puppet.id == subject)
+			.unwrap_or_else(|| panic!("{what}: the subject is on stage"));
+		let scale = h as f32 / view.height;
+		let to_pixel = |x: f32, y: f32| {
+			(
+				(x - view.centre.x + view.width(aspect) / 2.0) * scale,
+				(y - view.centre.y + view.height / 2.0) * scale,
+			)
+		};
+		let mut svg = fables::art::Svg::styled(story.style());
+		svg.begin(&format!(
+			"scale({scale:.5}) translate({:.2} {:.2})",
+			-(view.centre.x - view.width(aspect) / 2.0),
+			-(view.centre.y - view.height / 2.0)
+		));
+		fables::compose::draw_puppet(&mut svg, puppet);
+		svg.end();
+		let alone =
+			fables::raster::render(&svg.finish((0.0, 0.0, w as f32, h as f32), w, h)).unwrap();
+
+		// Head pixels: the puppet's pixels inside its measured head box, opened by a
+		// pixel so the window does not cut its own edges.
+		let (hl, ht, hr, hb) = puppet.extents().head;
+		let (wl, wt) = to_pixel(hl, ht);
+		let (wr, wb) = to_pixel(hr, hb);
+		let (mut left, mut top, mut right, mut bottom) = (
+			f32::INFINITY,
+			f32::INFINITY,
+			f32::NEG_INFINITY,
+			f32::NEG_INFINITY,
+		);
+
+		for y in 0..alone.height() {
+			for x in 0..alone.width() {
+				let inside = x as f32 + 1.0 >= wl
+					&& x as f32 <= wr + 1.0
+					&& y as f32 + 1.0 >= wt
+					&& y as f32 <= wb + 1.0;
+
+				if inside && alone.pixel(x, y).unwrap().alpha() > 0 {
+					left = left.min(x as f32);
+					top = top.min(y as f32);
+					right = right.max(x as f32 + 1.0);
+					bottom = bottom.max(y as f32 + 1.0);
+				}
+			}
+		}
+
+		assert!(
+			left <= right,
+			"{what}: no head pixels in the frame at the head's own box \
+			 ({wl:.0},{wt:.0})..({wr:.0},{wb:.0})"
+		);
+
+		let headroom = top / h as f32;
+		let side = left / w as f32;
+		let other_side = (w as f32 - right) / w as f32;
+
+		assert!(
+			headroom >= 0.06,
+			"{what}: head pixels start {headroom:.1}% of the frame height from the top, under the \
+			 6% headroom (box {left:.0},{top:.0})..({right:.0},{bottom:.0}, view {:?})",
+			view.centre
+		);
+		eprintln!(
+			"{what}: head {hl:.0},{ht:.0}..{hr:.0},{hb:.0} pixels \
+			 {wl:.0},{wt:.0}..{wr:.0},{wb:.0} box {left:.0},{top:.0}..{right:.0},{bottom:.0} \
+			 headroom {headroom:.3} sides {side:.3}/{other_side:.3}"
+		);
+		assert!(
+			side >= 0.05 && other_side >= 0.05,
+			"{what}: head pixels sit {side:.1}% / {other_side:.1}% of the frame width inside the \
+			 side edges, under the 5% margin"
+		);
+	}
+}

@@ -12,6 +12,7 @@
 use std::f32::consts::PI;
 use std::f32::consts::TAU;
 
+use super::Bounds;
 use super::Color;
 use super::Path;
 use super::Pt;
@@ -28,6 +29,7 @@ use super::rig::Gait;
 use super::rig::Legs;
 use super::rig::Limbs;
 use super::rig::Stance;
+use super::union_bounds;
 
 /// Body proportions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -801,11 +803,12 @@ impl Posed {
 	}
 }
 
-/// Draws a figure with its feet at the current origin.
-pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
+/// Draws a figure with its feet at the current origin, and returns the bounds of its head —
+/// the head with its hair and anything riding on it, back hair included — in the document's
+/// units, for whoever is measuring (see [`Svg::begin_measure`]).
+pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) -> Option<Bounds> {
 	if let Some(authored) = &look.puppet {
-		puppet::draw(svg, look, authored, state);
-		return;
+		return puppet::draw(svg, look, authored, state);
 	}
 
 	let frame = look.frame();
@@ -826,32 +829,42 @@ pub fn draw(svg: &mut Svg, look: &Look, state: &FigureState) {
 		-lie_lift, lie_turn, state.tilt
 	));
 
+	svg.begin_measure();
 	svg.begin(&torso);
 	svg.begin(&head_turn);
 	draw_back_hair(svg, look, &frame, state);
 	svg.end();
 	svg.end();
+	let back_hair = svg.end_measure();
 
 	draw_legs(svg, look, &frame, state, &posed);
 
 	svg.begin(&torso);
 	draw_body(svg, look, &frame);
+	svg.begin_measure();
 	svg.begin(&head_turn);
 	draw_head(svg, look, &frame, state);
 	draw_face(svg, look, &frame, state);
 	draw_front_hair(svg, look, &frame, state);
 	draw_extras_on_head(svg, look, &frame, state);
 	svg.end();
+	let head = svg.end_measure();
 	svg.end();
 
 	draw_arms(svg, look, &frame, state, &posed);
+
+	// Dizzy stars are an effect a mood draws over the figure, not part of it.
+	let measuring = svg.pause_measure();
 
 	if matches!(state.mood, Mood::Fainted | Mood::Dizzy) {
 		let above = posed.torso(frame.head + pt(0.0, -frame.head_r * 1.15));
 		fx::dizzy_stars(svg, above, frame.head_r, state.time);
 	}
 
+	svg.resume_measure(measuring);
 	svg.end();
+
+	union_bounds(back_hair, head)
 }
 
 /// Draws the rig's bones and joints over a figure, for model sheets and rig checks.
@@ -1016,13 +1029,8 @@ fn draw_shoe(svg: &mut Svg, look: &Look, frame: &Frame, c: Pt, side: f32, angle:
 		0.04,
 		svg.seed(look.seed + side as u64 + 11),
 	);
-	let clip = svg.next_id("shoe");
-	svg.define(&format!(
-		r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-		shoe.as_str()
-	));
 	svg.fill(&shoe, look.shoes);
-	svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+	svg.begin_clip(&shoe);
 	svg.fill(
 		&Path::rect(c.x - 80.0, c.y + frame.leg_width * 0.32, 160.0, 40.0),
 		look.shoes.lighten(0.45),
@@ -1034,7 +1042,7 @@ fn draw_shoe(svg: &mut Svg, look: &Look, frame: &Frame, c: Pt, side: f32, angle:
 		),
 		look.shoes.lighten(0.25),
 	);
-	svg.raw("</g>");
+	svg.end();
 	let line = silhouette(svg);
 	svg.outline(&shoe, line);
 	svg.end();
@@ -1070,16 +1078,11 @@ fn body_path(svg: &Svg, look: &Look, frame: &Frame) -> Path {
 fn draw_body(svg: &mut Svg, look: &Look, frame: &Frame) {
 	let body = body_path(svg, look, frame);
 	svg.cast_shadow(&body);
-	let clip = svg.next_id("body");
-	svg.define(&format!(
-		r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-		body.as_str()
-	));
 
 	let offset = svg.registration;
 	svg.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
 	svg.fill(&body, look.top);
-	svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+	svg.begin_clip(&body);
 	draw_pattern(svg, look, frame);
 
 	if look.legwear != Legwear::Trousers || look.has(Extra::Apron) {
@@ -1121,7 +1124,7 @@ fn draw_body(svg: &mut Svg, look: &Look, frame: &Frame) {
 		.line_to(pt(-frame.head_r * 0.62, collar_y - 40.0))
 		.close();
 	svg.fill(&collar, look.trim);
-	svg.raw("</g>");
+	svg.end();
 	svg.end();
 
 	svg.finish_shape(&body, look.top);
@@ -1451,13 +1454,8 @@ fn draw_eye(svg: &mut Svg, look: &Look, c: Pt, r: f32, side: f32, eyes: Eyes, st
 			}
 
 			let white = Path::ellipse(c, rx, ry);
-			let clip = svg.next_id("eye");
-			svg.define(&format!(
-				r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-				white.as_str()
-			));
 			svg.fill(&white, palette::WHITE);
-			svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+			svg.begin_clip(&white);
 
 			let look_down = if state.mood == Mood::Sad {
 				r * 0.07
@@ -1492,7 +1490,7 @@ fn draw_eye(svg: &mut Svg, look: &Look, c: Pt, r: f32, side: f32, eyes: Eyes, st
 				svg.fill(&lid_shape, look.skin.darken(0.06));
 			}
 
-			svg.raw("</g>");
+			svg.end();
 
 			if lid > 0.02 {
 				let edge = c.y - ry + lid * ry * 2.0;
@@ -1922,13 +1920,8 @@ fn open_mouth(
 			c + pt(-half, corner),
 		)
 		.close();
-	let clip = svg.next_id("mouth");
-	svg.define(&format!(
-		r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-		mouth.as_str()
-	));
 	svg.fill(&mouth, palette::MAW);
-	svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+	svg.begin_clip(&mouth);
 
 	match tongue {
 		TongueAt::Bottom => {
@@ -1990,7 +1983,7 @@ fn open_mouth(
 		}
 	}
 
-	svg.raw("</g>");
+	svg.end();
 	svg.stroke(&mouth, palette::INK, svg.line * 1.2);
 
 	if state.teeth == Teeth::Sparkly {
