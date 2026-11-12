@@ -565,11 +565,13 @@ impl Linear {
 					.collect();
 				let arg = |i: usize| n.get(i).copied();
 				let step = match name.trim() {
-					"translate" => Linear {
-						e: arg(0).unwrap_or(0.0),
-						f: arg(1).unwrap_or(0.0),
-						..Linear::IDENTITY
-					},
+					"translate" => {
+						Linear {
+							e: arg(0).unwrap_or(0.0),
+							f: arg(1).unwrap_or(0.0),
+							..Linear::IDENTITY
+						}
+					}
 					"rotate" => {
 						let (sin, cos) = arg(0).unwrap_or(0.0).to_radians().sin_cos();
 						let (cx, cy) = (arg(1).unwrap_or(0.0), arg(2).unwrap_or(0.0));
@@ -802,7 +804,7 @@ impl Svg {
 		// A stroke of `bleed` units around the path bleeds by the transform of that
 		// vector — moved by the frame's turn and scale, never by its place.
 		let moved = |v: Pt| frame.apply(v) - frame.apply(Pt::default());
-		let swell = moved(pt(bleed, bleed)).len();
+		let swell = moved(pt(bleed, 0.0)).len().max(moved(pt(0.0, bleed)).len());
 		let a = frame.apply(pt(left, top) + shift);
 		let b = frame.apply(pt(right, bottom) + shift);
 		let (mut min, mut max) = (
@@ -869,8 +871,12 @@ impl Svg {
 		self.frames.pop();
 		// Clips opened inside the group just closed stop bounding what is drawn.
 		let depth = self.frames.len();
-		self.clips
-			.truncate(self.clips.iter().position(|(_, at)| *at > depth).unwrap_or(usize::MAX));
+		self.clips.truncate(
+			self.clips
+				.iter()
+				.position(|(_, at)| *at > depth)
+				.unwrap_or(usize::MAX),
+		);
 	}
 
 	pub fn fill(&mut self, path: &Path, color: Color) {
@@ -1371,6 +1377,43 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn measurement_follows_the_drawing_through_turns_and_clips() {
+		let mut svg = Svg::new();
+		svg.measuring(true);
+		svg.begin("translate(100 200)");
+		svg.begin_measure();
+		svg.begin("rotate(90)");
+		svg.fill(&Path::rect(0.0, 0.0, 40.0, 10.0), palette::INK);
+		svg.end();
+		assert_eq!(svg.end_measure(), Some((90.0, 200.0, 100.0, 240.0)));
+
+		// What a clip cuts away is not measured.
+		svg.begin_measure();
+		svg.begin_clip(&Path::rect(0.0, 0.0, 50.0, 50.0));
+		svg.fill(&Path::rect(0.0, 0.0, 200.0, 10.0), palette::INK);
+		svg.end();
+		svg.fill(&Path::rect(0.0, 0.0, 20.0, 20.0), palette::INK);
+		assert_eq!(svg.end_measure(), Some((100.0, 200.0, 150.0, 220.0)));
+		svg.end();
+
+		// A stroke counts for its width around the path.
+		svg.begin_measure();
+		svg.stroke_alpha(
+			&Path::new().move_to(pt(0.0, 0.0)).line_to(pt(10.0, 0.0)),
+			palette::WHITE,
+			8.0,
+			1.0,
+		);
+		assert_eq!(svg.end_measure(), Some((-4.0, -4.0, 14.0, 4.0)));
+
+		// Nobody asking, nothing measured.
+		let mut plain = Svg::new();
+		plain.begin_measure();
+		plain.fill(&Path::rect(0.0, 0.0, 40.0, 10.0), palette::INK);
+		assert_eq!(plain.end_measure(), None);
+	}
+
+	#[test]
 	fn the_register_slips_the_same_way_on_the_page_however_a_part_is_turned() {
 		let mut svg = Svg::new();
 		svg.begin("translate(300 200) scale(0.5)");
@@ -1388,7 +1431,8 @@ mod tests {
 			svg.begin(transform);
 			// The register is an offset: it moves with each frame's turn and scale, never
 			// with its place.
-			let moved = |frame: Linear, offset: Pt| frame.apply(offset) - frame.apply(Pt::default());
+			let moved =
+				|frame: Linear, offset: Pt| frame.apply(offset) - frame.apply(Pt::default());
 			let slip = moved(svg.frame(), svg.register_here());
 			let page = moved(Linear::of_transform("scale(0.5)"), pt(7.0, 5.0));
 			assert!(

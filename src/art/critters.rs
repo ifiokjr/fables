@@ -395,8 +395,7 @@ pub fn flower(
 
 	face(svg, r * 0.5, wilt, state.time);
 	svg.end();
-	let bloom = svg.end_measure();
-	bloom
+	svg.end_measure()
 }
 
 /// A tiny face for plants: smiling when well, frowning with X eyes when wilted.
@@ -430,7 +429,13 @@ fn face(svg: &mut Svg, size: f32, wilt: f32, time: f32) {
 
 /// A lollipop tree. Origin is the bottom of the trunk. The tree has no head, so the whole
 /// outline is its head bounds for framing, and the return is `None`.
-pub fn tree(svg: &mut Svg, color: Color, height: f32, state: CritterState, seed: u64) -> Option<Bounds> {
+pub fn tree(
+	svg: &mut Svg,
+	color: Color,
+	height: f32,
+	state: CritterState,
+	seed: u64,
+) -> Option<Bounds> {
 	let wilt = state.wilt.clamp(0.0, 1.0);
 	let trunk = Path::wobbly_poly(
 		&[
@@ -490,7 +495,12 @@ pub fn bonk(svg: &mut Svg, c: Pt, size: f32) {
 
 /// A toothbrush standing in its cup, with eyes. It only ever looks hopeful. Origin is the
 /// bottom of the cup. The whole buddy is its head for framing, and the return is `None`.
-pub fn toothbrush_buddy(svg: &mut Svg, color: Color, state: CritterState, seed: u64) -> Option<Bounds> {
+pub fn toothbrush_buddy(
+	svg: &mut Svg,
+	color: Color,
+	state: CritterState,
+	seed: u64,
+) -> Option<Bounds> {
 	let lean = (state.time * 1.5).sin() * 3.0 + state.lively * (state.time * 9.0).sin() * 6.0;
 
 	svg.begin(&format!("rotate({lean:.1})"));

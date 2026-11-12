@@ -202,12 +202,15 @@ impl<'a> Renderer<'a> {
 	}
 
 	/// Reads the view cache, however busy the frame renderers are.
-	fn cached<T>(&self, with: impl FnOnce(&mut std::collections::HashMap<(usize, u32), View>) -> T) -> T {
+	fn cached<T>(
+		&self,
+		with: impl FnOnce(&mut std::collections::HashMap<(usize, u32), View>) -> T,
+	) -> T {
 		with(
 			&mut self
 				.view_cache
 				.lock()
-				.unwrap_or_else(|poisoned| poisoned.into_inner()),
+				.unwrap_or_else(std::sync::PoisonError::into_inner),
 		)
 	}
 
@@ -624,7 +627,7 @@ impl<'a> Renderer<'a> {
 	/// shot). A framing that is not tracking reads at the same moment every frame, so the
 	/// view is measured once and remembered.
 	fn framing_view(&self, shot: &Shot, setup: &Setup, time: f32) -> View {
-		let key = (setup as *const Setup as usize, time.to_bits());
+		let key = (std::ptr::from_ref::<Setup>(setup) as usize, time.to_bits());
 
 		if let Some(view) = self.cached(|cache| cache.get(&key).copied()) {
 			return view;
@@ -816,7 +819,7 @@ impl<'a> Renderer<'a> {
 	/// Where the camera wants to be once everything settles after `time` (the automatic
 	/// framing), measured once and remembered per shot and moment.
 	fn target(&self, shot: &Shot, time: f32) -> View {
-		let key = (shot as *const Shot as usize, time.to_bits());
+		let key = (std::ptr::from_ref::<Shot>(shot) as usize, time.to_bits());
 
 		if let Some(view) = self.cached(|cache| cache.get(&key).copied()) {
 			return view;

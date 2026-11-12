@@ -65,6 +65,10 @@ const LEAD_ROOM: f32 = 0.12;
 const HEADROOM: f32 = 0.06;
 /// Room beside a subject, at least this fraction of the frame width on each side.
 const SIDE_MARGIN: f32 = 0.05;
+/// A long hold rides in on a slow push that tightens the view by up to this fraction of its
+/// height — half of it off each edge. The framing leaves that much room, so the headroom
+/// and side margins a shot is built with still hold once the push has run its course.
+const PUSH_TIGHTENS: f32 = 0.04;
 /// How much a `push` tightens and a `pull` widens, as a multiplier of the view height.
 const PUSH_IN: f32 = 0.75;
 const PULL_OUT: f32 = 1.35;
@@ -179,14 +183,15 @@ pub fn shot_view(
 }
 
 /// A full shot: wide enough for everyone, the ground line and the tallest head inside the band,
-/// with the head rule's headroom and side margins.
+/// with the head rule's headroom and side margins, push room included.
 fn full_view(aspect: f32, band: (f32, f32), subjects: &[&Puppet], ground: f32) -> Option<View> {
 	let extent = bounds(subjects)?;
-	let top_at = band.0.max(HEADROOM);
+	let top_at = band.0.max(HEADROOM + PUSH_TIGHTENS / 2.0);
 	let ground_at = band.1;
 	let wide = (extent.2 - extent.0) * 1.15 / aspect;
 	let tall = (ground - extent.1) / (ground_at - top_at);
-	let beside = (extent.2 - extent.0) / ((1.0 - 2.0 * SIDE_MARGIN) * aspect);
+	let beside =
+		(extent.2 - extent.0) / ((1.0 - 2.0 * (SIDE_MARGIN + PUSH_TIGHTENS / 2.0)) * aspect);
 	let height = wide
 		.max(tall)
 		.max(beside)
@@ -212,10 +217,7 @@ fn full_view(aspect: f32, band: (f32, f32), subjects: &[&Puppet], ground: f32) -
 fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet]) -> Option<View> {
 	let measured: Vec<Extents> = subjects.iter().map(|puppet| puppet.extents()).collect();
 	// The head as a disc, from its measured bounds: hair and head-wear included.
-	let heads: Vec<(Pt, f32)> = measured
-		.iter()
-		.map(|e| head_disc(e.head))
-		.collect();
+	let heads: Vec<(Pt, f32)> = measured.iter().map(|e| head_disc(e.head)).collect();
 	let radius = heads.iter().map(|(_, r)| *r).fold(0.0, f32::max);
 	let lowest_head = heads.iter().map(|(h, _)| h.y).fold(0.0, f32::max);
 	let extent = union_all(measured.iter().map(|e| e.subject))?;
@@ -250,25 +252,26 @@ fn tight_view(aspect: f32, band: (f32, f32), size: ShotSize, subjects: &[&Puppet
 	};
 
 	// The head sits below the frame's top edge by the format's action band and at least
-	// [`HEADROOM`] of the view height.
-	let top_at = band.0.max(HEADROOM);
+	// [`HEADROOM`] of the view height, with room for the push.
+	let top_at = band.0.max(HEADROOM + PUSH_TIGHTENS / 2.0);
 	let span = (crop - head_top).max(radius * 2.0);
 	let mut height = span / (1.0 + CROP - top_at);
 
 	// Wide enough for the group across, with room to breathe either side, and always the
-	// [`SIDE_MARGIN`]s of the frame width either side of the subjects.
+	// [`SIDE_MARGIN`]s of the frame width either side of the subjects, push included.
+	let side = SIDE_MARGIN + PUSH_TIGHTENS / 2.0;
 	let breathe = match size {
 		ShotSize::ExtremeClose => radius * 0.5,
 		ShotSize::Close => radius * 1.1,
 		_ => radius * 1.4,
 	};
 	height = height.max((extent.2 - extent.0 + breathe * 2.0) / aspect);
-	height = height.max((extent.2 - extent.0) / ((1.0 - 2.0 * SIDE_MARGIN) * aspect));
+	height = height.max((extent.2 - extent.0) / ((1.0 - 2.0 * side) * aspect));
 
 	// Lead room: a subject facing or looking right sits left of centre, and the reverse —
-	// but only as far as the side margins allow.
+	// but only as far as those margins allow.
 	let width = height * aspect;
-	let room = width * (0.5 - SIDE_MARGIN);
+	let room = width * (0.5 - side);
 	let mut centre_x = if subjects.len() == 1 {
 		subjects[0].at.x - subjects[0].heading * LEAD_ROOM * width
 	} else {
@@ -300,7 +303,10 @@ fn waist(puppet: &Puppet, extents: &Extents) -> f32 {
 /// so a tall hairdo reads as the head it is.
 fn head_disc(bounds: Bounds) -> (Pt, f32) {
 	(
-		pt(f32::midpoint(bounds.0, bounds.2), f32::midpoint(bounds.1, bounds.3)),
+		pt(
+			f32::midpoint(bounds.0, bounds.2),
+			f32::midpoint(bounds.1, bounds.3),
+		),
 		((bounds.2 - bounds.0).max(bounds.3 - bounds.1)) / 2.0,
 	)
 }

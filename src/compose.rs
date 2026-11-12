@@ -553,7 +553,7 @@ pub(crate) fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
 mod tests {
 	use super::*;
 	use crate::art::figure::Build;
-	use crate::art::figure::HairStyle;
+	use crate::art::figure::Mood;
 	use crate::art::figure::Pose;
 	use crate::art::light::Light;
 	use crate::art::light::Preset;
@@ -583,10 +583,8 @@ mod tests {
 	/// A kid from a cast line — the parametric puppet, no authored parts — with a named
 	/// hairdo and pose, facing `heading`.
 	fn kid_of(hair: &str, pose: Pose, heading: f32) -> Puppet {
-		let cast = crate::cast::Cast::parse(&format!(
-			"[kid]\nname = \"Kid\"\nhair = \"{hair}\"\n"
-		))
-		.unwrap();
+		let cast = crate::cast::Cast::parse(&format!("[kid]\nname = \"Kid\"\nhair = \"{hair}\"\n"))
+			.unwrap();
 		let Kind::Figure(look) = cast.members["kid"].kind.clone() else {
 			panic!("a cast kid is a figure");
 		};
@@ -646,10 +644,14 @@ mod tests {
 		draw_subject(&mut svg, puppet);
 		svg.end();
 		let pixmap = crate::raster::render(&svg.finish(view, 600, 640)).unwrap();
-		let (vx, vy, vw, vh) = view;
+		let (vx, vy, vw, _) = view;
 		let unit = vw / pixmap.width() as f32;
-		let (mut left, mut top, mut right, mut bottom) =
-			(f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+		let (mut left, mut top, mut right, mut bottom) = (
+			f32::INFINITY,
+			f32::INFINITY,
+			f32::NEG_INFINITY,
+			f32::NEG_INFINITY,
+		);
 
 		for y in 0..pixmap.height() {
 			for x in 0..pixmap.width() {
@@ -662,10 +664,7 @@ mod tests {
 			}
 		}
 
-		assert!(
-			left <= right,
-			"the puppet drew nothing in {view:?}"
-		);
+		assert!(left <= right, "the puppet drew nothing in {view:?}");
 		(left, top, right, bottom)
 	}
 
@@ -725,7 +724,10 @@ mod tests {
 			((a.0 - x) + (b.2 - x)).abs() < 1.0 && ((a.2 - x) + (b.0 - x)).abs() < 1.0,
 			"dog {a:?} vs mirrored {b:?}"
 		);
-		assert!((a.1 - b.1).abs() < 1.0 && (a.3 - b.3).abs() < 1.0, "{a:?} vs {b:?}");
+		assert!(
+			(a.1 - b.1).abs() < 1.0 && (a.3 - b.3).abs() < 1.0,
+			"{a:?} vs {b:?}"
+		);
 
 		let mut turned = kid();
 		turned.heading = -1.0;
@@ -775,7 +777,7 @@ mod tests {
 		let mut dizzy = kid();
 
 		if let Body::Figure(state) = &mut dizzy.body {
-			state.mood = crate::art::figure::Mood::Dizzy;
+			state.mood = Mood::Dizzy;
 		}
 
 		assert!(
@@ -804,4 +806,3 @@ mod tests {
 		assert!(!day.contains(&lean), "no cast lean in daylight: {day}");
 	}
 }
-
