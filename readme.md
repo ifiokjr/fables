@@ -165,7 +165,7 @@ Worlds and characters are named by slugs, never paths, so the server only reads 
 | --- | --- |
 | `fables new "<Title>" --star <id>` | A new book in the world's `stories/<title>/story.md`, laid out from its `recipe.md` with the star already staged. |
 | `fables check <story>` | Validates the script and reports page and word counts. Errors give line numbers and list valid options. |
-| `fables review <story>` | A director's critique of the rehearsed script: line-numbered findings and suggestions about staging, mood arcs, pacing, light and shots. Advice, never a refusal; ends with a count of findings. |
+| `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, mood arcs, pacing, light and shots. Advice, never a refusal; ends with a count of findings. |
 | `fables proofs <story>` | `out/<book>/<style>/proofs/`: one PNG per page plus `contact-sheet.png`, in about a second. |
 | `fables ebook <story>` | `out/<book>/<style>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
 | `fables print <story>` | `out/<book>/<style>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
@@ -441,6 +441,7 @@ src/
   studio.rs       worlds and characters as operations: what the CLI and MCP server share
   mcp.rs          `fables mcp`: the studio's tools over the Model Context Protocol
   publish.rs      a book's outputs: the check, proofs, ePub, print files and videos
+  review.rs       the critique: findings from a rehearsed story and its planned video
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, the director's camera setups, frame renderer, soundtrack, ffmpeg
