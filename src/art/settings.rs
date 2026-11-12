@@ -19,9 +19,9 @@
 //! | `data-line="none"` | A fill without an outline (skies, lawns, stripes). |
 //! | `data-night` | The colour at night. Parts without one are dimmed. |
 //! | `data-wilt` | The colour it turns as the scene wilts. |
-//! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides. |
+//! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides; `overcast` and `storm` hide the sun. |
 //! | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows, stars). |
-//! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). |
+//! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). Both colours wilt, fade with distance, darken at night and grade like a flat fill. |
 //! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line. |
 //! | `data-dots` | A riso dot screen over it: `colour spacing radius opacity`. |
 //! | `data-drift` | Units a second it drifts sideways, wrapping (clouds). |
@@ -33,8 +33,9 @@
 //! data-colour data-seed>` places one of the living plants from [`critters`], which have faces
 //! and wilt. The root `<svg>` sets `data-ground`, where actors' feet rest.
 //!
-//! The built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`)
-//! are compiled in from `settings/`; a world adds or replaces them with its own `settings/`.
+//! The built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`,
+//! `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`) are
+//! compiled in from `settings/`; a world adds or replaces them with its own `settings/`.
 
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
@@ -64,7 +65,7 @@ use super::pt;
 pub const OVER: f32 = 160.0;
 
 /// The settings compiled into fables, by name.
-const BUILT_IN: [(&str, &str); 7] = [
+const BUILT_IN: [(&str, &str); 15] = [
 	("plain", include_str!("../../settings/plain.svg")),
 	("town", include_str!("../../settings/town.svg")),
 	("street", include_str!("../../settings/street.svg")),
@@ -72,6 +73,14 @@ const BUILT_IN: [(&str, &str); 7] = [
 	("park", include_str!("../../settings/park.svg")),
 	("bathroom", include_str!("../../settings/bathroom.svg")),
 	("bedroom", include_str!("../../settings/bedroom.svg")),
+	("kitchen", include_str!("../../settings/kitchen.svg")),
+	("classroom", include_str!("../../settings/classroom.svg")),
+	("forest", include_str!("../../settings/forest.svg")),
+	("beach", include_str!("../../settings/beach.svg")),
+	("hilltop", include_str!("../../settings/hilltop.svg")),
+	("shop", include_str!("../../settings/shop.svg")),
+	("playroom", include_str!("../../settings/playroom.svg")),
+	("stage", include_str!("../../settings/stage.svg")),
 ];
 
 /// A built-in setting's part file, by name.
@@ -80,6 +89,11 @@ pub fn built_in_source(name: &str) -> Option<&'static str> {
 		.iter()
 		.find(|(key, _)| *key == name)
 		.map(|(_, source)| *source)
+}
+
+/// The names of the settings compiled into fables.
+pub fn built_in_names() -> impl Iterator<Item = &'static str> {
+	BUILT_IN.iter().map(|(name, _)| *name)
 }
 
 /// A setting file as an editor sees it: its ground, its title, and each part's id and markup,
@@ -612,10 +626,17 @@ impl Part {
 					let paint = sky_gradient(svg, &weather.light);
 					svg.fill_paint(path, &paint);
 				} else if let Some((top, bottom)) = self.gradient {
+					// Each end goes through the same colours as a flat fill (wilt, night,
+					// distance, the light's grade, then the page's), so a gradient wall dims
+					// at night and grades with the flat parts beside it.
+					let stop = |colour: Color| {
+						svg.graded(snap(svg, self.color(Paint::Color(colour), weather)))
+					};
+					let (top, bottom) = (stop(top), stop(bottom));
 					let paint = part_gradient(
 						svg,
-						weather.light.grade(top),
-						weather.light.grade(bottom),
+						top,
+						bottom,
 						self.bounds.unwrap_or((0.0, 0.0, STAGE, STAGE)),
 					);
 					svg.fill_paint(path, &paint);
@@ -1060,6 +1081,144 @@ mod tests {
 				crate::raster::render(&doc).unwrap();
 			}
 		}
+	}
+
+	#[test]
+	fn all_fifteen_built_ins_have_three_layers_and_a_ground() {
+		let names: Vec<&str> = built_in_names().collect();
+		assert_eq!(
+			names,
+			[
+				"plain",
+				"town",
+				"street",
+				"garden",
+				"park",
+				"bathroom",
+				"bedroom",
+				"kitchen",
+				"classroom",
+				"forest",
+				"beach",
+				"hilltop",
+				"shop",
+				"playroom",
+				"stage",
+			]
+		);
+
+		let library = Library::built_in();
+
+		for name in names {
+			let setting = library.find(name).unwrap();
+
+			for layer in [Layer::Far, Layer::Near, Layer::Front] {
+				assert!(
+					setting.0.parts.iter().any(|part| part.layer == layer),
+					"{name} has no {layer:?} parts"
+				);
+			}
+
+			assert!(
+				(STAGE * 0.75..STAGE).contains(&setting.ground()),
+				"{name} stands its actors at {}",
+				setting.ground()
+			);
+			assert!(
+				setting.0.parts.len() < 150,
+				"{name} has {} parts, too many to draw every frame",
+				setting.0.parts.len()
+			);
+			assert!(!setting.about().is_empty(), "{name} needs a <title>");
+		}
+	}
+
+	#[test]
+	fn overcast_and_storm_hide_the_sun() {
+		let source = r#"<svg data-ground="2000"><path id="far-sun" d="M100 100 C100 110 110 110 110 100 C110 90 100 90 100 100 Z" fill="sunflower" data-time="day"/></svg>"#;
+		let sun_shows = |preset: Preset| {
+			let light = Light::of(preset);
+			let document = draw_setting(
+				source,
+				&Weather {
+					light,
+					..Weather::default()
+				},
+			);
+			document.contains(&format!("fill=\"{}\"", light.grade(palette::SUNFLOWER)))
+		};
+
+		for preset in [Preset::Day, Preset::Dawn, Preset::Golden, Preset::Dusk] {
+			assert!(sun_shows(preset), "the sun is out at {}", preset.name());
+		}
+
+		for preset in [
+			Preset::Overcast,
+			Preset::Storm,
+			Preset::Night,
+			Preset::Indoor,
+		] {
+			assert!(!sun_shows(preset), "no sun at {}", preset.name());
+		}
+
+		let overcast = draw_setting(
+			source,
+			&Weather {
+				light: Light::of(Preset::Overcast),
+				..Weather::default()
+			},
+		);
+		assert!(
+			!overcast.contains("radialGradient id=\"glow"),
+			"a hidden sun has no bloom: {overcast}"
+		);
+	}
+
+	#[test]
+	fn a_gradient_wilts_darkens_and_grades_like_a_flat_fill() {
+		let source = r#"<svg data-ground="2000"><path id="near-lawn" d="M0 100 L100 100 L100 200 L0 200 Z" fill="leaf" data-gradient="meadow leaf" data-wilt="toffee" data-line="none"/></svg>"#;
+		let day = draw_setting(source, &Weather::default());
+		assert!(
+			day.contains(&palette::MEADOW.to_string()) && day.contains(&palette::LEAF.to_string()),
+			"the authored colours by day: {day}"
+		);
+
+		let wilted = draw_setting(
+			source,
+			&Weather {
+				wilt: 1.0,
+				..Weather::default()
+			},
+		);
+		assert!(
+			!wilted.contains(&palette::LEAF.to_string()),
+			"the lawn wilts: {wilted}"
+		);
+
+		let night = draw_setting(
+			source,
+			&Weather {
+				night: true,
+				..Weather::default()
+			},
+		);
+		assert!(
+			night.contains(&palette::LEAF.mix(palette::NIGHT, 0.35).to_string()),
+			"the lawn dims at night: {night}"
+		);
+
+		let dusk = Light::of(Preset::Dusk);
+		let lit = draw_setting(
+			source,
+			&Weather {
+				light: dusk,
+				..Weather::default()
+			},
+		);
+		assert!(
+			lit.contains(&dusk.grade(palette::LEAF).to_string()),
+			"the lawn grades with the light: {lit}"
+		);
 	}
 
 	#[test]

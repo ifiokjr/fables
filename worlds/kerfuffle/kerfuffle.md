@@ -80,12 +80,20 @@ Every book reuses the same small town, so readers learn its geography. Settings 
 
 | Setting | What's there | Good for |
 | --- | --- | --- |
-| `town` | Crooked painted houses, the leaning clock tower, a sandy path. | Openers, name reveals, endings. |
-| `street` | Big house fronts, bunting, a red postbox, a lamp post, hedges. | Meeting grown-ups, the postie. |
-| `garden` | A picket fence and a bed of flowers with faces. | Wilting and blooming (`wilt=`). |
-| `park` | Lollipop trees, swings and a slide. | Friends, playing, birds. |
-| `bathroom` | Tiles, a bubbly bath with a duck, a round mirror, the toothbrush cup. | Habits at home. |
-| `bedroom` | Striped wallpaper, a window (with a moon at `night`), a bed, a rocket on the shelf. | Bedtime, mornings. |
+| `town` | Crooked painted houses up the hill to the leaning clock tower, a sandy path; lit windows and a glowing clock after dark. | Openers, name reveals, endings. |
+| `street` | Big house fronts, bunting, a red postbox, a lamp post, hedges, and a side street off to the clock tower. | Meeting grown-ups, the postie. |
+| `garden` | A picket fence, a bed of flowers with faces, a striped lawn and the neighbours' roofs. | Wilting and blooming (`wilt=`). |
+| `park` | Lollipop trees, swings and a slide, a lamp, and fireflies at dusk. | Friends, playing, birds. |
+| `bathroom` | Tiles, a bubbly bath with a duck, the round mirror over the sink, the toothbrush cup, and a moon night light. | Habits at home. |
+| `bedroom` | Striped wallpaper, a window (with a moon at `night`), a bed, a lamp, a rug, a rocket on the shelf. | Bedtime, mornings. |
+| `kitchen` | Cupboards, a cooker with a steaming pan, a window over the sink, the fridge with drawings on it. | Breakfast, tea, grown-ups at home. |
+| `classroom` | A chalkboard of doodles, bookshelves, the teacher's desk, a window. | School, show and tell. |
+| `forest` | Tall trunks fading into the trees, a winding path, mushrooms that glow and an owl at night. | Adventures, getting lost. |
+| `beach` | The sea to the horizon, a lighthouse, a striped umbrella, a sandcastle. | Days out, holidays. |
+| `hilltop` | A long view of fields, a river and blue mountains, a lone tree, the Milky Way at night. | Big moments, looking far. |
+| `shop` | Shelves of jars, the counter and till, a window onto the street. | Errands, buying sweets. |
+| `playroom` | A play tent, a toy box, bunting and a rainbow mat floor. | Playing indoors, sharing. |
+| `stage` | Red curtains, footlights, a painted backdrop and a spotlight. | Shows, being brave, the finale. |
 | `plain` | Paper with one big colour blob (`tint=`). | Close-ups, montages, the end. |
 
 Scene weather works everywhere: `wilt` (plants droop), `stink` (green haze), `mint` (icy freshness) and `night`.

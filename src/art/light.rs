@@ -21,8 +21,8 @@ use super::pt;
 ///
 /// Settings mark their sun with `data-time="day"` and their moon and stars with
 /// `data-time="night"`; under a lit scene those parts follow the light's body instead of the
-/// bare day-or-night flag. `None` is an interior light (a lamp, a candle) with no sky body at
-/// all.
+/// bare day-or-night flag. `None` means no sky body shows: an interior light (a lamp, a
+/// candle), or a sky covered over by cloud (`overcast`, `storm`), which hides the sun.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Body {
 	Sun,
@@ -264,7 +264,7 @@ impl Light {
 			vignette: 0.08,
 			glow_colour: Color(0xE8_EC_EE),
 			glow_strength: 0.18,
-			body: Some(Body::Sun),
+			body: None,
 			rim: false,
 			ground_shadow: 0.85,
 		},
@@ -284,7 +284,7 @@ impl Light {
 			vignette: 0.3,
 			glow_colour: Color(0xD8_DC_E4),
 			glow_strength: 0.16,
-			body: Some(Body::Sun),
+			body: None,
 			rim: false,
 			ground_shadow: 0.7,
 		},
@@ -545,6 +545,14 @@ mod tests {
 			u32::from(r) + u32::from(g) + u32::from(b) < 3 * 128,
 			"moonlight darkens grey: {moonlit}"
 		);
+	}
+
+	#[test]
+	fn cloud_covers_the_sun_under_overcast_and_storm() {
+		assert_eq!(Light::of(Preset::Overcast).body, None);
+		assert_eq!(Light::of(Preset::Storm).body, None);
+		assert_eq!(Light::of(Preset::Golden).body, Some(Body::Sun));
+		assert_eq!(Light::of(Preset::Moonlit).body, Some(Body::Moon));
 	}
 
 	#[test]
