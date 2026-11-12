@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod press;
 pub mod publish;
 pub mod raster;
+pub mod review;
 pub mod stage;
 pub mod story;
 pub mod studio;

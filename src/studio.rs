@@ -27,6 +27,7 @@ use serde::Serialize;
 
 use crate::art::dials::Fill;
 use crate::art::figure::Mood;
+use crate::art::light::Preset;
 use crate::art::pack::Face;
 use crate::art::pack::Finish;
 use crate::art::pack::StylePack;
@@ -44,7 +45,12 @@ use crate::cast::Member;
 use crate::press::sheets;
 use crate::publish;
 use crate::raster;
+use crate::raster::BODY_FAMILY;
+use crate::stage::ShotSize;
+use crate::stage::Travel;
 use crate::story::Story;
+use crate::story::Transition;
+use crate::video::frames::Format;
 use crate::video::voice;
 use crate::video::voice::Delivery;
 use crate::video::voice::Utterance;
@@ -81,6 +87,19 @@ pub struct WorldReport {
 	pub cast: Vec<MemberReport>,
 	/// The books, by folder under `stories/`.
 	pub stories: Vec<String>,
+	/// The other worlds under the root, whose characters a script's `guests` can invite.
+	pub visitors: Vec<VisitorWorld>,
+}
+
+/// A world beside this one, whose characters a book can invite as guests.
+#[derive(Clone, Debug, Serialize)]
+pub struct VisitorWorld {
+	/// The world's folder; a script's `guests` names its characters `folder/id`.
+	pub folder: String,
+	pub name: String,
+	pub style: String,
+	/// Who could be invited, by cast id.
+	pub cast: Vec<MemberReport>,
 }
 
 /// One cast member.
@@ -359,6 +378,58 @@ pub enum VideoShape {
 	Portrait,
 }
 
+/// Which moments of a video to look at.
+#[derive(Clone, Debug)]
+pub enum Frames {
+	/// These seconds, from the start of the video.
+	Times(Vec<f32>),
+	/// Every n seconds, from the start.
+	Every(f32),
+}
+
+/// The most frames one tile can hold, so a tool's answer stays something a model can look at.
+pub const MAX_FRAMES: usize = 12;
+
+impl Frames {
+	/// The moments to render, within a video of `duration` seconds.
+	pub fn times(&self, duration: f32) -> Result<Vec<f32>> {
+		let times = match self {
+			Frames::Times(times) => times.clone(),
+			Frames::Every(step) => {
+				ensure!(
+					*step > 0.0,
+					"sample every n seconds: n must be more than zero"
+				);
+
+				(0..(duration / step).ceil() as usize)
+					.map(|index| index as f32 * step)
+					.collect::<Vec<_>>()
+			}
+		};
+
+		ensure!(
+			!times.is_empty(),
+			"name moments to look at (`times`), or an interval (`every`)"
+		);
+		ensure!(
+			times.len() <= MAX_FRAMES,
+			"{} frames is too many to look at; name at most {MAX_FRAMES} moments, or sample every \
+			 {:.0}s",
+			times.len(),
+			(duration / MAX_FRAMES as f32).ceil()
+		);
+
+		for &time in &times {
+			ensure!(
+				time >= 0.0 && time < duration,
+				"{time:.1}s is outside the video, which runs {duration:.0}s"
+			);
+		}
+
+		Ok(times)
+	}
+}
+
 /// What a render wrote, relative to the studio's root.
 #[derive(Clone, Debug, Serialize)]
 pub struct Rendered {
@@ -393,6 +464,79 @@ pub struct SettingWeather {
 	#[serde(default)]
 	pub wilt: f32,
 }
+
+/// A light preset, and a sentence on what it feels like.
+#[derive(Clone, Debug, Serialize)]
+pub struct LightLine {
+	pub name: String,
+	pub about: &'static str,
+}
+
+/// A piece of camera vocabulary, and a sentence on what it says.
+#[derive(Clone, Debug, Serialize)]
+pub struct ShotLine {
+	pub name: String,
+	pub about: &'static str,
+}
+
+/// The camera vocabulary: shot sizes, moves, how the camera arrives, and page transitions.
+#[derive(Clone, Debug, Serialize)]
+pub struct ShotsReport {
+	pub sizes: Vec<ShotLine>,
+	pub moves: Vec<ShotLine>,
+	pub arrivals: Vec<ShotLine>,
+	pub transitions: Vec<ShotLine>,
+}
+
+/// A sentence on each light preset, in [`Preset::ALL`] order.
+const LIGHTS: [&str; 10] = [
+	"Plain open daylight: the honest default, with shadows where they fall.",
+	"Cool air and a warm horizon: beginnings and fresh starts.",
+	"Honeyed light from a low sun: the day at its best, or a last chance.",
+	"Violet and settled: the day ending, journeys nearly done.",
+	"Dark and closed: the world asleep, or something to find in the dark.",
+	"Silver and calm: a still world lit by the moon.",
+	"Flat grey light with no shadows: waiting weather.",
+	"The darkest grade: the low point, the worst page.",
+	"Ordinary light at home: nothing special happening, yet.",
+	"One small warm pool of light: safe, secret, precious.",
+];
+
+/// A sentence on each shot size, in [`ShotSize::ALL`] order.
+const SHOT_SIZES: [&str; 5] = [
+	"The whole setting, the star small in it: open a sequence.",
+	"Head to toe: movement, entrances and the body's comedy.",
+	"The waist up: conversation, two people trading lines.",
+	"Head and shoulders: a decision, a feeling held back.",
+	"The face alone: the turn, the gasp, what only the reader notices.",
+];
+
+/// A sentence on each camera move, in [`Travel::MOVES`] order.
+const SHOT_MOVES: [&str; 7] = [
+	"Glide in, tightening: attention arriving.",
+	"Glide out, widening: room to breathe after a peak.",
+	"Glide left, revealing what was beside us.",
+	"Glide right, revealing what was beside us.",
+	"Rise: how big, how far, how high.",
+	"Descend: to the ground, to what fell.",
+	"Follow the subject as they move.",
+];
+
+/// A sentence on each way a camera arrives at a framing.
+const SHOT_ARRIVALS: [&str; 2] = [
+	"Arrive on the cut: the same moment, a new angle.",
+	"Glide to the framing: the older, gentler camera.",
+];
+
+/// A sentence on each page transition, in [`Transition::ALL`] order.
+const SHOT_TRANSITIONS: [&str; 6] = [
+	"The paper page turn: the book's default hello.",
+	"No effect at all: the same moment continues.",
+	"A little time passes between the pages.",
+	"Through the paper colour: a chapter's end, or a big change.",
+	"A circle closes and opens: old-fashioned attention on one face.",
+	"The new page slides in: the story chases forward.",
+];
 
 impl Studio {
 	pub fn new(root: &Path) -> Studio {
@@ -488,6 +632,29 @@ impl Studio {
 			.collect();
 		stories.sort();
 
+		let visitors = world
+			.neighbours()?
+			.iter()
+			.map(|other| {
+				Ok(VisitorWorld {
+					folder: other
+						.dir
+						.file_name()
+						.and_then(|name| name.to_str())
+						.unwrap_or_default()
+						.to_owned(),
+					name: other.name.clone(),
+					style: other.style.clone(),
+					cast: other
+						.cast()?
+						.members
+						.values()
+						.map(|member| member_report(other, member))
+						.collect(),
+				})
+			})
+			.collect::<Result<Vec<_>>>()?;
+
 		Ok(WorldReport {
 			summary: summary(&world),
 			narrator: world.narrator.as_ref().map(|voice| voice.name.clone()),
@@ -497,6 +664,7 @@ impl Studio {
 				.map(|member| member_report(&world, member))
 				.collect(),
 			stories,
+			visitors,
 		})
 	}
 
@@ -778,7 +946,7 @@ impl Studio {
 		);
 		let mut script = Story::load(&path)?;
 		world.furnish(&mut script)?;
-		let cast = world.cast()?;
+		let cast = world.cast_for(&script)?;
 		Ok((world, script, cast))
 	}
 
@@ -824,6 +992,13 @@ impl Studio {
 	pub fn check_story(&self, folder: &str, story: &str) -> Result<publish::CheckReport> {
 		let (_, script, cast) = self.book(folder, story)?;
 		publish::check(&script, &cast)
+	}
+
+	/// Critiques a book the way a director would: findings with line numbers and suggestions,
+	/// never a refusal. Timings are estimated offline, so no voice is recorded.
+	pub fn review_story(&self, folder: &str, story: &str) -> Result<Vec<crate::review::Finding>> {
+		let (_, script, cast) = self.book(folder, story)?;
+		publish::review(&script, &cast, &self.root.join("out"))
 	}
 
 	/// Makes a book's outputs under the root's `out/`. Returns what was written, and the proofs'
@@ -911,11 +1086,94 @@ impl Studio {
 	) -> Result<Rendered> {
 		let (_, script, cast) = self.book(folder, story)?;
 		let format = match shape {
-			VideoShape::Landscape => crate::video::frames::Format::Landscape,
-			VideoShape::Portrait => crate::video::frames::Format::Portrait,
+			VideoShape::Landscape => Format::Landscape,
+			VideoShape::Portrait => Format::Portrait,
 		};
 		let files = publish::video(&script, &cast, &self.root.join("out"), &[format], preview)?;
 		Ok(self.relative(&files))
+	}
+
+	/// The storyboard as images: the video's camera plan drawn as a comic strip, one labelled
+	/// panel per setup, in the shape's framing. Timings are estimated offline, so no voice is
+	/// recorded and no video is encoded.
+	pub fn storyboard_images(
+		&self,
+		folder: &str,
+		story: &str,
+		shape: VideoShape,
+	) -> Result<Vec<Image>> {
+		let (_, script, cast) = self.book(folder, story)?;
+		let timeline = publish::estimated_timeline(&script, &cast, &self.root.join("out"))?;
+		let boards = crate::press::storyboard::boards(
+			&script,
+			&timeline,
+			&cast,
+			shape == VideoShape::Portrait,
+		)?;
+
+		boards
+			.into_iter()
+			.enumerate()
+			.map(|(page, board)| {
+				Ok(Image {
+					label: format!("{}: storyboard, page {}", script.meta.title, page + 1),
+					png: raster::png(&board)?,
+				})
+			})
+			.collect()
+	}
+
+	/// Frames from a story's video at the sampled moments, tiled into one labelled image and
+	/// drawn straight from the frame renderer, so no video is encoded and no voice recorded
+	/// (timings are estimated offline). At most 12 frames.
+	pub fn video_frames(
+		&self,
+		folder: &str,
+		story: &str,
+		sample: &Frames,
+		shape: VideoShape,
+	) -> Result<Image> {
+		let (_, script, cast) = self.book(folder, story)?;
+		let timeline = publish::estimated_timeline(&script, &cast, &self.root.join("out"))?;
+		let times = sample.times(timeline.duration)?;
+
+		let format = match shape {
+			VideoShape::Landscape => Format::Landscape,
+			VideoShape::Portrait => Format::Portrait,
+		};
+		let (full_w, full_h) = format.size(false);
+		let renderer =
+			crate::video::frames::Renderer::new(&timeline, &script, format, full_w / 2, full_h / 2);
+
+		let frames: Vec<(String, Pixmap)> = times
+			.iter()
+			.map(|&time| {
+				let label = match timeline.shot_at(time).kind {
+					crate::video::timeline::ShotKind::Title => "title card".to_owned(),
+					crate::video::timeline::ShotKind::Page(page) => {
+						format!("{time:.1}s · page {}", page + 1)
+					}
+					crate::video::timeline::ShotKind::End => format!("{time:.1}s · the end"),
+				};
+
+				Ok((label, renderer.render(time, 0)?))
+			})
+			.collect::<Result<_>>()?;
+
+		Ok(Image {
+			label: format!(
+				"{}: {} frames of the {} video ({:.0}s, estimated timings)",
+				script.meta.title,
+				frames.len(),
+				if shape == VideoShape::Portrait {
+					"portrait"
+				} else {
+					"landscape"
+				},
+				timeline.duration
+			),
+			png: raster::png(&tile_frames(&frames)?)?,
+		})
 	}
 
 	/// Paths as the studio's root sees them.
@@ -1117,6 +1375,53 @@ impl Studio {
 			label: format!("{name}: {}", setting.about()),
 			png: raster::png(&pixmap)?,
 		})
+	}
+
+	/// The light presets, with a sentence on each.
+	pub fn lights() -> Vec<LightLine> {
+		Preset::ALL
+			.iter()
+			.zip(LIGHTS)
+			.map(|(preset, about)| {
+				LightLine {
+					name: preset.name().to_owned(),
+					about,
+				}
+			})
+			.collect()
+	}
+
+	/// The camera vocabulary, with a sentence on each.
+	pub fn shots() -> ShotsReport {
+		let line = |name: &str, about: &'static str| {
+			ShotLine {
+				name: name.to_owned(),
+				about,
+			}
+		};
+
+		ShotsReport {
+			sizes: ShotSize::ALL
+				.iter()
+				.zip(SHOT_SIZES)
+				.map(|(size, about)| line(size, about))
+				.collect(),
+			moves: Travel::MOVES
+				.iter()
+				.zip(SHOT_MOVES)
+				.map(|(r#move, about)| line(r#move, about))
+				.collect(),
+			arrivals: [Travel::Cut, Travel::Glide]
+				.iter()
+				.zip(SHOT_ARRIVALS)
+				.map(|(travel, about)| line(travel.name(), about))
+				.collect(),
+			transitions: Transition::ALL
+				.iter()
+				.zip(SHOT_TRANSITIONS)
+				.map(|(transition, about)| line(transition, about))
+				.collect(),
+		}
 	}
 
 	/// The built-in styles, with a sentence on each.
@@ -1503,6 +1808,58 @@ fn fit_width(pixmap: &Pixmap, px: u32) -> Pixmap {
 	out
 }
 
+/// Frames tiled onto one board, four across, each with its moment written underneath.
+fn tile_frames(frames: &[(String, Pixmap)]) -> Result<Pixmap> {
+	const COLUMNS: u32 = 4;
+	const GAP: u32 = 16;
+	const LABEL: u32 = 46;
+
+	let sample = frames
+		.first()
+		.map_or((1, 1), |(_, frame)| (frame.width(), frame.height()));
+	let cell_w = sample.0 + GAP;
+	let cell_h = sample.1 + LABEL + GAP;
+	let columns = COLUMNS.min(frames.len() as u32).max(1);
+	let rows = (frames.len() as u32).div_ceil(columns);
+	let mut board = Pixmap::new(GAP + columns * cell_w, GAP + rows * cell_h)
+		.context("too many frames to tile")?;
+	board.fill(resvg::tiny_skia::Color::from_rgba8(0x2a, 0x22, 0x38, 0xff));
+
+	for (slot, (label, frame)) in frames.iter().enumerate() {
+		let column = slot as u32 % columns;
+		let row = slot as u32 / columns;
+		let x = (GAP + column * cell_w) as i32;
+		let y = (GAP + row * cell_h) as i32;
+
+		let stamp = format!(
+			r##"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{LABEL}">
+				<text x="6" y="30" font-family="{BODY_FAMILY}" font-size="26" fill="#f4ede1">{}</text>
+			</svg>"##,
+			sample.0,
+			crate::art::escape(label),
+		);
+
+		board.draw_pixmap(
+			x,
+			y,
+			frame.as_ref(),
+			&PixmapPaint::default(),
+			Transform::default(),
+			None,
+		);
+		board.draw_pixmap(
+			x,
+			y + sample.1 as i32,
+			raster::render(&stamp)?.as_ref(),
+			&PixmapPaint::default(),
+			Transform::default(),
+			None,
+		);
+	}
+
+	Ok(board)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1710,6 +2067,101 @@ mod tests {
 			.unwrap();
 		assert!(audition.wav.starts_with(b"RIFF"));
 		assert!(audition.seconds > 0.3);
+	}
+
+	#[test]
+	fn every_light_and_shot_has_a_sentence() {
+		let lights = Studio::lights();
+		assert_eq!(lights.len(), Preset::ALL.len());
+
+		for preset in Preset::ALL {
+			assert!(
+				lights.iter().any(|light| light.name == preset.name()),
+				"{} has no sentence",
+				preset.name()
+			);
+		}
+
+		let shots = Studio::shots();
+		assert_eq!(shots.sizes.len(), ShotSize::ALL.len());
+		assert_eq!(shots.moves.len(), Travel::MOVES.len());
+		assert_eq!(shots.transitions.len(), Transition::ALL.len());
+
+		for (name, list) in [
+			("wide", &shots.sizes),
+			("extreme-close", &shots.sizes),
+			("push", &shots.moves),
+			("track", &shots.moves),
+			("cut", &shots.arrivals),
+			("ease", &shots.arrivals),
+			("iris", &shots.transitions),
+		] {
+			assert!(
+				list.iter().any(|line| line.name == name),
+				"{name} has no sentence"
+			);
+		}
+	}
+
+	#[test]
+	fn a_book_can_be_seen_without_rendering_a_video() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		studio
+			.write_story(
+				"nibbleton",
+				"nell-nibbles",
+				"+++\ntitle = \"Nell Nibbles\"\nauthor = \"A\"\nstar = \"nell\"\n+++\n# \
+				 park\n@nell x=0.5 happy wave talk\nNell waved hello.\n",
+			)
+			.unwrap();
+
+		let boards = studio
+			.storyboard_images("nibbleton", "nell-nibbles", VideoShape::Landscape)
+			.unwrap();
+		assert_eq!(boards.len(), 1, "one board page");
+		assert!(boards[0].png.starts_with(b"\x89PNG"));
+		assert!(boards[0].label.contains("storyboard"));
+
+		let frames = studio
+			.video_frames(
+				"nibbleton",
+				"nell-nibbles",
+				&Frames::Times(vec![0.0, 2.0]),
+				VideoShape::Portrait,
+			)
+			.unwrap();
+		assert!(frames.png.starts_with(b"\x89PNG"));
+		assert!(frames.label.contains("2 frames"));
+
+		// Sampling past the end, or too finely, says what to do instead.
+		let error = format!(
+			"{:#}",
+			studio
+				.video_frames(
+					"nibbleton",
+					"nell-nibbles",
+					&Frames::Times(vec![999.0]),
+					VideoShape::Portrait,
+				)
+				.unwrap_err()
+		);
+		assert!(error.contains("outside the video"), "{error}");
+
+		let error = format!(
+			"{:#}",
+			studio
+				.video_frames(
+					"nibbleton",
+					"nell-nibbles",
+					&Frames::Every(0.1),
+					VideoShape::Portrait,
+				)
+				.unwrap_err()
+		);
+		assert!(error.contains("too many"), "{error}");
 	}
 
 	#[test]

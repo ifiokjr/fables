@@ -160,11 +160,7 @@ pub fn video(
 /// framing. Never records a voice — a line without a cached take is measured from its word
 /// count, so the board renders offline in a second or two.
 pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<Vec<PathBuf>> {
-	let cache = out.join(&story.slug).join("cache").join("voice");
-	let rehearsals = stage::rehearse(story, cast)?;
-	let timeline = crate::video::timeline::build(story, cast, &rehearsals, |line| {
-		Ok(offline_take(line, &cache))
-	})?;
+	let timeline = estimated_timeline(story, cast, out)?;
 
 	press::storyboard::write(
 		story,
@@ -173,6 +169,30 @@ pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Res
 		portrait,
 		&book_dir(out, story).join("storyboard"),
 	)
+}
+
+/// The timeline with estimated durations: a cached take when there is one, else the line's
+/// words read at about 2.6 a second, so boards, sampled frames and reviews run offline
+/// without a microphone or ffmpeg.
+pub fn estimated_timeline(
+	story: &Story,
+	cast: &Cast,
+	out: &Path,
+) -> Result<crate::video::timeline::Timeline> {
+	let cache = out.join(&story.slug).join("cache").join("voice");
+	let rehearsals = stage::rehearse(story, cast)?;
+	crate::video::timeline::build(story, cast, &rehearsals, |line| {
+		Ok(offline_take(line, &cache))
+	})
+}
+
+/// Critiques a rehearsed story: what a director would change, with line numbers (see
+/// [`review`](crate::review)). Advice, never a refusal; timings are estimated offline.
+pub fn review(story: &Story, cast: &Cast, out: &Path) -> Result<Vec<crate::review::Finding>> {
+	let rehearsals = stage::rehearse(story, cast)?;
+	let timeline = estimated_timeline(story, cast, out)?;
+
+	Ok(crate::review::review(story, &rehearsals, &timeline))
 }
 
 /// The length of a spoken line without a microphone: the cached take when there is one, else

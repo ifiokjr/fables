@@ -97,6 +97,37 @@ pub fn write(
 ) -> Result<Vec<PathBuf>> {
 	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
 
+	let stem = if portrait {
+		"storyboard-portrait"
+	} else {
+		"storyboard"
+	};
+
+	boards(story, timeline, cast, portrait)?
+		.iter()
+		.enumerate()
+		.map(|(page, board)| {
+			let name = if page == 0 {
+				format!("{stem}.png")
+			} else {
+				format!("{stem}-{}.png", page + 1)
+			};
+			let path = dir.join(name);
+			std::fs::write(&path, raster::png(board)?)
+				.with_context(|| format!("could not write {}", path.display()))?;
+			Ok(path)
+		})
+		.collect()
+}
+
+/// The board pages: every camera setup drawn at its midpoint and captioned, tiled 24 to a
+/// page, so the board can be written to files or served as images.
+pub fn boards(
+	story: &Story,
+	timeline: &Timeline,
+	cast: &Cast,
+	portrait: bool,
+) -> Result<Vec<Pixmap>> {
 	let (width, height) = if portrait { PORTRAIT } else { LANDSCAPE };
 	let panels = panels(story, timeline, cast, portrait)?;
 
@@ -109,53 +140,40 @@ pub fn write(
 	let cell_h = height + LABEL + GAP;
 	let board_w = GAP + COLUMNS * cell_w;
 	let board_h = GAP + ROWS * cell_h;
-	let mut paths = Vec::new();
 
-	for (page, chunk) in panels.chunks(ROWS as usize * COLUMNS as usize).enumerate() {
-		let mut board = Pixmap::new(board_w, board_h).context("storyboard page too large")?;
-		board.fill(resvg::tiny_skia::Color::from_rgba8(0x2a, 0x22, 0x38, 0xff));
+	panels
+		.chunks(ROWS as usize * COLUMNS as usize)
+		.map(|chunk| {
+			let mut board = Pixmap::new(board_w, board_h).context("storyboard page too large")?;
+			board.fill(resvg::tiny_skia::Color::from_rgba8(0x2a, 0x22, 0x38, 0xff));
 
-		for (slot, panel) in chunk.iter().enumerate() {
-			let column = slot as u32 % COLUMNS;
-			let row = slot as u32 / COLUMNS;
-			let x = (GAP + column * cell_w) as i32;
-			let y = (GAP + row * cell_h) as i32;
+			for (slot, panel) in chunk.iter().enumerate() {
+				let column = slot as u32 % COLUMNS;
+				let row = slot as u32 / COLUMNS;
+				let x = (GAP + column * cell_w) as i32;
+				let y = (GAP + row * cell_h) as i32;
 
-			board.draw_pixmap(
-				x,
-				y,
-				panel.frame.as_ref(),
-				&PixmapPaint::default(),
-				Transform::default(),
-				None,
-			);
-			board.draw_pixmap(
-				x,
-				y + height as i32,
-				label_stamp(&panel.label, &panel.line, width, LABEL)?.as_ref(),
-				&PixmapPaint::default(),
-				Transform::default(),
-				None,
-			);
-		}
+				board.draw_pixmap(
+					x,
+					y,
+					panel.frame.as_ref(),
+					&PixmapPaint::default(),
+					Transform::default(),
+					None,
+				);
+				board.draw_pixmap(
+					x,
+					y + height as i32,
+					label_stamp(&panel.label, &panel.line, width, LABEL)?.as_ref(),
+					&PixmapPaint::default(),
+					Transform::default(),
+					None,
+				);
+			}
 
-		let stem = if portrait {
-			"storyboard-portrait"
-		} else {
-			"storyboard"
-		};
-		let name = if page == 0 {
-			format!("{stem}.png")
-		} else {
-			format!("{stem}-{}.png", page + 1)
-		};
-		let path = dir.join(name);
-		std::fs::write(&path, raster::png(&board)?)
-			.with_context(|| format!("could not write {}", path.display()))?;
-		paths.push(path);
-	}
-
-	Ok(paths)
+			Ok(board)
+		})
+		.collect()
 }
 
 /// The strip under a panel: the page, the shot, who it frames, how long it holds, and how the

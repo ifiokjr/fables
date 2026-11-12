@@ -25,6 +25,7 @@ use serde::Serialize;
 
 use crate::studio::Audition;
 use crate::studio::CharacterBrief;
+use crate::studio::Frames;
 use crate::studio::Image;
 use crate::studio::Output;
 use crate::studio::PartData;
@@ -35,6 +36,32 @@ use crate::studio::Studio;
 use crate::studio::VideoShape;
 use crate::studio::VoiceChoice;
 use crate::studio::WorldBrief;
+
+/// The director's guide ([`docs/directing.md`](../../docs/directing.md)), compiled in so the
+/// tool and the file can never disagree.
+const GUIDE: &str = include_str!("../docs/directing.md");
+
+/// The guide's topics, which are its `##` headings.
+const GUIDE_TOPICS: [&str; 8] = [
+	"overview", "story", "staging", "camera", "light", "acting", "mixing", "workflow",
+];
+
+/// The guide's `##` sections, as (heading, body), in file order.
+fn guide_sections() -> impl Iterator<Item = (&'static str, &'static str)> {
+	GUIDE.split("\n## ").skip(1).map(|section| {
+		match section.split_once('\n') {
+			Some((heading, body)) => (heading.trim(), body.trim()),
+			None => (section.trim(), ""),
+		}
+	})
+}
+
+/// One `##` section of the guide, by topic.
+fn guide_section(topic: &str) -> Option<&'static str> {
+	guide_sections()
+		.find(|(heading, _)| heading.eq_ignore_ascii_case(topic))
+		.map(|(_, body)| body)
+}
 
 /// What the server tells a model before it calls anything.
 const INSTRUCTIONS: &str = "\
@@ -55,13 +82,18 @@ Changes that would break a figure are refused with the part check's findings. A 
                             every character's model sheet before the character is used in a book.
 
 To make a book:
-1. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
-2. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
+1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
+                            mixing and workflow.
+2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
+3. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
                             pages that start `# setting`, with narration and `@actor` stage \
                             directions). It is checked against the cast and refused, with the \
                             line to fix, if it doesn't work. `story_read` reads one back, for \
                             example a world's existing books, to learn the format.
-3. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
+4. `story_review` critiques it the way a director would: findings with line numbers and \
+                            suggestions, never a refusal. `storyboard_render` and `video_frames` \
+                            let you see the shots without encoding a video.
+5. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
                             the ePub and KDP print files; `video_render` narrates and animates it.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -74,6 +106,13 @@ pub struct WorldParams {
 pub struct StyleParams {
 	/// The style's name, from `style_list`.
 	pub style: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GuideParams {
+	/// The topic: overview, story, staging, camera, light, acting, mixing or workflow. Leave
+	/// it out for the overview and the topic list.
+	pub topic: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -175,6 +214,29 @@ pub struct VideoParams {
 	/// Half size at 15 frames a second, for checking timing quickly.
 	#[serde(default)]
 	pub preview: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StoryboardParams {
+	pub world: String,
+	pub story: String,
+	/// `landscape` (16:9, the default) or `portrait` (9:16).
+	#[serde(default)]
+	pub shape: Option<VideoShape>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VideoFramesParams {
+	pub world: String,
+	pub story: String,
+	/// Seconds to look at, from the start of the video, e.g. [3.5, 12].
+	#[serde(default)]
+	pub times: Vec<f32>,
+	/// Look every n seconds instead of naming times. At most 12 frames come back.
+	pub every: Option<f32>,
+	/// `portrait` (9:16, the default) or `landscape` (16:9).
+	#[serde(default)]
+	pub shape: VideoShape,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -349,6 +411,35 @@ impl StudioServer {
 	)]
 	fn style_sheet(&self, Parameters(params): Parameters<StyleParams>) -> CallToolResult {
 		images(Studio::style_sheets(&params.style, crate::studio::SHEET_PX))
+	}
+
+	#[tool(
+		description = "The director's guide, by topic: overview, story, staging, camera, light, \
+		               acting, mixing or workflow. No topic returns the overview and the topic \
+		               list. Read it before directing a book or a cartoon."
+	)]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn guide(&self, Parameters(params): Parameters<GuideParams>) -> CallToolResult {
+		let Some(topic) = params.topic.as_deref() else {
+			let overview = guide_section("overview").unwrap_or_default();
+
+			return CallToolResult::success(vec![ContentBlock::text(format!(
+				"{overview}\n\nTopics: {}",
+				GUIDE_TOPICS.join(", ")
+			))]);
+		};
+
+		let Some(section) = guide_section(topic) else {
+			return failed(&anyhow::anyhow!(
+				"unknown topic `{topic}`; the topics are {}",
+				GUIDE_TOPICS.join(", ")
+			));
+		};
+
+		CallToolResult::success(vec![ContentBlock::text(format!("## {topic}\n\n{section}"))])
 	}
 
 	#[tool(
@@ -530,6 +621,15 @@ impl StudioServer {
 	}
 
 	#[tool(
+		description = "Critique a book the way a director would: findings with a severity (`fix` \
+		               or `consider`), the script line, an observation and a suggestion in script \
+		               vocabulary. Advice, never a refusal; run it before rendering video."
+	)]
+	fn story_review(&self, Parameters(params): Parameters<StoryParams>) -> CallToolResult {
+		json(self.studio.review_story(&params.world, &params.story))
+	}
+
+	#[tool(
 		description = "Make a book's outputs: proofs (every page, returned as a contact sheet \
 		               image), the ePub, and KDP print files. Returns the files written."
 	)]
@@ -576,6 +676,69 @@ impl StudioServer {
 			self.studio
 				.render_video(&params.world, &params.story, params.shape, params.preview),
 		)
+	}
+
+	#[tool(
+		description = "The storyboard as images: the video's camera plan as a comic strip, one \
+		               labelled panel per setup. Never records a voice or encodes a video, so it \
+		               runs offline in a second or two."
+	)]
+	fn storyboard_render(
+		&self,
+		Parameters(params): Parameters<StoryboardParams>,
+	) -> CallToolResult {
+		let shape = params.shape.unwrap_or(VideoShape::Landscape);
+
+		images(
+			self.studio
+				.storyboard_images(&params.world, &params.story, shape),
+		)
+	}
+
+	#[tool(
+		description = "Frames from a story's video at named times (`times`) or every n seconds \
+		               (`every`), as one tiled image. Rendered straight from the frame renderer \
+		               with estimated timings, so no voice is recorded and no video encoded. At \
+		               most 12 frames."
+	)]
+	fn video_frames(&self, Parameters(params): Parameters<VideoFramesParams>) -> CallToolResult {
+		let sample = match (params.every, params.times.is_empty()) {
+			(Some(every), _) => Frames::Every(every),
+			(None, false) => Frames::Times(params.times),
+			(None, true) => {
+				return failed(&anyhow::anyhow!(
+					"name moments to look at (`times`: seconds from the start) or an interval \
+					 (`every`: seconds between frames)"
+				));
+			}
+		};
+
+		images(
+			self.studio
+				.video_frames(&params.world, &params.story, &sample, params.shape)
+				.map(|image| vec![image]),
+		)
+	}
+
+	#[tool(description = "The light presets, with a sentence on what each feels like.")]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn light_list(&self) -> CallToolResult {
+		json(Ok(Studio::lights()))
+	}
+
+	#[tool(
+		description = "The camera vocabulary: shot sizes, moves, how a camera arrives (`cut`, \
+		               `ease`), and page transitions, with a sentence on what each says."
+	)]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn shot_list(&self) -> CallToolResult {
+		json(Ok(Studio::shots()))
 	}
 
 	#[tool(
@@ -640,6 +803,7 @@ mod tests {
 			"style_list",
 			"style_describe",
 			"style_sheet",
+			"guide",
 			"character_create",
 			"character_parts",
 			"character_set_parts",
@@ -651,9 +815,14 @@ mod tests {
 			"story_write",
 			"story_read",
 			"story_check",
+			"story_review",
 			"book_render",
 			"page_render",
 			"video_render",
+			"storyboard_render",
+			"video_frames",
+			"light_list",
+			"shot_list",
 			"setting_list",
 			"setting_create",
 			"setting_parts",
@@ -664,6 +833,51 @@ mod tests {
 				names.iter().any(|listed| listed == name),
 				"{name}: {names:?}"
 			);
+		}
+	}
+
+	#[test]
+	fn the_guide_serves_every_topic_and_only_the_topics() {
+		let sections: Vec<&str> = guide_sections().map(|(heading, _)| heading).collect();
+
+		for topic in GUIDE_TOPICS {
+			let lowercase = topic.to_ascii_lowercase();
+			assert!(
+				sections
+					.iter()
+					.any(|heading| heading.eq_ignore_ascii_case(&lowercase)),
+				"the guide has no {topic} section"
+			);
+			assert!(
+				guide_section(topic).is_some_and(|body| body.len() > 200),
+				"the {topic} section has something to say"
+			);
+		}
+
+		for heading in sections {
+			assert!(
+				GUIDE_TOPICS
+					.iter()
+					.any(|topic| heading.eq_ignore_ascii_case(topic)),
+				"the guide's `{heading}` section is not a topic"
+			);
+		}
+	}
+
+	#[test]
+	fn an_unknown_guide_topic_is_an_error_listing_the_topics() {
+		let server = StudioServer::new(Path::new("."));
+		let result = server.guide(Parameters(GuideParams {
+			topic: Some("lenses".into()),
+		}));
+
+		assert_eq!(result.is_error, Some(true));
+		match &result.content[0] {
+			ContentBlock::Text(text) => {
+				assert!(text.text.contains("staging"), "{}", text.text);
+				assert!(text.text.contains("workflow"), "{}", text.text);
+			}
+			other => panic!("the error comes back as text: {other:?}"),
 		}
 	}
 

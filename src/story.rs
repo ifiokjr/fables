@@ -70,6 +70,15 @@ pub struct Meta {
 	/// nearest `world.toml` above the script (see [`world`](crate::world)).
 	#[serde(default)]
 	pub world: Option<String>,
+	/// Characters invited from other worlds under the same root, as `world/id` (e.g.
+	/// `"kiteharbour/hana"`). A guest is directed by its id, or by `world.id` when its id
+	/// clashes with a local cast member. See [`world::World::cast_for`].
+	#[serde(default)]
+	pub guests: Vec<String>,
+	/// How guests are inked: with their own style's `[line]` and `[shade]` (the default), so
+	/// they keep looking like themselves, or with the host world's.
+	#[serde(default)]
+	pub guest_style: GuestStyle,
 	/// The light every page starts in, unless its heading names `light=` (`"golden"`). A
 	/// world's default applies unless the book names its own.
 	#[serde(default)]
@@ -88,6 +97,19 @@ pub struct Meta {
 
 fn default_language() -> String {
 	"en-GB".to_owned()
+}
+
+/// How a book's guests from other worlds are inked and shaded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GuestStyle {
+	/// Each guest is inked with its own style's `[line]` and `[shade]` dials, so a cartoon kid
+	/// and an anime kid can share a page looking like themselves.
+	#[default]
+	Own,
+	/// Guests are inked and shaded with the host world's `[line]` and `[shade]` dials; their
+	/// construction never changes.
+	Host,
 }
 
 /// What the front cover shows.
@@ -808,5 +830,32 @@ Hello.
 	fn slugs_are_file_safe() {
 		assert_eq!(slugify("Stinky McStinkbreath!"), "stinky-mcstinkbreath");
 		assert_eq!(slugify("  The  End  "), "the-end");
+	}
+
+	#[test]
+	fn guests_are_named_in_the_front_matter() {
+		let story = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nguests = [\"kiteharbour/hana\", \
+			 \"kerfuffle/stinky\"]\nguest-style = \"host\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		assert_eq!(
+			story.meta.guests,
+			vec!["kiteharbour/hana", "kerfuffle/stinky"]
+		);
+		assert_eq!(story.meta.guest_style, GuestStyle::Host);
+
+		let plain = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n").unwrap();
+		assert_eq!(plain.meta.guests, Vec::<String>::new());
+		assert_eq!(plain.meta.guest_style, GuestStyle::Own);
+
+		let error = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nguest-style = \"guests\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap_err();
+		assert!(
+			format!("{error:#}").contains("expected `own` or `host`"),
+			"{error:#}"
+		);
 	}
 }

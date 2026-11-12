@@ -210,6 +210,9 @@ pub struct Authored {
 	pub parts: Arc<Parts>,
 	/// The style the parts are drawn in: its finish, face rules and bodies.
 	pub style: Arc<StylePack>,
+	/// The style whose `[line]` and `[shade]` dials ink this figure when it is a guest drawn
+	/// in its host's finish; `None` inks it with its own style.
+	pub ink_style: Option<Arc<StylePack>>,
 }
 
 impl Authored {
@@ -238,7 +241,14 @@ impl Authored {
 			file: file.to_path_buf(),
 			parts: Arc::new(parts),
 			style: Arc::clone(style),
+			ink_style: None,
 		})
+	}
+
+	/// The style this figure is inked with: its host's when it is a guest drawn in the host's
+	/// finish, otherwise its own.
+	pub fn inker(&self) -> &StylePack {
+		self.ink_style.as_deref().unwrap_or(&self.style)
 	}
 
 	/// A part at turn `t` (0 front-on, 1 three-quarters). Loading checked that every part a
@@ -306,7 +316,7 @@ fn blush(skin: Color, warm: Color) -> Color {
 
 impl Inks {
 	fn of(look: &Look, style: &StylePack, teeth: Teeth) -> Inks {
-		let inks = Inks {
+		Inks {
 			finish: style.finish,
 			face: style.face,
 			features: style.features,
@@ -331,12 +341,6 @@ impl Inks {
 				Teeth::Clean | Teeth::Sparkly => style.inks.clean_teeth,
 				Teeth::Grotty => palette::GROT,
 			},
-		};
-
-		if style.shade.fill == Fill::Palette {
-			inks.snapped(|color| style.shade.palette.nearest(color))
-		} else {
-			inks
 		}
 	}
 
@@ -1017,14 +1021,19 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	let body = puppet.style.body(look.build);
 	let posed = Posed::of(state, &puppet.style, look.build);
 	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
-	let inks = Inks::of(look, &puppet.style, state.teeth);
+	// How this figure is inked: its own style, or its host's when it is a guest drawn in the
+	// host's finish. Only the line and shade dials and the fill's palette snapping follow the
+	// inker; the construction is always its own.
+	let inker = puppet.inker();
+	let mut inks = Inks::of(look, &puppet.style, state.teeth);
+
+	if inker.shade.fill == Fill::Palette {
+		inks = inks.snapped(|color| inker.shade.palette.nearest(color));
+	}
+
 	let t = solved.t;
 	// The style's line and shade dials, for this figure only.
-	let saved = svg.use_brush(Brush::new(
-		puppet.style.line,
-		&puppet.style.shade,
-		inks.line,
-	));
+	let saved = svg.use_brush(Brush::new(inker.line, &inker.shade, inks.line));
 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 

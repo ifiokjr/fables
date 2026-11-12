@@ -62,6 +62,13 @@ enum Command {
 	},
 	/// Check a script for mistakes without rendering anything.
 	Check { story: PathBuf },
+	/// Critique a script the way a director would: findings with line numbers and suggestions,
+	/// never a refusal.
+	Review {
+		story: PathBuf,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+	},
 	/// Render every page as a PNG plus a contact sheet.
 	Proofs {
 		story: PathBuf,
@@ -352,6 +359,12 @@ fn run(cli: Cli) -> Result<()> {
 			})
 		}
 		Command::Check { story } => each_style(&story, &choices, flag, check),
+		Command::Review { story, out } => {
+			each(&story, |path| {
+				let (story, cast) = load(path, None, flag)?;
+				review(&story, &cast, &out)
+			})
+		}
 		Command::Proofs { story, out } => {
 			each_style(&story, &choices, flag, |story, cast| {
 				proofs(story, cast, &out)
@@ -579,7 +592,7 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 
 	let world = World::for_story(&story, world)?;
 	world.furnish(&mut story)?;
-	let cast = world.cast()?;
+	let cast = world.cast_for(&story)?;
 
 	Ok((story, cast))
 }
@@ -589,6 +602,41 @@ fn check(story: &Story, cast: &Cast) -> Result<()> {
 	println!(
 		"✓ {} — {} script pages, {} book pages, {} words, {} cast members",
 		report.title, report.script_pages, report.book_pages, report.words, report.cast_members
+	);
+
+	Ok(())
+}
+
+/// Prints a review's findings, fixes first, and the counts.
+fn review(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
+	let findings = publish::review(story, cast, out)?;
+	let fixes = findings
+		.iter()
+		.filter(|finding| finding.severity == fables::review::Severity::Fix)
+		.count();
+	let considers = findings.len() - fixes;
+
+	for finding in &findings {
+		let severity = match finding.severity {
+			fables::review::Severity::Fix => "fix     ",
+			fables::review::Severity::Consider => "consider",
+		};
+
+		println!(
+			"{severity} line {}: {} {}",
+			finding.line, finding.observation, finding.suggestion
+		);
+	}
+
+	if findings.is_empty() {
+		println!("Nothing a director would change.");
+	}
+
+	println!(
+		"— {} ({} pages, {} words): {fixes} fix, {considers} consider.",
+		story.meta.title,
+		story.pages.len(),
+		fables::review::story_words(story)
 	);
 
 	Ok(())

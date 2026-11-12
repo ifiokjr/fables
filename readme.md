@@ -139,7 +139,8 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 
 | Tool | What it does |
 | --- | --- |
-| `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences and a style, or read one back with its cast and books. |
+| `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, workflow. |
+| `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences and a style, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
 | `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space and the drawing rules; the kit as an image. |
 | `character_create` | A new cast member from who they are and their colours, drawn from the style's template. |
 | `character_parts` | A character's parts as path data, their own or the kit's. |
@@ -148,6 +149,9 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `voice_providers`, `voice_list` | Which voice providers can speak now, and the offline macOS voices. |
 | `voice_cast`, `voice_audition` | Give a character their voice, and hear a line in it, delivered in a mood, as audio. |
 | `story_write`, `story_read`, `story_check` | Write a book's script into a world, checked against the cast (a script that doesn't rehearse is refused, with the line to fix), or read and check one. |
+| `story_review` | A director's critique of a book: findings with a severity, the script line and a suggestion. Advice, never a refusal. |
+| `storyboard_render`, `video_frames` | The storyboard as an image, one labelled panel per camera setup; and sampled frames of the video as one tiled image, rendered offline with estimated timings. |
+| `light_list`, `shot_list` | The light presets and the camera vocabulary (shot sizes, moves, arrivals, transitions), with a sentence on each. |
 | `page_render`, `book_render` | One page as an image, or the proofs (with a contact sheet image), ePub and KDP print files under `<root>/out/`. |
 | `video_render` | The narrated, lip-synced MP4, 9:16 or 16:9, or a quick preview. |
 | `setting_list`, `setting_create` | A world's settings, built-in and its own; start one, blank or from a setting to repaint. |
@@ -161,6 +165,7 @@ Worlds and characters are named by slugs, never paths, so the server only reads 
 | --- | --- |
 | `fables new "<Title>" --star <id>` | A new book in the world's `stories/<title>/story.md`, laid out from its `recipe.md` with the star already staged. |
 | `fables check <story>` | Validates the script and reports page and word counts. Errors give line numbers and list valid options. |
+| `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, mood arcs, pacing, light and shots. Advice, never a refusal; ends with a count of findings. |
 | `fables proofs <story>` | `out/<book>/<style>/proofs/`: one PNG per page plus `contact-sheet.png`, in about a second. |
 | `fables ebook <story>` | `out/<book>/<style>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
 | `fables print <story>` | `out/<book>/<style>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
@@ -283,6 +288,17 @@ Teeth, stink and mint **carry over from page to page** until changed, so grotty 
 - `@pause 0.4` adds a beat of silence.
 - `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`.
 - Fainting bonks, hops boing and entrances pop automatically.
+
+### Guests
+
+A book can invite characters from other worlds under the same root, and each keeps looking like themselves:
+
+```text
+guests = ["kiteharbour/hana", "kerfuffle/stinky"]   # front matter
+guest-style = "host"                                 # optional
+```
+
+A guest is directed by its id (`@hana`), or by `world.id` (`@kiteharbour.hana`) when its id clashes with a local cast member — then the bare id means the local one. A guest keeps their puppet parts, their own style's construction (bodies, features, eyes, kit) and their voice, and by default their own style's line and shading as well, so a cartoon kid and an anime kid can share a page looking like themselves. `guest-style = "host"` inks and shades guests with the host world's `[line]` and `[shade]` dials instead; their construction never changes. Everyone on a page moves with the host story's `[motion]`, and guests stand at the height their own world gives them. A missing world or character is an error naming the ones that do exist, and the "meet the folk" page still lists only the host world's cast.
 
 ### New characters
 
@@ -425,6 +441,7 @@ src/
   studio.rs       worlds and characters as operations: what the CLI and MCP server share
   mcp.rs          `fables mcp`: the studio's tools over the Model Context Protocol
   publish.rs      a book's outputs: the check, proofs, ePub, print files and videos
+  review.rs       the critique: findings from a rehearsed story and its planned video
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, the director's camera setups, frame renderer, soundtrack, ffmpeg

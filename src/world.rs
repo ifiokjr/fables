@@ -29,12 +29,19 @@ use crate::art::pack;
 use crate::art::pack::StylePack;
 use crate::art::settings::Library;
 use crate::cast::Cast;
+use crate::cast::Kind;
 use crate::story::Drawing;
+use crate::story::GuestStyle;
 use crate::story::Story;
 use crate::video::voice::Voice;
 
 /// The file that marks a folder as a world.
 pub const FILE: &str = "world.toml";
+
+/// A world's folder name (the last component of its path).
+fn folder_of(dir: &Path) -> &str {
+	dir.file_name().and_then(|name| name.to_str()).unwrap_or("")
+}
 
 /// A loaded world.
 #[derive(Clone, Debug)]
@@ -224,6 +231,92 @@ impl World {
 		Cast::load(&self.cast_file(), &self.style()?)
 	}
 
+	/// The other worlds under the same root as this one (the ones a script's guests can come
+	/// from).
+	pub fn neighbours(&self) -> Result<Vec<World>> {
+		let Some(root) = self.dir.parent() else {
+			return Ok(Vec::new());
+		};
+
+		let mut found: Vec<PathBuf> = std::fs::read_dir(root)
+			.into_iter()
+			.flatten()
+			.filter_map(|entry| Some(entry.ok()?.path()))
+			.filter(|path| path.join(FILE).is_file() && path != &self.dir)
+			.collect();
+		found.sort();
+
+		found.iter().map(|path| World::load(path)).collect()
+	}
+
+	/// The cast a story rehearses with: this world's folk plus the guests its front matter
+	/// invites from the worlds beside it (`guests = ["kiteharbour/hana"]`). A guest is loaded
+	/// with their own world's style, so their construction, line and shading and their voice
+	/// travel with them; `guest-style = "host"` inks them with this world's `[line]` and
+	/// `[shade]` instead.
+	pub fn cast_for(&self, story: &Story) -> Result<Cast> {
+		let mut cast = self.cast()?;
+
+		if story.meta.guests.is_empty() {
+			return Ok(cast);
+		}
+
+		let neighbours = self.neighbours()?;
+		let folders: Vec<&str> = neighbours
+			.iter()
+			.map(|world| folder_of(&world.dir))
+			.collect();
+		let host_style = self.style()?;
+
+		for invited in &story.meta.guests {
+			let Some((folder, id)) = invited.split_once('/') else {
+				bail!("guest `{invited}` should be `world/character`, e.g. `kiteharbour/hana`");
+			};
+
+			let Some(index) = folders.iter().position(|name| *name == folder) else {
+				let beside = if folders.is_empty() {
+					format!(
+						"there are no other worlds under {}",
+						self.dir.parent().unwrap_or(Path::new("")).display()
+					)
+				} else {
+					format!("the worlds beside {} are {}", self.name, folders.join(", "))
+				};
+
+				bail!("there is no world `{folder}` to invite a guest from; {beside}");
+			};
+
+			let guest_world = &neighbours[index];
+			let guest_cast = guest_world
+				.cast()
+				.with_context(|| format!("inviting a guest from {}", guest_world.name))?;
+
+			let Some(member) = guest_cast.member(id) else {
+				let known: Vec<&str> = guest_cast.members.keys().map(String::as_str).collect();
+
+				bail!(
+					"{} has no `{id}` to invite; its cast is: {}",
+					guest_world.name,
+					known.join(", ")
+				);
+			};
+
+			let mut member = member.clone();
+
+			// The host's finish inks the guest's own construction, when the script asks for it.
+			if story.meta.guest_style == GuestStyle::Host
+				&& let Kind::Figure(look) = &mut member.kind
+				&& let Some(puppet) = &mut look.puppet
+			{
+				puppet.ink_style = Some(Arc::clone(&host_style));
+			}
+
+			cast.add_guest(folder, member);
+		}
+
+		Ok(cast)
+	}
+
 	/// Where the world's books live.
 	pub fn stories(&self) -> PathBuf {
 		self.dir.join("stories")
@@ -360,6 +453,155 @@ mod tests {
 		assert!(
 			error.contains("sunset") && error.contains("candle"),
 			"{error}"
+		);
+	}
+
+	/// Two worlds beside each other: `home` (cartoon) with a local `mo` and `tia`, and `away`
+	/// (anime) with a local `mo` of its own and a `hana`.
+	fn two_worlds(dir: &Path) -> World {
+		let worlds = dir.join("worlds");
+		let home = world(&worlds, "home", "");
+		std::fs::write(
+			home.join("cast.toml"),
+			"[mo]\nname = \"Local Mo\"\n[tia]\nname = \"Local Tia\"\n",
+		)
+		.unwrap();
+
+		let away = world(&worlds, "away", "style = \"anime\"\n");
+		std::fs::write(
+			away.join("cast.toml"),
+			"[mo]\nname = \"Away Mo\"\n[hana]\nname = \"Away Hana\"\n",
+		)
+		.unwrap();
+
+		World::load(&home).unwrap()
+	}
+
+	fn story_with_guests(front: &str) -> Story {
+		crate::story::parse(&format!(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n{front}+++\n# plain\nHi.\n"
+		))
+		.unwrap()
+	}
+
+	#[test]
+	fn a_guest_is_found_keeps_their_id_and_shares_the_stage_with_a_clashing_local() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = two_worlds(dir.path());
+
+		let cast = home
+			.cast_for(&story_with_guests("guests = [\"away/hana\"]\n"))
+			.unwrap();
+		assert_eq!(cast.guests.len(), 1);
+		assert!(
+			cast.member("hana").is_some_and(|m| m.name == "Away Hana"),
+			"no clash: the bare id finds the guest"
+		);
+		assert_eq!(
+			cast.member("mo").map(|m| m.name.as_str()),
+			Some("Local Mo"),
+			"the host's cast is untouched"
+		);
+
+		let clash = home
+			.cast_for(&story_with_guests("guests = [\"away/mo\"]\n"))
+			.unwrap();
+		assert!(
+			clash.member("mo").is_some_and(|m| m.name == "Local Mo"),
+			"on a clash the bare id means the local one"
+		);
+		assert!(
+			clash.member("away.mo").is_some_and(|m| m.name == "Away Mo"),
+			"world.id finds the guest"
+		);
+	}
+
+	#[test]
+	fn a_missing_world_or_character_is_an_error_naming_what_exists() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = two_worlds(dir.path());
+
+		let error = format!(
+			"{:#}",
+			home.cast_for(&story_with_guests("guests = [\"nowhere/pip\"]\n"))
+				.unwrap_err()
+		);
+		assert!(
+			error.contains("no world `nowhere`") && error.contains("away"),
+			"{error}"
+		);
+
+		let error = format!(
+			"{:#}",
+			home.cast_for(&story_with_guests("guests = [\"away/pip\"]\n"))
+				.unwrap_err()
+		);
+		assert!(
+			error.contains("has no `pip`") && error.contains("hana, mo"),
+			"{error}"
+		);
+
+		let error = format!(
+			"{:#}",
+			home.cast_for(&story_with_guests("guests = [\"away.hana\"]\n"))
+				.unwrap_err()
+		);
+		assert!(
+			error.contains("world/character") && error.contains("away.hana"),
+			"{error}"
+		);
+	}
+
+	#[test]
+	fn a_guest_carries_their_own_worlds_style_into_a_host_book() {
+		let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+		let host = World::load(&root.join("worlds/mumbleton")).unwrap();
+		let cast = host
+			.cast_for(&story_with_guests("guests = [\"kiteharbour/hana\"]\n"))
+			.unwrap();
+
+		let Kind::Figure(look) = cast.resolve("hana").unwrap() else {
+			panic!("hana is a person");
+		};
+		let puppet = look.puppet.as_ref().expect("hana has a puppet");
+		assert_eq!(puppet.style.name, "anime", "her construction is her own");
+		assert!(
+			puppet.ink_style.is_none(),
+			"by default she is inked with her own style too"
+		);
+		assert_eq!(puppet.inker().name, "anime");
+
+		let Kind::Figure(look) = cast.resolve("mo").unwrap() else {
+			panic!("mo is a person");
+		};
+		assert_eq!(
+			look.puppet.as_ref().expect("mo has a puppet").style.name,
+			"cartoon"
+		);
+	}
+
+	#[test]
+	fn guest_style_host_inks_the_guest_with_the_host_worlds_dials() {
+		let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+		let host = World::load(&root.join("worlds/mumbleton")).unwrap();
+		let cast = host
+			.cast_for(&story_with_guests(
+				"guests = [\"kiteharbour/hana\"]\nguest-style = \"host\"\n",
+			))
+			.unwrap();
+
+		let Kind::Figure(look) = cast.resolve("hana").unwrap() else {
+			panic!("hana is a person");
+		};
+		let puppet = look.puppet.as_ref().expect("hana has a puppet");
+		assert_eq!(
+			puppet.style.name, "anime",
+			"her construction is still her own"
+		);
+		assert_eq!(
+			puppet.inker().name,
+			"cartoon",
+			"but she is inked with the host's line and shade"
 		);
 	}
 }
