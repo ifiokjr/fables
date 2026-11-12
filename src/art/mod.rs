@@ -490,6 +490,9 @@ pub struct Svg {
 	measuring: bool,
 	/// Bounds measurements under way, innermost last (the head inside the puppet).
 	measure: Vec<Measured>,
+	/// Clip paths under way: the box of each, and the group depth it was opened at, so
+	/// what a clipped fill adds to the bounds is what will actually show.
+	clips: Vec<(Measured, usize)>,
 }
 
 /// An SVG group's transform: how a point in the group's own units maps into the units
@@ -690,6 +693,7 @@ impl Svg {
 			frames: Vec::new(),
 			measuring: false,
 			measure: Vec::new(),
+			clips: Vec::new(),
 		}
 	}
 
@@ -784,7 +788,7 @@ impl Svg {
 
 	/// Remembers a path about to be drawn. `shift` moves it in the current group's units (a
 	/// fill's registration offset), `bleed` widens the box by the width a stroke adds
-	/// around its path.
+	/// around its path. Whatever a clip path will cut away is not remembered.
 	fn note(&mut self, path: &Path, shift: Pt, bleed: f32) {
 		if self.measure.is_empty() {
 			return;
@@ -801,10 +805,24 @@ impl Svg {
 		let swell = moved(pt(bleed, bleed)).len();
 		let a = frame.apply(pt(left, top) + shift);
 		let b = frame.apply(pt(right, bottom) + shift);
-		let (min, max) = (
-			pt(a.x.min(b.x) - swell, a.y.min(b.y) - swell),
-			pt(a.x.max(b.x) + swell, a.y.max(b.y) + swell),
+		let (mut min, mut max) = (
+			pt(a.x.min(b.x), a.y.min(b.y)),
+			pt(a.x.max(b.x), a.y.max(b.y)),
 		);
+
+		for (clip, _) in &self.clips {
+			min.x = min.x.max(clip.left);
+			min.y = min.y.max(clip.top);
+			max.x = max.x.min(clip.right);
+			max.y = max.y.min(clip.bottom);
+		}
+
+		if min.x > max.x || min.y > max.y {
+			return;
+		}
+
+		let min = pt(min.x - swell, min.y - swell);
+		let max = pt(max.x + swell, max.y + swell);
 
 		for measured in &mut self.measure {
 			measured.note(min);
@@ -849,6 +867,10 @@ impl Svg {
 	pub fn end(&mut self) {
 		self.body.push_str("</g>");
 		self.frames.pop();
+		// Clips opened inside the group just closed stop bounding what is drawn.
+		let depth = self.frames.len();
+		self.clips
+			.truncate(self.clips.iter().position(|(_, at)| *at > depth).unwrap_or(usize::MAX));
 	}
 
 	pub fn fill(&mut self, path: &Path, color: Color) {
@@ -939,6 +961,20 @@ impl Svg {
 		);
 		let _ = write!(self.body, r#"<g clip-path="url(#{id})">"#);
 		self.frames.push(self.frame());
+
+		if self.measuring {
+			let mut clip = Measured::OPEN;
+
+			if let Some((left, top, right, bottom)) = path_bounds(path.as_str()) {
+				let frame = self.frame();
+
+				for point in [pt(left, top), pt(right, bottom)] {
+					clip.note(frame.apply(point));
+				}
+			}
+
+			self.clips.push((clip, self.frames.len()));
+		}
 	}
 
 	/// A fill painted with a gradient or pattern from the document's defs, by id.
@@ -1122,11 +1158,6 @@ impl Svg {
 		let shade = self.graded(shade);
 		self.cast_shadow(path);
 
-		let clip = self.next_id("shade");
-		self.define(&format!(
-			r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-			path.as_str()
-		));
 		let offset = self.registration;
 		let opacity = self.style.fill_opacity;
 		self.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
@@ -1155,7 +1186,7 @@ impl Svg {
 					shade
 				};
 				self.fill_alpha(path, shade, opacity);
-				self.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+				self.begin_clip(path);
 				self.fill_alpha(
 					&Path::circle(light, reach),
 					base,
@@ -1175,7 +1206,7 @@ impl Svg {
 					self.fill_alpha(&shine, palette::WHITE, 0.55);
 				}
 
-				self.raw("</g>");
+				self.end();
 			}
 		}
 

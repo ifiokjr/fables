@@ -1028,13 +1028,8 @@ fn draw_shoe(svg: &mut Svg, look: &Look, frame: &Frame, c: Pt, side: f32, angle:
 		0.04,
 		svg.seed(look.seed + side as u64 + 11),
 	);
-	let clip = svg.next_id("shoe");
-	svg.define(&format!(
-		r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-		shoe.as_str()
-	));
 	svg.fill(&shoe, look.shoes);
-	svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+	svg.begin_clip(&shoe);
 	svg.fill(
 		&Path::rect(c.x - 80.0, c.y + frame.leg_width * 0.32, 160.0, 40.0),
 		look.shoes.lighten(0.45),
@@ -1046,7 +1041,7 @@ fn draw_shoe(svg: &mut Svg, look: &Look, frame: &Frame, c: Pt, side: f32, angle:
 		),
 		look.shoes.lighten(0.25),
 	);
-	svg.raw("</g>");
+	svg.end();
 	let line = silhouette(svg);
 	svg.outline(&shoe, line);
 	svg.end();
@@ -1082,16 +1077,11 @@ fn body_path(svg: &Svg, look: &Look, frame: &Frame) -> Path {
 fn draw_body(svg: &mut Svg, look: &Look, frame: &Frame) {
 	let body = body_path(svg, look, frame);
 	svg.cast_shadow(&body);
-	let clip = svg.next_id("body");
-	svg.define(&format!(
-		r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-		body.as_str()
-	));
 
 	let offset = svg.registration;
 	svg.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
 	svg.fill(&body, look.top);
-	svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+	svg.begin_clip(&body);
 	draw_pattern(svg, look, frame);
 
 	if look.legwear != Legwear::Trousers || look.has(Extra::Apron) {
@@ -1133,7 +1123,7 @@ fn draw_body(svg: &mut Svg, look: &Look, frame: &Frame) {
 		.line_to(pt(-frame.head_r * 0.62, collar_y - 40.0))
 		.close();
 	svg.fill(&collar, look.trim);
-	svg.raw("</g>");
+	svg.end();
 	svg.end();
 
 	svg.finish_shape(&body, look.top);
@@ -1463,13 +1453,8 @@ fn draw_eye(svg: &mut Svg, look: &Look, c: Pt, r: f32, side: f32, eyes: Eyes, st
 			}
 
 			let white = Path::ellipse(c, rx, ry);
-			let clip = svg.next_id("eye");
-			svg.define(&format!(
-				r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-				white.as_str()
-			));
 			svg.fill(&white, palette::WHITE);
-			svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+			svg.begin_clip(&white);
 
 			let look_down = if state.mood == Mood::Sad {
 				r * 0.07
@@ -1504,7 +1489,7 @@ fn draw_eye(svg: &mut Svg, look: &Look, c: Pt, r: f32, side: f32, eyes: Eyes, st
 				svg.fill(&lid_shape, look.skin.darken(0.06));
 			}
 
-			svg.raw("</g>");
+			svg.end();
 
 			if lid > 0.02 {
 				let edge = c.y - ry + lid * ry * 2.0;
@@ -1934,13 +1919,8 @@ fn open_mouth(
 			c + pt(-half, corner),
 		)
 		.close();
-	let clip = svg.next_id("mouth");
-	svg.define(&format!(
-		r#"<clipPath id="{clip}"><path d="{}"/></clipPath>"#,
-		mouth.as_str()
-	));
 	svg.fill(&mouth, palette::MAW);
-	svg.raw(&format!(r#"<g clip-path="url(#{clip})">"#));
+	svg.begin_clip(&mouth);
 
 	match tongue {
 		TongueAt::Bottom => {
@@ -2002,7 +1982,7 @@ fn open_mouth(
 		}
 	}
 
-	svg.raw("</g>");
+	svg.end();
 	svg.stroke(&mouth, palette::INK, svg.line * 1.2);
 
 	if state.teeth == Teeth::Sparkly {

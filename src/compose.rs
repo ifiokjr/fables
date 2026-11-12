@@ -553,6 +553,8 @@ pub(crate) fn draw_breath(svg: &mut Svg, puppet: &Puppet, time: f32) {
 mod tests {
 	use super::*;
 	use crate::art::figure::Build;
+	use crate::art::figure::HairStyle;
+	use crate::art::figure::Pose;
 	use crate::art::light::Light;
 	use crate::art::light::Preset;
 	use crate::art::pack::StylePack;
@@ -578,6 +580,211 @@ mod tests {
 		}
 	}
 
+	/// A kid from a cast line — the parametric puppet, no authored parts — with a named
+	/// hairdo and pose, facing `heading`.
+	fn kid_of(hair: &str, pose: Pose, heading: f32) -> Puppet {
+		let cast = crate::cast::Cast::parse(&format!(
+			"[kid]\nname = \"Kid\"\nhair = \"{hair}\"\n"
+		))
+		.unwrap();
+		let Kind::Figure(look) = cast.members["kid"].kind.clone() else {
+			panic!("a cast kid is a figure");
+		};
+		let frame = look.frame();
+		let facing = heading * 0.7;
+		let mut state = FigureState::new(&frame);
+		state.hands = frame.hands(pose, facing);
+		state.hand_shapes = pose.hand_shapes();
+		state.facing = facing;
+
+		Puppet {
+			id: "kid".into(),
+			kind: Kind::Figure(look),
+			at: pt(1200.0, 2060.0),
+			scale: 2.25,
+			z: 0,
+			opacity: 1.0,
+			body: Body::Figure(state),
+			stink: 0.0,
+			mint: 0.0,
+			heading,
+			breath: 0.0,
+			lift: 0.0,
+			smear: 0.0,
+		}
+	}
+
+	/// The sausage dog, facing `heading`.
+	fn dog(heading: f32) -> Puppet {
+		Puppet {
+			id: "dog".into(),
+			kind: Kind::Dog(palette::TOMATO),
+			at: pt(1200.0, 2060.0),
+			scale: 1.0,
+			z: 0,
+			opacity: 1.0,
+			body: Body::Critter(CritterState {
+				facing: heading,
+				..CritterState::default()
+			}),
+			stink: 0.0,
+			mint: 0.0,
+			heading,
+			breath: 0.0,
+			lift: 0.0,
+			smear: 0.0,
+		}
+	}
+
+	/// Draws the puppet's subject alone on transparent paper — what [`Puppet::extents`]
+	/// measures, ground shadow and effects and all left out — and returns the box of its
+	/// visible pixels in stage units.
+	fn pixel_bounds(puppet: &Puppet) -> Bounds {
+		let view = (puppet.at.x - 1500.0, puppet.at.y - 1700.0, 3000.0, 3200.0);
+		let mut svg = Svg::new();
+		svg.begin(&subject_transform(puppet));
+		draw_subject(&mut svg, puppet);
+		svg.end();
+		let pixmap = crate::raster::render(&svg.finish(view, 600, 640)).unwrap();
+		let (vx, vy, vw, vh) = view;
+		let unit = vw / pixmap.width() as f32;
+		let (mut left, mut top, mut right, mut bottom) =
+			(f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+
+		for y in 0..pixmap.height() {
+			for x in 0..pixmap.width() {
+				if pixmap.pixel(x, y).unwrap().alpha() > 0 {
+					left = left.min(vx + x as f32 * unit);
+					top = top.min(vy + y as f32 * unit);
+					right = right.max(vx + (x + 1) as f32 * unit);
+					bottom = bottom.max(vy + (y + 1) as f32 * unit);
+				}
+			}
+		}
+
+		assert!(
+			left <= right,
+			"the puppet drew nothing in {view:?}"
+		);
+		(left, top, right, bottom)
+	}
+
+	/// The measured bounds hold every drawn pixel, and sit within a small tolerance of
+	/// them: the measurement is the drawing, give or take control points, stroke bleed
+	/// and pixel granularity.
+	fn holds_every_pixel(puppet: &Puppet, what: &str) {
+		let Extents { subject, head } = puppet.extents();
+		let pixels = pixel_bounds(puppet);
+		// One pixel (5 units) of slack for antialiased edges.
+		let slack = 6.0;
+
+		assert!(
+			pixels.0 >= subject.0 - slack
+				&& pixels.1 >= subject.1 - slack
+				&& pixels.2 <= subject.2 + slack
+				&& pixels.3 <= subject.3 + slack,
+			"{what}: drawn pixels {pixels:?} escape the measured bounds {subject:?}"
+		);
+
+		assert!(
+			(subject.0 - pixels.0).abs() < 40.0
+				&& (subject.1 - pixels.1).abs() < 40.0
+				&& (pixels.2 - subject.2).abs() < 40.0
+				&& (pixels.3 - subject.3).abs() < 40.0,
+			"{what}: measured bounds {subject:?} stray from the drawn pixels {pixels:?}"
+		);
+
+		assert!(
+			head.0 >= subject.0 - 0.01
+				&& head.1 >= subject.1 - 0.01
+				&& head.2 <= subject.2 + 0.01
+				&& head.3 <= subject.3 + 0.01,
+			"{what}: the head {head:?} escapes its own subject {subject:?}"
+		);
+	}
+
+	#[test]
+	fn measured_bounds_hold_every_drawn_pixel() {
+		// A tall hairdo waving, both ways; the dog, both ways; and an authored puppet.
+		holds_every_pixel(&kid_of("puff", Pose::Wave, 1.0), "puff kid waving right");
+		holds_every_pixel(&kid_of("puff", Pose::Wave, -1.0), "puff kid waving left");
+		holds_every_pixel(&dog(1.0), "dog facing right");
+		holds_every_pixel(&dog(-1.0), "dog facing left");
+		holds_every_pixel(&kid(), "authored template kid");
+	}
+
+	#[test]
+	fn the_bounds_mirror_when_the_heading_flips() {
+		// The dog mirrors exactly (its drawing is `scale(-1 1)`); an authored kid's
+		// three-quarter face only leans, so its flip is held loosely.
+		let (right, left) = (dog(1.0), dog(-1.0));
+		let (a, b) = (right.extents().subject, left.extents().subject);
+		let x = right.at.x;
+
+		assert!(
+			((a.0 - x) + (b.2 - x)).abs() < 1.0 && ((a.2 - x) + (b.0 - x)).abs() < 1.0,
+			"dog {a:?} vs mirrored {b:?}"
+		);
+		assert!((a.1 - b.1).abs() < 1.0 && (a.3 - b.3).abs() < 1.0, "{a:?} vs {b:?}");
+
+		let mut turned = kid();
+		turned.heading = -1.0;
+
+		if let Body::Figure(state) = &mut turned.body {
+			state.facing = -0.7;
+		}
+
+		let (a, b) = (kid().extents().subject, turned.extents().subject);
+		let x = turned.at.x;
+
+		assert!(
+			((a.0 - x) + (b.2 - x)).abs() < 50.0 && ((a.2 - x) + (b.0 - x)).abs() < 50.0,
+			"authored kid {a:?} vs turned {b:?}"
+		);
+	}
+
+	#[test]
+	fn a_waving_figure_measures_the_raised_hand() {
+		let idle = kid_of("puff", Pose::Idle, 1.0).extents().subject;
+		let wave = kid_of("puff", Pose::Wave, 1.0).extents().subject;
+
+		assert!(
+			wave.2 > idle.2 + 15.0,
+			"the waving hand reaches further right: idle {idle:?} vs wave {wave:?}"
+		);
+	}
+
+	#[test]
+	fn effects_do_not_enlarge_the_bounds() {
+		let clean = kid().extents().subject;
+
+		let mut breathing = kid();
+		breathing.stink = 1.0;
+		breathing.mint = 1.0;
+		breathing.breath = 1.0;
+		breathing.smear = -1.0;
+
+		assert_eq!(
+			breathing.extents().subject,
+			clean,
+			"breath, stink, mint and speed lines must not be part of the subject"
+		);
+
+		// Dizzy stars orbit well above the head; the dizzy face may draw differently,
+		// but the subject's top must not rise to the stars.
+		let mut dizzy = kid();
+
+		if let Body::Figure(state) = &mut dizzy.body {
+			state.mood = crate::art::figure::Mood::Dizzy;
+		}
+
+		assert!(
+			dizzy.extents().subject.1 >= clean.1 - 40.0,
+			"dizzy stars lifted the subject: {:?} against {clean:?}",
+			dizzy.extents().subject
+		);
+	}
+
 	#[test]
 	fn a_scene_light_turns_the_ground_shadow_into_a_cast_shadow() {
 		let golden = Light::of(Preset::Golden);
@@ -597,3 +804,4 @@ mod tests {
 		assert!(!day.contains(&lean), "no cast lean in daylight: {day}");
 	}
 }
+
