@@ -124,6 +124,34 @@ fn one() -> f32 {
 }
 
 impl Proportions {
+	/// A hip joint's x, `side` -1 near and 1 far, turned by `t`.
+	fn hip_x(&self, side: f32, t: f32) -> f32 {
+		let (near, far) = self.hips_turned;
+		lerp(
+			side * self.limbs.hip_spread,
+			if side < 0.0 { near } else { far },
+			t,
+		)
+	}
+
+	/// What fitting the floor stances to this body needs, turned by `t` (see [`Limbs::fit`]).
+	/// Seated, the hips rest on the thighs, or on clothes that `hang` further below the hip
+	/// joints. The feet's grounds are where [`Posed::of`] stands them.
+	fn floor(&self, t: f32, hang: f32) -> rig::Floor {
+		rig::Floor {
+			turn: t,
+			hips: (self.hip_x(-1.0, t), self.hip_x(1.0, t)),
+			ground: (3.0 * t, -9.0 * t),
+			seat: (self
+				.leg_profile
+				.map_or(self.leg_width.0, |widths| widths[0])
+				/ 2.0)
+				.max(hang),
+			knee: self.knee_radius(),
+			torso: self.limbs.pelvis_y - self.shoulder_y,
+		}
+	}
+
 	/// Half the knee's width, how far its round sits off the floor when it kneels.
 	fn knee_radius(&self) -> f32 {
 		self.leg_profile.map_or_else(
@@ -160,6 +188,19 @@ impl Proportions {
 /// The `facing` the stage gives a figure turned towards the middle of the page. An authored
 /// puppet shows its full three-quarter drawing there.
 const STAGED_FACING: f32 = 0.35;
+
+/// How far down a `fist` drawn for a kid's hand, from the wrist, a held thing sits: a little
+/// past halfway, so a bigger hand holds it further from the wrist. That is 17 of the cartoon
+/// fist's 32 units (a fraction exact in binary), where the cartoon's props have always been.
+fn grip(fist: &Shape) -> f32 {
+	fist.bounds().1.y * (17.0 / 32.0)
+}
+
+/// How many of the cartoon fist's 32 units long a kit draws its `fist`: 1 for the cartoon, more
+/// for a kit drawn bigger in its own units, so distances round a held thing grow with the hand.
+fn fist_size(fist: &Shape) -> f32 {
+	fist.bounds().1.y / 32.0
+}
 
 /// A character's authored puppet: their part file over their style's kit, read and checked once.
 #[derive(Clone, Debug)]
@@ -778,11 +819,19 @@ struct Solved {
 }
 
 impl Solved {
-	fn new(posed: &Posed, body: &Proportions) -> Solved {
+	/// The rig posed by `posed` on `body`. A body that keeps to the floor sits on clothes that
+	/// `hang` below its hip joints (see [`hang`]).
+	fn new(posed: &Posed, body: &Proportions, hang: f32) -> Solved {
 		let limbs = body.limbs;
+		// A body that keeps to the floor sits, kneels and crouches on its own legs.
+		let legs = if body.floor {
+			limbs.fit(posed.legs, &body.floor(posed.t, hang))
+		} else {
+			posed.legs
+		};
 		let (legs, swing) = match posed.gait {
-			Some((gait, phase)) => limbs.cycle(gait, phase, 1.0, posed.legs),
-			None => (posed.legs, (pt(0.0, 0.0), pt(0.0, 0.0))),
+			Some((gait, phase)) => limbs.cycle(gait, phase, 1.0, legs),
+			None => (legs, (pt(0.0, 0.0), pt(0.0, 0.0))),
 		};
 
 		Solved {
@@ -835,13 +884,7 @@ impl Solved {
 
 	/// `side` is -1 for the near (page-left) limb and 1 for the far one.
 	fn hip(&self, side: f32) -> Pt {
-		let (near, far) = self.body.hips_turned;
-		let x = lerp(
-			side * self.limbs.hip_spread,
-			if side < 0.0 { near } else { far },
-			self.t,
-		);
-		self.torso(pt(x, self.limbs.pelvis_y))
+		self.torso(pt(self.body.hip_x(side, self.t), self.limbs.pelvis_y))
 	}
 
 	fn shoulder(&self, side: f32) -> Pt {
@@ -861,8 +904,13 @@ impl Solved {
 		} else {
 			self.legs.feet.1
 		};
-		// Knees bend outwards from the front and forwards when turned.
-		let pole = pt(lerp(side, 1.2, self.t), -0.25).norm();
+		// Knees bend outwards from the front and forwards when turned; on a body that keeps to
+		// the floor, the way a real knee flexes, so a leg stretched along the floor raises it.
+		let pole = if self.body.floor {
+			rig::flex_pole(side, self.t, foot - hip)
+		} else {
+			rig::knee_pole(side, self.t)
+		};
 		let (mut knee, mut ankle) =
 			rig::two_bone(hip, foot, self.limbs.thigh, self.limbs.shin, pole);
 
@@ -946,12 +994,26 @@ fn figure_transform(look: &Look, posed: &Posed, state: &FigureState, head_r: f32
 	)
 }
 
+/// How far below the hip joints a figure's clothes hang where they don't drape over the lap:
+/// its top, and legwear that rides with the hips rather than hanging like a skirt. Seated, the
+/// figure rests on them, so they never go through the floor.
+fn hang(puppet: &Authored, body: &Proportions, t: f32) -> f32 {
+	let drapes = body.floor && puppet.part("legwear-leg", t).is_none();
+
+	["torso", "legwear"]
+		.into_iter()
+		.filter(|name| !(drapes && *name == "legwear"))
+		.filter_map(|name| puppet.part(name, t))
+		.map(|part| part.bounds().1.y - body.limbs.pelvis_y)
+		.fold(0.0, f32::max)
+}
+
 /// Draws an authored figure with its soles at the current origin.
 pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
 	let frame = look.frame();
 	let body = puppet.style.body(look.build);
 	let posed = Posed::of(state, &puppet.style, look.build);
-	let solved = Solved::new(&posed, body);
+	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
 	let inks = Inks::of(look, &puppet.style, state.teeth);
 	let t = solved.t;
 	// The style's line and shade dials, for this figure only.
@@ -1053,7 +1115,7 @@ pub fn draw_bones(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureS
 	let frame = look.frame();
 	let body = puppet.style.body(look.build);
 	let posed = Posed::of(state, &puppet.style, look.build);
-	let solved = Solved::new(&posed, body);
+	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
 	let pelvis = solved.torso(solved.pivot);
 	let chest = solved.torso(pt(0.0, body.shoulder_y));
 	let neck = solved.torso(body.neck);
@@ -1720,11 +1782,12 @@ impl Arm<'_> {
 			svg.end();
 		}
 
-		// Held things sit in the fist, under the fingers.
+		// Held things sit in the fist, under the fingers: a little past halfway down it, so a
+		// bigger hand holds them further from the wrist.
 		let along = (wrist - elbow).norm();
 
 		if let Some(held) = held {
-			let fist = wrist + along * 17.0 * held.scale;
+			let fist = wrist + along * grip(&puppet.required("hand-fist", 0.0)) * held.scale;
 			draw_prop(svg, puppet, ink, held, fist, along, side);
 		}
 
@@ -1816,10 +1879,13 @@ fn draw_prop(
 			svg.end();
 		}
 		Prop::Toothbrush => {
-			let brushing = (fist - held.mouth).len() < 70.0;
+			// Near the mouth, it is brushing; how near, and how far it scrubs, grow with the
+			// hand the kit draws.
+			let size = fist_size(&puppet.required("hand-fist", 0.0));
+			let brushing = (fist - held.mouth).len() < 70.0 * size;
 			let (dir, scrub) = if brushing {
 				let towards = if held.mouth.x < fist.x { -1.0 } else { 1.0 };
-				(pt(towards, 0.0), (held.time * 22.0).sin() * 8.0)
+				(pt(towards, 0.0), (held.time * 22.0).sin() * 8.0 * size)
 			} else {
 				// Sticking out of the fist, sideways from the forearm, away from the body.
 				(along.perp() * -side, 0.0)
@@ -2779,7 +2845,7 @@ mod tests {
 			let mut state = FigureState::new(&frame);
 			state.hands = frame.hands(pose, 0.0);
 			let posed = Posed::of(&state, &cartoon(), Build::Kid);
-			let solved = Solved::new(&posed, &kid());
+			let solved = Solved::new(&posed, &kid(), 0.0);
 
 			for side in [-1.0, 1.0] {
 				let (shoulder, elbow, wrist) = solved.arm(&posed, side);
@@ -2890,7 +2956,7 @@ mod tests {
 		state.prop = Some(Prop::Toothbrush);
 		let posed = Posed::of(&state, &cartoon(), Build::Kid);
 		assert_eq!(posed.prop, Some((Prop::Toothbrush, true)), "no wave swap");
-		let solved = Solved::new(&posed, &kid());
+		let solved = Solved::new(&posed, &kid(), 0.0);
 		let (_, _, wrist) = solved.arm(&posed, 1.0);
 		assert!(
 			(wrist - mouth_on_body(&solved, &posed, cartoon().face, cartoon().features.mouth))
@@ -3000,6 +3066,30 @@ mod tests {
 		assert!(!behind(Pose::ArmsCrossed));
 	}
 
+	#[test]
+	fn held_things_sit_in_the_fist_however_big_the_hand() {
+		let fist = |style: &str| {
+			StylePack::named(style)
+				.unwrap_or_else(|error| unreachable!("{error}"))
+				.kit
+				.get("hand-fist")
+				.cloned()
+				.unwrap_or_else(|| unreachable!("every kit has a fist"))
+		};
+		let (cartoon, anime) = (fist("cartoon"), fist("anime"));
+		assert_eq!(
+			grip(&cartoon),
+			17.0,
+			"the cartoon's props stay where they were"
+		);
+		// The anime fist is nearly three times as long, so its grip is further down it.
+		assert!(grip(&anime) > 40.0 && grip(&anime) < anime.bounds().1.y * 0.6);
+		// And a toothbrush counts as near the mouth from nearly three times as far away, while
+		// the cartoon's distances stay exactly what they were.
+		assert_eq!(fist_size(&cartoon), 1.0);
+		assert!(fist_size(&anime) > 2.5 && fist_size(&anime) < 3.0);
+	}
+
 	/// Every stance, solved on `body`, three-quarters turned.
 	/// A slender body with long legs that keep to the floor, the way anime bodies are built.
 	fn long_legged() -> Proportions {
@@ -3011,6 +3101,8 @@ mod tests {
 				shin: 280.0,
 				..kid().limbs
 			},
+			shoulder_y: -884.0,
+			hips_turned: (-30.0, 40.0),
 			leg_profile: Some([74.0, 66.0, 50.0, 42.0, 50.0, 36.0, 26.0]),
 			knee_splay: 0.45,
 			floor: true,
@@ -3030,7 +3122,7 @@ mod tests {
 				state.facing = STAGED_FACING;
 				state.legs = body.limbs.stance(stance, STAGED_FACING);
 				let posed = Posed::of(&state, &style, Build::Kid);
-				(stance, Solved::new(&posed, body), posed)
+				(stance, Solved::new(&posed, body, 0.0), posed)
 			})
 			.collect()
 	}
@@ -3095,35 +3187,38 @@ mod tests {
 			}
 		}
 
-		// Sinking from a squat to the floor, over a foot planted just behind the hip, moves the
-		// knee smoothly, with no jump where it reaches the floor.
+		// Sinking from a squat through a kneel to a sit moves the near knee smoothly, with no
+		// jump where it reaches the floor or leaves it again.
 		let base = Legs {
 			feet: (pt(-70.0, body.limbs.ankle_y), pt(70.0, body.limbs.ankle_y)),
 			crouch: 0.0,
 			bend: 0.0,
 		};
 		let mut last: Option<(Pt, Pt)> = None;
+		let mut knelt = false;
 
-		for step in 0..=60 {
+		for step in 0..=240 {
 			let mut legs = base;
-			legs.crouch = lerp(0.5, 0.97, step as f32 / 60.0);
+			legs.crouch = lerp(rig::SQUAT, 0.97, step as f32 / 240.0);
 			let posed = Posed {
 				legs,
 				..stances(&body)[0].2.clone()
 			};
-			let (_, knee, ankle) = Solved::new(&posed, &body).leg(-1.0);
+			let (_, knee, ankle) = Solved::new(&posed, &body, 0.0).leg(-1.0);
+			knelt |= (knee.y - floor).abs() < 0.01;
 
 			if let Some((knee_before, ankle_before)) = last {
-				assert!((knee - knee_before).len() < 20.0, "step {step}");
-				assert!((ankle - ankle_before).len() < 20.0, "step {step}");
+				assert!((knee - knee_before).len() < 12.0, "step {step}");
+				assert!((ankle - ankle_before).len() < 12.0, "step {step}");
 			}
 
 			last = Some((knee, ankle));
 		}
 
+		assert!(knelt, "on the way down the knee rests on the floor");
 		assert!(
-			last.is_some_and(|(knee, _)| (knee.y - floor).abs() < 0.01),
-			"at the bottom the knee rests on the floor"
+			last.is_some_and(|(knee, _)| knee.y < floor - body.limbs.thigh * 0.5),
+			"seated, the knee is raised"
 		);
 	}
 
@@ -3143,7 +3238,7 @@ mod tests {
 		assert_eq!(kneels(Stance::Tiptoe), [false, false]);
 		assert!(kneels(Stance::Kneel).contains(&true), "a kneel kneels");
 
-		let plain = Solved::new(&stances(&kid())[4].2, &kid());
+		let plain = Solved::new(&stances(&kid())[4].2, &kid(), 0.0);
 		assert!(
 			!plain.kneels(plain.leg(-1.0)),
 			"a body off the floor never kneels"
@@ -3194,13 +3289,14 @@ mod tests {
 		let mut state = FigureState::new(&Frame::authored(&cartoon(), Build::Kid));
 		state.legs = body.limbs.stance(Stance::Crouch, 0.0);
 		let posed = Posed::of(&state, &cartoon(), Build::Kid);
-		let (hip, knee, ankle) = Solved::new(&posed, &body).leg(-1.0);
+		let (hip, knee, ankle) = Solved::new(&posed, &body, 0.0).leg(-1.0);
 		let splayed = Solved::new(
 			&posed,
 			&Proportions {
 				knee_splay: 1.0,
 				..body
 			},
+			0.0,
 		)
 		.leg(-1.0)
 		.1;
