@@ -32,10 +32,23 @@
 //! idle = "none"           # none, or bounce: a loop while standing
 //! idle-amount = 1.0
 //! idle-tempo = 120.0      # beats a minute
+//!
+//! lead = 1.0              # eyes lead, the head follows, the body follows
+//! overlap = 1.0           # parts arrive one after another, not together
+//! arcs = 1.0              # hands swing on arcs about the shoulder, heads nod through turns
+//! takes = 1.0             # mood changes play as takes: squash, stretch, settle
+//! breath = 1.0            # a standing figure breathes
+//! weight-shift = 1.0      # and shifts its weight from foot to foot
+//! gesture = 1.0           # speakers beat time with head and hand, brows answer the line
+//! listen = 1.0            # listeners nod, glance where the speaker points, flinch at shouts
+//! business = 1.0          # a figure held too long does one small piece of idle business
+//! travel = "walk"         # walk, or slide: x changes carry the figure on its own feet
 //! ```
 //!
 //! Every default is the cartoon look as it was before the dials existed, so a style only says
-//! what it changes. Line weights stay in `[finish]`: `line` outside, `detail` inside.
+//! what it changes. Line weights stay in `[finish]`: `line` outside, `detail` inside. The
+//! rules the acting dials drive live in [`acting`](crate::video::acting); a script's
+//! `[video] acting = "plain"` turns the whole layer off.
 
 use serde::Deserialize;
 use serde::Deserializer;
@@ -246,6 +259,17 @@ pub enum Idle {
 	Bounce,
 }
 
+/// How a figure crosses the stage when its `x` changes between stage directions.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Travel {
+	/// It walks (or runs) there on its own feet.
+	#[default]
+	Walk,
+	/// It slides, as cut-outs did before rigs could walk.
+	Slide,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct Motion {
@@ -273,6 +297,18 @@ pub struct Motion {
 	pub idle_amount: f32,
 	/// Beats a minute for the idle loop.
 	pub idle_tempo: f32,
+	/// The performance layer's dials (see [`acting`](crate::video::acting)): each scales one
+	/// rule animators use, 1 the cartoon's way, 0 off.
+	pub lead: f32,
+	pub overlap: f32,
+	pub arcs: f32,
+	pub takes: f32,
+	pub breath: f32,
+	pub weight_shift: f32,
+	pub gesture: f32,
+	pub listen: f32,
+	pub business: f32,
+	pub travel: Travel,
 }
 
 impl Default for Motion {
@@ -293,6 +329,16 @@ impl Default for Motion {
 			idle: Idle::None,
 			idle_amount: 1.0,
 			idle_tempo: 120.0,
+			lead: 1.0,
+			overlap: 1.0,
+			arcs: 1.0,
+			takes: 1.0,
+			breath: 1.0,
+			weight_shift: 1.0,
+			gesture: 1.0,
+			listen: 1.0,
+			business: 1.0,
+			travel: Travel::Walk,
 		}
 	}
 }
@@ -311,6 +357,27 @@ impl Motion {
 			x * x * ((c + 1.0) * x - c) / 2.0
 		} else {
 			let c = 1.1 * 1.525 * self.overshoot;
+			let x = 2.0 * t - 2.0;
+			f32::midpoint(x * x * ((c + 1.0) * x + c), 2.0)
+		}
+	}
+
+	/// The same ease with the wind-up and overshoot scaled by how big the change is: a
+	/// blink-sized change (`size` 0) goes without one, a jump or a point (`size` 1) gets the
+	/// most. The `anticipation` and `overshoot` dials keep their meaning and scale these.
+	pub fn ease_by_distance(&self, t: f32, size: f32) -> f32 {
+		if self.easing == Easing::Snap {
+			return if t > 0.0 { 1.0 } else { 0.0 };
+		}
+
+		let size = size.clamp(0.0, 1.0);
+
+		if t < 0.5 {
+			let c = 1.1 * 1.525 * self.anticipation * size;
+			let x = 2.0 * t;
+			x * x * ((c + 1.0) * x - c) / 2.0
+		} else {
+			let c = 1.1 * 1.525 * self.overshoot * size;
 			let x = 2.0 * t - 2.0;
 			f32::midpoint(x * x * ((c + 1.0) * x + c), 2.0)
 		}
@@ -376,6 +443,28 @@ mod tests {
 			..Motion::default()
 		};
 		assert_eq!(snap.ease(0.01), 1.0);
+	}
+
+	#[test]
+	fn small_changes_get_no_wind_up_and_big_ones_get_the_most() {
+		let motion = Motion::default();
+		let depth = |size: f32| {
+			(0..100)
+				.map(|step| motion.ease_by_distance(step as f32 / 99.0, size))
+				.fold(f32::INFINITY, f32::min)
+		};
+
+		assert!(
+			depth(0.0).abs() < 1e-5,
+			"a blink-sized change never winds up"
+		);
+		assert!(depth(0.5) < depth(0.0), "a middling change dips");
+		assert!(depth(1.0) < depth(0.5), "a big change winds up hardest");
+		assert!(motion.ease_by_distance(0.0, 0.7).abs() < 1e-5);
+		assert!(
+			(motion.ease_by_distance(1.0, 0.7) - 1.0).abs() < 1e-5,
+			"every size still lands on target"
+		);
 	}
 
 	#[test]

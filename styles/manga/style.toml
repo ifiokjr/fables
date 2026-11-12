@@ -30,6 +30,11 @@ overshoot = 0.5
 smears = 0.9
 blink-every = 4.5
 mouth-rate = 8.0
+overlap = 0.2         # moves on threes snap between held poses
+breath = 0.2
+weight-shift = 0.0
+business = 0.0
+takes = 0.5
 
 [face]
 turn = 0.42

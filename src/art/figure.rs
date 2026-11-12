@@ -642,7 +642,8 @@ impl Frame {
 		self.hip_half * 1.25
 	}
 
-	fn shoulder(&self, side: f32) -> Pt {
+	/// Where an arm hangs from, for rules that swing a hand on an arc about the shoulder.
+	pub fn shoulder(&self, side: f32) -> Pt {
 		pt(side * self.shoulder_half, self.shoulder_y)
 	}
 

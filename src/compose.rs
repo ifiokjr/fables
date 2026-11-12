@@ -47,6 +47,9 @@ pub struct Puppet {
 	pub lift: f32,
 	/// Speed lines trailing a fast move: their strength, signed by the way it is going.
 	pub smear: f32,
+	/// How out of breath the puppet is (0..1): high just after running, so breathing stays
+	/// fast for a while.
+	pub exerted: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -180,6 +183,7 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 		breath,
 		lift: 0.0,
 		smear: 0.0,
+		exerted: 0.0,
 	}
 }
 
@@ -257,6 +261,7 @@ pub fn blend(a: &Puppet, b: &Puppet, t: f32) -> Puppet {
 		breath: lerp(a.breath, b.breath, t),
 		lift: lerp(a.lift, b.lift, t),
 		smear: b.smear,
+		exerted: lerp(a.exerted, b.exerted, t),
 	}
 }
 
@@ -519,6 +524,7 @@ mod tests {
 			breath: 0.0,
 			lift: 0.0,
 			smear: 0.0,
+			exerted: 0.0,
 		}
 	}
 

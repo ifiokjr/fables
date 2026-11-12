@@ -707,6 +707,31 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 	fables::video::motion::motion_test(look, &member.name, (style, &motion), &video)?;
 	done(&video, started);
 
+	// A second motion clip: the acting rules, in order, on this character and a scene
+	// partner (the next person in the cast, or a copy of the same one).
+	let partner = cast
+		.members
+		.values()
+		.find(|other| other.id != member.id && other.kind.is_figure());
+	let (partner_look, partner_name) = match partner {
+		Some(other) => {
+			let fables::cast::Kind::Figure(look) = &other.kind else {
+				unreachable!("a figure partner");
+			};
+
+			(look.clone(), other.name.clone())
+		}
+		None => (look.clone(), member.name.clone()),
+	};
+	let acting = dir.join(format!("{id}-acting{label}.mp4"));
+	fables::video::motion::acting_test(
+		[look, &partner_look],
+		&format!("{} & {}", member.name, partner_name),
+		(style, &motion),
+		&acting,
+	)?;
+	done(&acting, started);
+
 	Ok(())
 }
 
