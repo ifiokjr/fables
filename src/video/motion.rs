@@ -370,6 +370,11 @@ const ACTING_LENGTH: f32 = 27.2;
 /// Where the two test characters stand on the stage, in stage units.
 const ACTING_X: [f32; 2] = [700.0, 1750.0];
 
+/// How long a beat's move takes: a walk crosses on its own feet, anything else tweens.
+fn beat_span(beat: &ActingBeat) -> f32 {
+	if beat.x.is_some() { 1.8 } else { 0.6 }
+}
+
 /// A test character on the acting stage.
 fn actor(look: &Look, id: &str, x: f32, beat: &ActingBeat) -> Puppet {
 	let frame = look.frame();
@@ -418,7 +423,7 @@ fn acting_stage(
 	let moving = ACTING
 		.iter()
 		.rposition(|beat| beat.at <= time)
-		.is_some_and(|index| index > 0 && time - ACTING[index].at < 0.6);
+		.is_some_and(|index| index > 0 && time - ACTING[index].at < beat_span(&ACTING[index]));
 	let time = motion.drawing_time(time, 0.0, moving);
 	let index = ACTING.iter().rposition(|beat| beat.at <= time).unwrap_or(0);
 	let beat = &ACTING[index];
@@ -509,7 +514,8 @@ fn acting_stage(
 	for (slot, look) in looks.iter().enumerate() {
 		let id = if slot == 0 { "a" } else { "b" };
 		let now = actor(look, id, beat.x.unwrap_or(ACTING_X[slot]), beat);
-		let mut puppet = if index > 0 && since < 0.6 {
+		let span = beat_span(beat);
+		let mut puppet = if index > 0 && since < span {
 			let old = actor(look, id, ACTING_X[slot], previous);
 			// A change of x walks there on its own feet; everything else is acted too.
 			acting::tween(&old, &now, since, since / 0.6, false, &cx)
