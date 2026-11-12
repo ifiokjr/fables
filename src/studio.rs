@@ -826,6 +826,13 @@ impl Studio {
 		publish::check(&script, &cast)
 	}
 
+	/// Critiques a book the way a director would: findings with line numbers and suggestions,
+	/// never a refusal. Timings are estimated offline, so no voice is recorded.
+	pub fn review_story(&self, folder: &str, story: &str) -> Result<Vec<crate::review::Finding>> {
+		let (_, script, cast) = self.book(folder, story)?;
+		publish::review(&script, &cast, &self.root.join("out"))
+	}
+
 	/// Makes a book's outputs under the root's `out/`. Returns what was written, and the proofs'
 	/// contact sheet when proofs were made.
 	pub fn render_book(
