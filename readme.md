@@ -284,6 +284,17 @@ Teeth, stink and mint **carry over from page to page** until changed, so grotty 
 - `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`.
 - Fainting bonks, hops boing and entrances pop automatically.
 
+### Guests
+
+A book can invite characters from other worlds under the same root, and each keeps looking like themselves:
+
+```text
+guests = ["kiteharbour/hana", "kerfuffle/stinky"]   # front matter
+guest-style = "host"                                 # optional
+```
+
+A guest is directed by its id (`@hana`), or by `world.id` (`@kiteharbour.hana`) when its id clashes with a local cast member — then the bare id means the local one. A guest keeps their puppet parts, their own style's construction (bodies, features, eyes, kit) and their voice, and by default their own style's line and shading as well, so a cartoon kid and an anime kid can share a page looking like themselves. `guest-style = "host"` inks and shades guests with the host world's `[line]` and `[shade]` dials instead; their construction never changes. Everyone on a page moves with the host story's `[motion]`, and guests stand at the height their own world gives them. A missing world or character is an error naming the ones that do exist, and the "meet the folk" page still lists only the host world's cast.
+
 ### New characters
 
 Add a table to the world's cast file, such as [`worlds/kerfuffle/cast.toml`](worlds/kerfuffle/cast.toml), built from puppet parts, then run `fables sheets` to see them:

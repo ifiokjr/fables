@@ -97,9 +97,30 @@ pub struct Member {
 	pub kind: Kind,
 }
 
+/// A visitor from another world, invited by a script's front matter (`guests = ["world/id"]`).
+/// They keep their own puppet, their own world's construction and their voice; see
+/// [`World::cast_for`](crate::world::World::cast_for).
+#[derive(Clone, Debug)]
+pub struct Guest {
+	/// The guest world's folder under the same root as the host.
+	pub world: String,
+	/// Their cast entry in that world, built with that world's style.
+	pub member: Member,
+}
+
+impl Guest {
+	/// How directions name them when their id clashes with a local cast member: `world.id`.
+	pub fn qualified(&self) -> String {
+		format!("{}.{}", self.world, self.member.id)
+	}
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Cast {
 	pub members: BTreeMap<String, Member>,
+	/// Visitors from other worlds, invited by the script's front matter. The
+	/// "meet the folk" page and the world's sheets list only `members`.
+	pub guests: Vec<Guest>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,16 +226,30 @@ impl Cast {
 			);
 		}
 
-		Ok(Cast { members })
+		Ok(Cast {
+			members,
+			guests: Vec::new(),
+		})
 	}
 
-	/// Resolves an actor id like `stinky`, `bird.a` or `flower.3` to how it is drawn.
-	pub fn resolve(&self, actor: &str) -> Result<Kind> {
-		let base = actor.split('.').next().unwrap_or(actor);
+	/// Invites a guest from another world. Their id stays theirs (`@hana`); when a local cast
+	/// member already has it, directions must name them `world.id` instead.
+	pub fn add_guest(&mut self, world: &str, member: Member) {
+		self.guests.push(Guest {
+			world: world.to_owned(),
+			member,
+		});
+	}
 
-		if let Some(member) = self.members.get(base) {
+	/// Resolves an actor id like `stinky`, `bird.a` or `flower.3` to how it is drawn. A guest
+	/// is resolved by its own id, or by `world.id` when its id clashes with a local cast
+	/// member (the bare id always means the local one).
+	pub fn resolve(&self, actor: &str) -> Result<Kind> {
+		if let Some(member) = self.member(actor) {
 			return Ok(member.kind.clone());
 		}
+
+		let base = actor.split('.').next().unwrap_or(actor);
 
 		let kind = match base {
 			"bird" => Kind::Bird(palette::CORNFLOWER),
@@ -225,9 +260,20 @@ impl Cast {
 			"toothbrush" => Kind::Toothbrush(palette::TEAL),
 			_ => {
 				let known: Vec<&str> = self.members.keys().map(String::as_str).collect();
+				let invited: Vec<String> = self
+					.guests
+					.iter()
+					.map(|guest| format!("{}/{}", guest.world, guest.member.id))
+					.collect();
+				let guests = if invited.is_empty() {
+					String::new()
+				} else {
+					format!("; guests are {}", invited.join(", "))
+				};
+
 				bail!(
 					"unknown actor `{actor}`; cast members are {}, and generic actors are bird, \
-					 dog, worm, flower, tree, toothbrush",
+					 dog, worm, flower, tree, toothbrush{guests}",
 					known.join(", ")
 				);
 			}
@@ -236,8 +282,32 @@ impl Cast {
 		Ok(kind)
 	}
 
+	/// The cast member an actor id names: one of this world's, or a guest. Copies
+	/// (`@stinky.monday`) name their base member; a guest is named `world.id` when its id
+	/// clashes with a local one.
 	pub fn member(&self, actor: &str) -> Option<&Member> {
-		self.members.get(actor.split('.').next().unwrap_or(actor))
+		if let Some((world, rest)) = actor.split_once('.') {
+			let base = rest.split('.').next().unwrap_or(rest);
+
+			if let Some(guest) = self
+				.guests
+				.iter()
+				.find(|guest| guest.world == world && guest.member.id == base)
+			{
+				return Some(&guest.member);
+			}
+		}
+
+		let base = actor.split('.').next().unwrap_or(actor);
+
+		if let Some(member) = self.members.get(base) {
+			return Some(member);
+		}
+
+		self.guests
+			.iter()
+			.find(|guest| guest.member.id == base)
+			.map(|guest| &guest.member)
 	}
 }
 
@@ -427,6 +497,61 @@ colour = "#c9865a"
 		let cast = Cast::parse(CAST).unwrap();
 		let message = format!("{:#}", cast.resolve("granny").unwrap_err());
 		assert!(message.contains("biscuit, stinky"), "{message}");
+	}
+
+	#[test]
+	fn guests_resolve_by_id_and_by_world_on_a_clash() {
+		let mut cast = Cast::parse(CAST).unwrap();
+		let visitor = |id: &str| {
+			Member {
+				id: id.into(),
+				name: "Visitor".into(),
+				born: None,
+				habit: None,
+				about: None,
+				voice: None,
+				kind: Kind::Figure(
+					build_look(
+						"visitor",
+						&toml::from_str("name = \"V\"\nskin = \"teal\"\n").unwrap(),
+						Path::new(""),
+						&StylePack::default_pack(),
+					)
+					.unwrap(),
+				),
+			}
+		};
+
+		// No clash: the bare id finds the guest.
+		cast.add_guest("kiteharbour", visitor("hana"));
+		assert!(cast.member("hana").is_some_and(|m| m.name == "Visitor"));
+		assert!(cast.resolve("hana").unwrap().is_figure());
+		assert!(cast.member("hana.copy").is_some_and(|m| m.id == "hana"));
+
+		// Qualified names always find the guest.
+		assert!(
+			cast.member("kiteharbour.hana")
+				.is_some_and(|m| m.id == "hana"),
+			"world.id names the guest"
+		);
+
+		// A clash: the bare id means the local one, world.id the guest.
+		cast.add_guest("kerfuffle", visitor("stinky"));
+		assert!(
+			cast.member("stinky")
+				.is_some_and(|m| m.name == "Stinky McStinkbreath")
+		);
+		assert!(
+			cast.member("kerfuffle.stinky")
+				.is_some_and(|m| m.name == "Visitor"),
+			"world.id still finds the guest"
+		);
+
+		let message = format!("{:#}", cast.resolve("granny").unwrap_err());
+		assert!(
+			message.contains("guests are kiteharbour/hana, kerfuffle/stinky"),
+			"{message}"
+		);
 	}
 
 	#[test]

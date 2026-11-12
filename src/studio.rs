@@ -778,7 +778,7 @@ impl Studio {
 		);
 		let mut script = Story::load(&path)?;
 		world.furnish(&mut script)?;
-		let cast = world.cast()?;
+		let cast = world.cast_for(&script)?;
 		Ok((world, script, cast))
 	}
 
