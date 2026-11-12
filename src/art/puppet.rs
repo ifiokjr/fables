@@ -196,6 +196,12 @@ fn grip(fist: &Shape) -> f32 {
 	fist.bounds().1.y * (17.0 / 32.0)
 }
 
+/// How many of the cartoon fist's 32 units long a kit draws its `fist`: 1 for the cartoon, more
+/// for a kit drawn bigger in its own units, so distances round a held thing grow with the hand.
+fn fist_size(fist: &Shape) -> f32 {
+	fist.bounds().1.y / 32.0
+}
+
 /// A character's authored puppet: their part file over their style's kit, read and checked once.
 #[derive(Clone, Debug)]
 pub struct Authored {
@@ -1873,10 +1879,13 @@ fn draw_prop(
 			svg.end();
 		}
 		Prop::Toothbrush => {
-			let brushing = (fist - held.mouth).len() < 70.0;
+			// Near the mouth, it is brushing; how near, and how far it scrubs, grow with the
+			// hand the kit draws.
+			let size = fist_size(&puppet.required("hand-fist", 0.0));
+			let brushing = (fist - held.mouth).len() < 70.0 * size;
 			let (dir, scrub) = if brushing {
 				let towards = if held.mouth.x < fist.x { -1.0 } else { 1.0 };
-				(pt(towards, 0.0), (held.time * 22.0).sin() * 8.0)
+				(pt(towards, 0.0), (held.time * 22.0).sin() * 8.0 * size)
 			} else {
 				// Sticking out of the fist, sideways from the forearm, away from the body.
 				(along.perp() * -side, 0.0)
@@ -3075,6 +3084,10 @@ mod tests {
 		);
 		// The anime fist is nearly three times as long, so its grip is further down it.
 		assert!(grip(&anime) > 40.0 && grip(&anime) < anime.bounds().1.y * 0.6);
+		// And a toothbrush counts as near the mouth from nearly three times as far away, while
+		// the cartoon's distances stay exactly what they were.
+		assert_eq!(fist_size(&cartoon), 1.0);
+		assert!(fist_size(&anime) > 2.5 && fist_size(&anime) < 3.0);
 	}
 
 	/// Every stance, solved on `body`, three-quarters turned.
