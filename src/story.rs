@@ -32,7 +32,185 @@ use crate::art::light::Light;
 use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::art::style::StyleName;
+use crate::video::audio::Music;
+use crate::video::audio::MusicDefault;
+use crate::video::audio::Sound;
 pub use crate::video::voice::Voice;
+
+/// Who a book is read aloud to. The band sets the narration's pace, and the read-aloud limits a
+/// reviewer measures the words against; `fables new` starts every book at [`Age::DEFAULT`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Age {
+	Under3,
+	ThreeToFive,
+	FiveToSeven,
+}
+
+impl Age {
+	pub const ALL: [(&'static str, Age); 3] = [
+		("under-3", Age::Under3),
+		("3-5", Age::ThreeToFive),
+		("5-7", Age::FiveToSeven),
+	];
+	/// The band a new book starts in when neither the script nor the world names one.
+	pub const DEFAULT: Age = Age::ThreeToFive;
+	/// The read-aloud limits, one row per band. A reviewer reads this table rather than its own
+	/// copy.
+	pub const READ_ALOUD: [(&'static str, ReadAloud); 3] = [
+		(
+			"under-3",
+			ReadAloud {
+				page: (1, 25),
+				book: (0, 250),
+			},
+		),
+		(
+			"3-5",
+			ReadAloud {
+				page: (15, 45),
+				book: (250, 900),
+			},
+		),
+		(
+			"5-7",
+			ReadAloud {
+				page: (25, 60),
+				book: (400, 1400),
+			},
+		),
+	];
+
+	pub fn parse(value: &str) -> Option<Age> {
+		Self::ALL
+			.iter()
+			.find(|(key, _)| key.eq_ignore_ascii_case(value))
+			.map(|(_, age)| *age)
+	}
+
+	pub fn name(self) -> &'static str {
+		Self::ALL
+			.iter()
+			.find(|(_, age)| *age == self)
+			.map_or("", |(name, _)| *name)
+	}
+
+	/// The names, for error messages that list the options.
+	pub fn names() -> String {
+		Self::ALL.map(|(name, _)| name).join(", ")
+	}
+
+	/// The band's row in [`Age::READ_ALOUD`].
+	fn read_aloud(self) -> ReadAloud {
+		match Self::READ_ALOUD
+			.iter()
+			.find(|(name, _)| *name == self.name())
+		{
+			Some((_, limits)) => *limits,
+			None => unreachable!("every age band has a row in READ_ALOUD"),
+		}
+	}
+
+	/// (min, max) words a page for this band.
+	pub fn words_per_page(self) -> (u32, u32) {
+		self.read_aloud().page
+	}
+
+	/// (min, max) words a book for this band.
+	pub fn words_per_book(self) -> (u32, u32) {
+		self.read_aloud().book
+	}
+
+	/// How this band is read aloud: the rate, the silences and the room to look.
+	pub fn pacing(self) -> Pacing {
+		match self {
+			// Slow, with long gaps: a small child is still finding the pictures.
+			Age::Under3 => {
+				Pacing {
+					rate: 125,
+					lead_in: 1.2,
+					gap: 0.8,
+					beat: 0.32,
+					tail: 1.6,
+					reveal: 2.0,
+				}
+			}
+			Age::ThreeToFive => {
+				Pacing {
+					rate: 135,
+					lead_in: 1.0,
+					gap: 0.65,
+					beat: 0.26,
+					tail: 1.3,
+					reveal: 1.75,
+				}
+			}
+			Age::FiveToSeven => {
+				Pacing {
+					rate: 150,
+					lead_in: 0.85,
+					gap: 0.5,
+					beat: 0.2,
+					tail: 1.0,
+					reveal: REVEAL,
+				}
+			}
+		}
+	}
+}
+
+impl<'de> Deserialize<'de> for Age {
+	fn deserialize<D: serde::Deserializer<'de>>(
+		deserializer: D,
+	) -> std::result::Result<Self, D::Error> {
+		let value = String::deserialize(deserializer)?;
+		Self::parse(&value).ok_or_else(|| {
+			serde::de::Error::custom(format!(
+				"unknown age `{value}`; use one of: {}",
+				Self::names()
+			))
+		})
+	}
+}
+
+/// The read-aloud limits for one age band: words a page and words a book, each a range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadAloud {
+	pub page: (u32, u32),
+	pub book: (u32, u32),
+}
+
+/// How long a page is seen before it is talked over, before the age band scales it.
+const REVEAL: f32 = 1.5;
+
+/// The read-aloud clock: how fast the narrator reads, and how much air the page needs around
+/// the words. [`Age::pacing`] fills it in; a book with no age gets [`Pacing::LEGACY`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pacing {
+	/// Words a minute the narrator is asked for.
+	pub rate: u32,
+	/// Silence before a page's first line.
+	pub lead_in: f32,
+	/// Silence between paragraphs.
+	pub gap: f32,
+	/// Silence between a quote and its dialogue tag.
+	pub beat: f32,
+	/// Silence after a page's last line.
+	pub tail: f32,
+	/// Silence before the first line of a page in a new place.
+	pub reveal: f32,
+}
+
+impl Pacing {
+	/// The timing every book had before age bands existed: 165 words a minute and no reveal.
+	pub const LEGACY: Pacing = Pacing {
+		rate: 165,
+		lead_in: 0.55,
+		gap: 0.4,
+		beat: 0.18,
+		tail: 0.75,
+		reveal: 0.55,
+	};
+}
 
 /// The longest beat of silence a script can ask for: a `@pause` beyond it is a mistake, not a
 /// pause, and a video's buffers are sized from the total.
@@ -49,6 +227,10 @@ pub struct Meta {
 	/// and this fills in when a script leaves it out (see [`world`](crate::world)).
 	#[serde(default)]
 	pub author: String,
+	/// The audience the book is read aloud to: `under-3`, `3-5` or `5-7`. It sets the
+	/// narration's pace and the read-aloud limits.
+	#[serde(default)]
+	pub age: Option<Age>,
 	#[serde(default)]
 	pub illustrator: Option<String>,
 	#[serde(default)]
@@ -74,6 +256,10 @@ pub struct Meta {
 	/// The cast member drawn on the cover.
 	#[serde(default)]
 	pub star: Option<String>,
+	/// The story flow the book was started from (`fables new --flow`, or a world's own flow):
+	/// `three-tries`, `pile-up`, `there-and-back` and the rest of `fables flow list`.
+	#[serde(default)]
+	pub flow: Option<String>,
 	/// The world the book belongs to, as a folder relative to the script. Defaults to the
 	/// nearest `world.toml` above the script (see [`world`](crate::world)).
 	#[serde(default)]
@@ -161,6 +347,14 @@ pub struct VideoOptions {
 	/// plain tween exactly.
 	#[serde(default)]
 	pub acting: Acting,
+	/// The music: `auto` (each page's light picks a cue), a cue name, or `none`.
+	#[serde(default)]
+	pub music: MusicDefault,
+	/// Procedural ambience from each setting and light. On for a book with an `age`, so a book
+	/// with neither an `age` nor `ambience = true` keeps the soundtrack it always had;
+	/// `ambience = false` turns it off even for a book with an `age`.
+	#[serde(default)]
+	pub ambience: Option<bool>,
 }
 
 impl Default for VideoOptions {
@@ -172,6 +366,8 @@ impl Default for VideoOptions {
 			depth_of_field: true,
 			transition: None,
 			acting: Acting::default(),
+			music: MusicDefault::default(),
+			ambience: None,
 		}
 	}
 }
@@ -305,6 +501,16 @@ pub enum Beat {
 		name: String,
 		line: usize,
 	},
+	/// A dead stop: the voice, the music, the ambience and the performance's idle movement.
+	Hold {
+		seconds: f32,
+		line: usize,
+	},
+	/// A music cue from here on, whatever the light would have chosen.
+	Music {
+		music: Music,
+		line: usize,
+	},
 }
 
 #[derive(Clone, Debug)]
@@ -340,6 +546,34 @@ impl Page {
 		self.option("transition")
 			.and_then(|token| token.value.as_deref())
 			.and_then(Transition::parse)
+	}
+
+	/// How long the page holds silently before its first line (`hold=1.2`), for a reveal.
+	pub fn hold(&self) -> Result<f32> {
+		let Some(token) = self.option("hold") else {
+			return Ok(0.0);
+		};
+
+		let Some(value) = token.value.as_deref() else {
+			bail!(
+				"line {}: `hold` needs a number of seconds, e.g. `hold=1.5`",
+				self.line
+			);
+		};
+		let seconds: f32 = value.parse().map_err(|_| {
+			anyhow::anyhow!(
+				"line {}: `hold={value}` is not a number of seconds, e.g. `hold=1.5`",
+				self.line
+			)
+		})?;
+
+		ensure!(
+			seconds.is_finite() && (0.0..=MAX_PAUSE).contains(&seconds),
+			"line {}: `hold` takes 0 to {MAX_PAUSE:.0} seconds, e.g. `hold=1.5`",
+			self.line
+		);
+
+		Ok(seconds)
 	}
 
 	/// Whether a stage direction directs the camera, which makes the page shot exactly as
@@ -415,6 +649,9 @@ pub struct Story {
 	/// The light pages start in when their heading says nothing (`light = "dawn"` in front
 	/// matter, or the world's default).
 	pub light: Light,
+	/// The audience the book is read aloud to: its own `age`, else its world's, else `None` so
+	/// it keeps the timing it was rendered with before age bands existed.
+	pub age: Option<Age>,
 }
 
 /// How a world's drawing style prints and moves (see [`StylePack`](crate::art::pack::StylePack)).
@@ -434,6 +671,19 @@ impl Story {
 		self.meta.voice.as_ref().unwrap_or(&DEFAULT)
 	}
 
+	/// How the book is read aloud. A book with no age anywhere keeps the older timing exactly,
+	/// so its video is unchanged; `fables check` suggests an `age` for it.
+	pub fn pacing(&self) -> Pacing {
+		self.age.map_or(Pacing::LEGACY, Age::pacing)
+	}
+
+	/// Whether the soundtrack carries ambience beds.
+	pub fn ambience(&self) -> bool {
+		self.meta.video.ambience.unwrap_or(self.age.is_some())
+	}
+
+	/// The book's art style.
+	/// The skin pages are drawn in, printed the way the world's drawing style prints.
 	/// The page skin pages are printed in, in order of precedence: `--style` (which the command
 	/// line writes into `meta.style`), the script's own `style` front matter, the world's
 	/// drawing style's `skin`, then `riso`.
@@ -497,6 +747,7 @@ pub fn parse(source: &str) -> Result<Story> {
 		.unwrap_or_else(Light::day);
 
 	let slug = slugify(&meta.title);
+	let age = meta.age;
 	ensure!(
 		!slug.is_empty(),
 		"the title needs at least one letter or digit: it names the book's output folder"
@@ -513,10 +764,11 @@ pub fn parse(source: &str) -> Result<Story> {
 		skin: None,
 		settings: Library::built_in(),
 		light,
+		age,
 	})
 }
 
-fn split_front_matter(source: &str) -> Result<(&str, &str, usize)> {
+pub(crate) fn split_front_matter(source: &str) -> Result<(&str, &str, usize)> {
 	let Some(rest) = source.trim_start().strip_prefix("+++") else {
 		bail!("a story must begin with TOML front matter between `+++` lines");
 	};
@@ -574,7 +826,8 @@ fn parse_pages(body: &str, first_line: usize) -> Result<Vec<Page>> {
 			let page = pages.last_mut().with_context(|| {
 				format!("line {line_no}: stage direction before the first `# setting` heading")
 			})?;
-			page.beats.push(parse_direction(direction, line_no)?);
+			page.beats
+				.push(parse_direction(without_comment(direction), line_no)?);
 			continue;
 		}
 
@@ -630,6 +883,13 @@ fn parse_heading(heading: &str, line: usize) -> Result<Page> {
 	})
 }
 
+/// A stage direction may end with a `// note`, which is ignored (`@camera shot=wide // pinned`).
+fn without_comment(direction: &str) -> &str {
+	direction
+		.find(" //")
+		.map_or(direction, |at| &direction[..at])
+}
+
 fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
 	let mut words = direction.split_whitespace();
 	let Some(actor) = words.next() else {
@@ -660,7 +920,50 @@ fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
 				.map(|token| token.key.clone())
 				.with_context(|| format!("line {line}: `@sfx` needs a sound name"))?;
 
+			Sound::parse(&name).with_context(|| {
+				format!(
+					"line {line}: unknown sound `{name}`; try {}",
+					Sound::names()
+				)
+			})?;
+
 			Ok(Beat::Sfx { name, line })
+		}
+		"hold" => {
+			let value = tokens
+				.first()
+				.map(|token| token.key.as_str())
+				.with_context(|| {
+					format!("line {line}: `@hold` needs a number of seconds, e.g. `@hold 1.5`")
+				})?;
+			let seconds: f32 = value.parse().map_err(|_| {
+				anyhow::anyhow!(
+					"line {line}: `@hold {value}` is not a number of seconds, e.g. `@hold 1.5`"
+				)
+			})?;
+
+			ensure!(
+				seconds.is_finite() && (0.0..=MAX_PAUSE).contains(&seconds),
+				"line {line}: `@hold` takes 0 to {MAX_PAUSE:.0} seconds, e.g. `@hold 1.5`"
+			);
+
+			Ok(Beat::Hold { seconds, line })
+		}
+		"music" => {
+			let value = tokens
+				.first()
+				.map(|token| token.key.as_str())
+				.with_context(|| {
+					format!("line {line}: `@music` needs a cue; try {}", Music::names())
+				})?;
+			let music = Music::parse(value).with_context(|| {
+				format!(
+					"line {line}: unknown music `{value}`; try {}",
+					Music::names()
+				)
+			})?;
+
+			Ok(Beat::Music { music, line })
 		}
 		_ => {
 			Ok(Beat::Direct(Directive {
@@ -938,9 +1241,136 @@ Hello.
 	}
 
 	#[test]
+	fn a_direction_may_end_with_a_comment() {
+		let story = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@camera shot=wide // pinned\nHi.\n",
+		)
+		.unwrap();
+		let Beat::Direct(directive) = &story.pages[0].beats[0] else {
+			panic!("a camera direction");
+		};
+		assert_eq!(directive.actor, "camera");
+		assert_eq!(directive.tokens.len(), 1, "{:?}", directive.tokens);
+		assert_eq!(directive.tokens[0].to_string(), "shot=wide");
+	}
+
+	#[test]
 	fn slugs_are_file_safe() {
 		assert_eq!(slugify("Stinky McStinkbreath!"), "stinky-mcstinkbreath");
 		assert_eq!(slugify("  The  End  "), "the-end");
+	}
+
+	#[test]
+	fn age_sets_the_read_aloud_pace_from_one_table() {
+		let with = |age: &str| {
+			parse(&format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\nage = \"{age}\"\n+++\n# park\nHi.\n"
+			))
+			.unwrap()
+		};
+
+		assert_eq!(with("under-3").pacing().rate, 125);
+		assert_eq!(with("3-5").pacing().rate, 135);
+		assert_eq!(with("5-7").pacing().rate, 150);
+
+		// A book written before age bands keeps exactly the timing it was rendered with.
+		let legacy = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\nHi.\n").unwrap();
+		assert_eq!(legacy.age, None);
+		assert_eq!(legacy.pacing(), Pacing::LEGACY);
+		assert_eq!(legacy.pacing().rate, 165);
+		assert!(!legacy.ambience(), "a book with no age has no ambience");
+
+		// Younger listeners get longer silences and more room to look.
+		assert!(Age::Under3.pacing().gap > Age::ThreeToFive.pacing().gap);
+		assert!(Age::ThreeToFive.pacing().gap > Age::FiveToSeven.pacing().gap);
+		assert!(Age::Under3.pacing().tail > Age::FiveToSeven.pacing().tail);
+		assert!(Age::Under3.pacing().lead_in > Age::FiveToSeven.pacing().lead_in);
+		assert!(Age::Under3.pacing().reveal > Age::ThreeToFive.pacing().reveal);
+		assert!(Age::FiveToSeven.pacing().reveal >= REVEAL);
+
+		for (name, age) in Age::ALL {
+			assert_eq!(Age::parse(name), Some(age));
+			assert_eq!(age.name(), name);
+			assert_eq!(
+				Age::READ_ALOUD
+					.iter()
+					.filter(|(key, ..)| *key == name)
+					.count(),
+				1,
+				"{name} has one row in the table"
+			);
+		}
+
+		assert_eq!(Age::DEFAULT, Age::ThreeToFive);
+		assert_eq!(Age::ThreeToFive.words_per_page(), (15, 45));
+		assert_eq!(Age::Under3.words_per_book(), (0, 250));
+	}
+
+	#[test]
+	fn a_book_with_an_age_gets_ambience_unless_it_says_no() {
+		let with = |front: &str| {
+			parse(&format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\n{front}+++\n# park\nHi.\n"
+			))
+			.unwrap()
+		};
+
+		assert!(with("age = \"3-5\"\n").ambience());
+		assert!(!with("age = \"3-5\"\n[video]\nambience = false\n").ambience());
+		assert!(with("[video]\nambience = true\n").ambience());
+		assert!(!with("").ambience());
+	}
+
+	#[test]
+	fn an_unknown_age_names_the_bands_and_the_line() {
+		let error =
+			parse("+++\ntitle = \"T\"\nauthor = \"A\"\nage = \"toddler\"\n+++\n# park\nHi.\n")
+				.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 4"), "{message}");
+		assert!(
+			message.contains("under-3") && message.contains("5-7"),
+			"{message}"
+		);
+	}
+
+	#[test]
+	fn bad_timing_words_are_errors_with_the_line_and_the_options() {
+		let error = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@hold soon\nHi.\n")
+			.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(
+			message.contains("line 6") && message.contains("1.5"),
+			"{message}"
+		);
+
+		let error = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@music loud\nHi.\n")
+			.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(
+			message.contains("line 6") && message.contains("unknown music `loud`"),
+			"{message}"
+		);
+		assert!(message.contains("sleepy"), "{message}");
+
+		let page =
+			parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park hold=soon\nHi.\n").unwrap();
+		let error = page.pages[0].hold().unwrap_err();
+		let message = format!("{error:#}");
+		assert!(
+			message.contains("line 5") && message.contains("1.5"),
+			"{message}"
+		);
+
+		let error = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n[video]\nmusic = \"loud\"\n+++\n# park\nHi.\n",
+		)
+		.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(
+			message.contains("unknown music `loud`") && message.contains("auto"),
+			"{message}"
+		);
 	}
 
 	#[test]
@@ -996,6 +1426,162 @@ Hello.
 		assert!(
 			format!("{error:#}").contains("expected `own` or `host`"),
 			"{error:#}"
+		);
+	}
+
+	#[test]
+	fn age_bands_pace_the_book_and_carry_the_read_aloud_limits() {
+		let band = |value: &str| {
+			parse(&format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\nage = \"{value}\"\n+++\n# plain\nHi.\n"
+			))
+			.unwrap()
+		};
+
+		assert_eq!(band("under-3").age, Some(Age::Under3));
+		assert_eq!(band("3-5").pacing().rate, 135);
+		assert_eq!(band("5-7").pacing().rate, 150);
+
+		// Younger listeners get more air: a slower lead-in, wider gaps and a longer tail.
+		let under = Age::Under3.pacing();
+		let middle = Age::ThreeToFive.pacing();
+		let older = Age::FiveToSeven.pacing();
+		assert!(under.rate < middle.rate && middle.rate < older.rate);
+		assert!(under.gap > middle.gap && middle.gap > older.gap);
+		assert!(under.tail > middle.tail && middle.tail > older.tail);
+		assert!(under.reveal >= 1.5 && older.reveal >= 1.5, "room to look");
+
+		// A book with no age anywhere keeps the timing every book had.
+		let legacy = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n").unwrap();
+		assert_eq!(legacy.age, None);
+		assert_eq!(legacy.pacing(), Pacing::LEGACY);
+		assert_eq!(legacy.pacing().rate, 165);
+
+		// One row per band, from the one table a reviewer reads.
+		for (name, age) in Age::ALL {
+			assert_eq!(age.name(), name);
+			assert_eq!(Age::parse(name), Some(age));
+			assert!(age.words_per_page().1 >= age.words_per_page().0);
+			assert!(age.words_per_book().1 >= age.words_per_book().0);
+		}
+
+		assert_eq!(Age::ThreeToFive.words_per_page(), (15, 45));
+		assert_eq!(Age::FiveToSeven.words_per_book(), (400, 1400));
+		assert_eq!(Age::DEFAULT, Age::ThreeToFive);
+	}
+
+	#[test]
+	fn an_unknown_age_names_the_bands_with_its_line() {
+		let error =
+			parse("+++\ntitle = \"T\"\nauthor = \"A\"\nage = \"toddler\"\n+++\n# plain\nHi.\n")
+				.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("unknown age `toddler`"), "{message}");
+		assert!(message.contains("under-3"), "{message}");
+		assert!(message.contains("line 4"), "{message}");
+	}
+
+	#[test]
+	fn hold_and_music_are_timing_beats() {
+		let story = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park hold=1.2 music=sleepy\n@hold \
+			 0.8\n@music tense\nHi.\n",
+		)
+		.unwrap();
+		let page = &story.pages[0];
+		assert!((page.hold().unwrap() - 1.2).abs() < 1e-6);
+		assert!(
+			matches!(page.beats[0], Beat::Hold { seconds, .. } if (seconds - 0.8).abs() < 1e-6)
+		);
+		assert!(matches!(
+			page.beats[1],
+			Beat::Music {
+				music: Music::Tense,
+				..
+			}
+		));
+	}
+
+	#[test]
+	fn a_bad_hold_or_music_names_the_line_and_the_choices() {
+		let bad_hold = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@hold soon\nHi.\n")
+			.unwrap_err();
+		let message = format!("{bad_hold:#}");
+		assert!(message.contains("line 6"), "{message}");
+		assert!(message.contains("number of seconds"), "{message}");
+
+		let bad_music =
+			parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@music loud\nHi.\n")
+				.unwrap_err();
+		let message = format!("{bad_music:#}");
+		assert!(message.contains("line 6"), "{message}");
+		assert!(message.contains("unknown music `loud`"), "{message}");
+		assert!(message.contains("sleepy"), "{message}");
+
+		let page_hold =
+			parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park hold=soon\nHi.\n").unwrap();
+		let message = format!("{:#}", page_hold.pages[0].hold().unwrap_err());
+		assert!(message.contains("line 5"), "{message}");
+		assert!(message.contains("not a number"), "{message}");
+	}
+
+	#[test]
+	fn the_video_options_take_a_music_choice_and_ambience() {
+		let story = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n[video]\nmusic = \"play\"\nambience = \
+			 false\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		assert_eq!(story.meta.video.music, MusicDefault::Cue(Music::Play));
+		assert_eq!(story.meta.video.ambience, Some(false));
+		assert!(!story.ambience());
+
+		let auto = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n").unwrap();
+		assert_eq!(auto.meta.video.music, MusicDefault::Auto);
+		assert_eq!(auto.meta.video.ambience, None);
+		assert!(
+			!auto.ambience(),
+			"a book with no age and no ambience is unchanged"
+		);
+
+		let error = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n[video]\nmusic = \"loud\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("unknown music `loud`"), "{message}");
+		assert!(message.contains("auto"), "{message}");
+	}
+
+	#[test]
+	fn an_unknown_sound_names_the_line_and_the_effects() {
+		let error = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@sfx kazoo\nHi.\n")
+			.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 6"), "{message}");
+		assert!(message.contains("unknown sound `kazoo`"), "{message}");
+		assert!(message.contains("heartbeat"), "{message}");
+	}
+
+	#[test]
+	fn a_hold_takes_a_finite_number_of_at_most_sixty_seconds() {
+		for value in ["nan", "inf", "-1", "61"] {
+			let error = parse(&format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@hold {value}\nHi.\n"
+			))
+			.unwrap_err();
+			let message = format!("{error:#}");
+			assert!(
+				message.contains("line 6") && message.contains("0 to 60"),
+				"{value}: {message}"
+			);
+		}
+
+		let page = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park hold=61\nHi.\n").unwrap();
+		let message = format!("{:#}", page.pages[0].hold().unwrap_err());
+		assert!(
+			message.contains("line 5") && message.contains("0 to 60"),
+			"{message}"
 		);
 	}
 }

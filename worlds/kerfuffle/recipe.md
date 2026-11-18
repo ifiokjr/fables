@@ -5,6 +5,7 @@ author = "{{author}}"
 series = "Tales from Kerfuffle"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 dedication = "For everyone who has ever said NOPE."
 moral = "Write the one-line moral here. It is read out at the end of the video."
 blurb = "In the town of Kerfuffle, whatever you do shows on the outside. Write the back-cover blurb here."

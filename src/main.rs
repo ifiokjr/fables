@@ -74,19 +74,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-	/// Start a new book from the world's recipe.
+	/// Start a new book from a story flow, or from the world's recipe.
 	New {
 		/// The book (and its star's) name, e.g. "Bogey `McBogeyface`".
 		title: String,
 		/// The cast id of the star, from the world's cast.toml.
 		#[arg(long)]
 		star: String,
+		/// The cast id of the second character, for a flow that stages two or a crowd.
+		#[arg(long)]
+		friend: Option<String>,
+		/// The story flow to start from, from `fables flow list` (default: the world's
+		/// recipe.md, or three-tries when it has none).
+		#[arg(long)]
+		flow: Option<String>,
 		/// The author on the title page. Defaults to the world's `author` in world.toml.
 		#[arg(long)]
 		author: Option<String>,
 		/// Where books live (default: the world's stories/ folder).
 		#[arg(long)]
 		dir: Option<PathBuf>,
+	},
+	/// Choose a story flow: a laid-out shape a new book can start from.
+	Flow {
+		#[command(subcommand)]
+		action: FlowAction,
 	},
 	/// Start a world, and add characters to one.
 	World {
@@ -147,6 +159,10 @@ enum Command {
 		/// Also draw every mood for this cast member.
 		#[arg(long)]
 		moods: Option<String>,
+		/// Outline, on every setting of the places sheet, where a typical text card and the
+		/// actors sit.
+		#[arg(long)]
+		zones: bool,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -191,7 +207,7 @@ enum Command {
 		#[arg(long)]
 		preview: bool,
 	},
-	/// Draw the video's camera plan as a comic strip: one labelled panel per camera setup.
+	/// Draw the video's camera plan as a comic strip and write its shot list.
 	Storyboard {
 		story: PathBuf,
 		#[arg(long, default_value = "out")]
@@ -199,12 +215,46 @@ enum Command {
 		/// Which shape's camera plan to draw.
 		#[arg(long, value_enum, default_value = "landscape")]
 		format: Shape,
+		/// Write the director's shots into the script as editable `@camera` directions, in the
+		/// `--format` shape's plan. Name pages to pin only them: `--pin page=3,5`.
+		#[arg(long, num_args = 0..=1, default_missing_value = "all")]
+		pin: Option<String>,
+		/// Remove the directions a previous `--pin` wrote.
+		#[arg(long)]
+		unpin: bool,
+	},
+	/// Hold the storyboard's shots for their real durations over the soundtrack: an animatic
+	/// that judges timing in seconds rather than rendering every frame.
+	Animatic {
+		story: PathBuf,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+		/// Which shape to cut.
+		#[arg(long, value_enum, default_value = "landscape")]
+		format: Shape,
+		/// Leave every line silent, timed by its estimate: nothing is recorded, so it needs no
+		/// voice at all. Without it, a line whose voice cannot record here is silent anyway.
+		#[arg(long)]
+		silent: bool,
 	},
 	/// Build the book and both videos.
 	All {
 		story: PathBuf,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
+	},
+}
+
+#[derive(Subcommand)]
+enum FlowAction {
+	/// List the story flows: what each is for, how many characters it stages and its length.
+	List,
+	/// Show a flow's beats as a table.
+	///
+	/// Example: `fables flow show three-tries`
+	Show {
+		/// The flow's name, from `fables flow list`.
+		name: String,
 	},
 }
 
@@ -448,9 +498,32 @@ fn run(cli: Cli) -> Result<()> {
 		Command::New {
 			title,
 			star,
+			friend,
+			flow,
 			author,
 			dir,
-		} => new_story(&world()?, &title, &star, author.as_deref(), dir.as_deref()),
+		} => {
+			new_story(
+				&world()?,
+				&title,
+				&star,
+				friend.as_deref(),
+				flow.as_deref(),
+				author.as_deref(),
+				dir.as_deref(),
+			)
+		}
+		Command::Flow { action } => {
+			let world = match flag {
+				Some(dir) => Some(World::load(dir)?),
+				None => World::find(&root).ok(),
+			};
+
+			match action {
+				FlowAction::List => flow_list(world.as_ref()),
+				FlowAction::Show { name } => flow_show(world.as_ref(), &name),
+			}
+		}
 		Command::World { action } => {
 			match action {
 				WorldAction::New {
@@ -515,14 +588,20 @@ fn run(cli: Cli) -> Result<()> {
 				}
 			}
 		}
-		Command::Sheets { moods, out } => {
+		Command::Sheets { moods, zones, out } => {
 			let choices = style_choices(style.as_deref())?;
 			let world = world()?;
+			let zones = if zones {
+				Some(press::sheets::Zones::measure(&world.style()?)?)
+			} else {
+				None
+			};
 
 			for style in sheet_styles(&choices) {
 				sheets(
 					&world,
 					moods.as_deref(),
+					zones.as_ref(),
 					&out.join("sheets").join(style.name.name()),
 					style,
 				)?;
@@ -665,15 +744,50 @@ fn run(cli: Cli) -> Result<()> {
 				video(story, cast, &out, &format.formats(), preview)
 			})
 		}
-		Command::Storyboard { story, out, format } => {
+		Command::Storyboard {
+			story,
+			out,
+			format,
+			pin,
+			unpin,
+		} => {
 			anyhow::ensure!(
 				format != Shape::Both,
 				"storyboard draws one shape; use --format landscape or portrait"
 			);
+			anyhow::ensure!(
+				!(pin.is_some() && unpin),
+				"--pin writes camera directions and --unpin removes them; use one"
+			);
 			let choices = style_choices(style.as_deref())?;
+
+			if pin.is_some() || unpin {
+				each(&story, |path| {
+					match &pin {
+						Some(spec) => pin_story(path, flag, spec, &out, format == Shape::Portrait),
+						None => unpin_story(path),
+					}
+				})?;
+			}
 
 			each_style(&story, &choices, flag, |story, cast, _| {
 				storyboard(story, cast, &out, format == Shape::Portrait)
+			})
+		}
+		Command::Animatic {
+			story,
+			out,
+			format,
+			silent,
+		} => {
+			anyhow::ensure!(
+				format != Shape::Both,
+				"animatic cuts one shape; use --format landscape or portrait"
+			);
+			let choices = style_choices(style.as_deref())?;
+
+			each_style(&story, &choices, flag, |story, cast, _| {
+				animatic(story, cast, &out, format == Shape::Portrait, silent)
 			})
 		}
 		Command::All { story, out } => {
@@ -803,25 +917,17 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	Ok(())
 }
 
-/// Starts a book from the world's recipe, filled in with a title, a star and an author.
+/// Starts a book from a story flow (or the world's recipe), filled in with a title, a star and
+/// an author.
 fn new_story(
 	world: &World,
 	title: &str,
 	star: &str,
+	friend: Option<&str>,
+	flow: Option<&str>,
 	author: Option<&str>,
 	dir: Option<&Path>,
 ) -> Result<()> {
-	let author = author.or(world.author.as_deref()).with_context(|| {
-		"no author for the title page: pass --author, or set author in the world's world.toml"
-	})?;
-	let recipe = world.recipe().with_context(|| {
-		format!(
-			"{} has no recipe.md to start a book from",
-			world.dir.display()
-		)
-	})?;
-	let recipe = std::fs::read_to_string(&recipe)
-		.with_context(|| format!("could not read {}", recipe.display()))?;
 	let slug = fables::story::slugify(title);
 	anyhow::ensure!(
 		!slug.is_empty(),
@@ -839,20 +945,13 @@ fn new_story(
 		);
 	}
 
-	let year = 1970
-		+ std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map_or(0, |elapsed| elapsed.as_secs() / 31_556_952);
-	let script = recipe
-		.replace("{{title}}", title)
-		.replace("{{star}}", star)
-		.replace("{{author}}", author)
-		.replace("{{year}}", &year.to_string());
+	let started = fables::flow::start(world, title, star, friend, flow, author)?;
 
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
-	std::fs::write(&path, script).with_context(|| format!("could not write {}", path.display()))?;
-	say!("✓ wrote {} from the {} recipe", path.display(), world.name)?;
+	std::fs::write(&path, started.script)
+		.with_context(|| format!("could not write {}", path.display()))?;
+	say!("✓ wrote {} from {}", path.display(), started.source)?;
 
 	if let Err(error) =
 		load(&path, None, Some(&world.dir)).and_then(|(story, cast, _)| check(&story, &cast, true))
@@ -866,6 +965,68 @@ fn new_story(
 	}
 
 	Ok(())
+}
+
+/// Prints the story flows a book can start from, and what each is for.
+fn flow_list(world: Option<&World>) -> Result<()> {
+	for flow in fables::flow::list(world)? {
+		say!("{} ({})", flow.name, flow.slug)?;
+		say!(
+			"  {}, {} story pages, {} words",
+			flow.needs.line(),
+			pages(flow.pages),
+			pages(flow.words)
+		)?;
+		say!("  {}", flow.about)?;
+		say!("  good for: {}", flow.good_for)?;
+	}
+
+	Ok(())
+}
+
+/// Prints one flow's beats as a table.
+fn flow_show(world: Option<&World>, name: &str) -> Result<()> {
+	let flow = fables::flow::find(world, name)?;
+	say!("{} ({})", flow.name, flow.slug)?;
+	say!(
+		"  {}, {} story pages, {} words",
+		flow.needs.line(),
+		pages(flow.pages),
+		pages(flow.words)
+	)?;
+	say!("  {}", flow.about)?;
+	say!("  good for: {}", flow.good_for)?;
+	say!("")?;
+
+	let width = flow
+		.beats
+		.iter()
+		.map(|beat| beat.name.len())
+		.max()
+		.unwrap_or(4)
+		.max(4);
+	say!("  {:<width$}  {:>5}  {:>7}", "beat", "pages", "words")?;
+
+	for beat in &flow.beats {
+		say!(
+			"  {:<width$}  {:>5}  {:>7}",
+			beat.name,
+			beat.pages,
+			pages((beat.words[0], beat.words[1]))
+		)?;
+		say!("    {}", beat.note)?;
+	}
+
+	Ok(())
+}
+
+/// A page or word range as `13–17`, or `15` when both ends agree.
+fn pages((min, max): (usize, usize)) -> String {
+	if min == max {
+		min.to_string()
+	} else {
+		format!("{min}–{max}")
+	}
 }
 
 /// Starts a world under `<root>/worlds/`, and says what to make next.
@@ -1048,6 +1209,13 @@ fn check(story: &Story, cast: &Cast, notes: bool) -> Result<()> {
 		}
 	}
 
+	if story.age.is_none() {
+		println!(
+			"· no `age` in the front matter, so the narrator keeps the older pace; add `age = \
+			 \"3-5\"` (or `under-3`, `5-7`) to pace the read-aloud."
+		);
+	}
+
 	Ok(())
 }
 
@@ -1109,7 +1277,13 @@ fn print(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	Ok(())
 }
 
-fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Result<()> {
+fn sheets(
+	world: &World,
+	moods: Option<&str>,
+	zones: Option<&press::sheets::Zones>,
+	out: &Path,
+	style: Style,
+) -> Result<()> {
 	let started = Instant::now();
 	let cast = world.cast()?;
 	let slug = fables::story::slugify(&world.name);
@@ -1125,7 +1299,11 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	let path = out.join(format!("{slug}-places.png"));
 	std::fs::write(
 		&path,
-		raster::png(&press::sheets::places_sheet(&*world.settings()?, style)?)?,
+		raster::png(&press::sheets::places_sheet(
+			&*world.settings()?,
+			style,
+			zones,
+		)?)?,
 	)?;
 	done(&path, started)?;
 
@@ -1503,14 +1681,112 @@ fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bo
 	Ok(())
 }
 
-fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
-	let started = Instant::now();
+/// Writes the director's shots into the script at `path` as `@camera` directions.
+fn pin_story(
+	path: &Path,
+	world: Option<&Path>,
+	spec: &str,
+	out: &Path,
+	portrait: bool,
+) -> Result<()> {
+	let (story, cast, _) = load(path, None, world)?;
+	let pages = pages_spec(spec, story.pages.len())?;
+	let timeline = publish::estimated_timeline(&story, &cast, out)?;
+	let source = std::fs::read_to_string(path)
+		.with_context(|| format!("could not read {}", path.display()))?;
+	let pinned = press::storyboard::pin(&source, &story, &timeline, pages.as_deref(), portrait)?;
+	std::fs::write(path, &pinned.script)
+		.with_context(|| format!("could not write {}", path.display()))?;
 
-	for path in publish::storyboard(story, cast, out, portrait)? {
-		done(&path, started)?;
+	for note in &pinned.notes {
+		say!("  {note}")?;
 	}
 
-	Ok(())
+	let list = pinned
+		.pages
+		.iter()
+		.map(usize::to_string)
+		.collect::<Vec<_>>()
+		.join(", ");
+	say!(
+		"✓ pinned {} camera directions into {} (pages {list})",
+		pinned.count,
+		path.display()
+	)
+}
+
+/// Removes the camera directions a previous `--pin` wrote.
+fn unpin_story(path: &Path) -> Result<()> {
+	let source = std::fs::read_to_string(path)
+		.with_context(|| format!("could not read {}", path.display()))?;
+	let (restored, removed) = press::storyboard::unpin(&source);
+	std::fs::write(path, &restored)
+		.with_context(|| format!("could not write {}", path.display()))?;
+	say!(
+		"✓ removed {removed} pinned camera directions from {}",
+		path.display()
+	)
+}
+
+/// The pages named by `--pin`: `all`, or `page=3,5`.
+fn pages_spec(spec: &str, count: usize) -> Result<Option<Vec<usize>>> {
+	let spec = spec.trim();
+
+	if spec.is_empty() || spec == "all" {
+		return Ok(None);
+	}
+
+	let list = spec.strip_prefix("page=").unwrap_or(spec);
+	let mut pages = Vec::new();
+
+	for part in list.split(',') {
+		let part = part.trim();
+		let page: usize = part.parse().map_err(|_| {
+			anyhow::anyhow!("`{part}` is not a page number; name pages like `--pin page=3,5`")
+		})?;
+		anyhow::ensure!(
+			(1..=count).contains(&page),
+			"page {page} is not in the book, which has {count} pages"
+		);
+		pages.push(page);
+	}
+
+	anyhow::ensure!(!pages.is_empty(), "name pages like `--pin page=3,5`");
+	Ok(Some(pages))
+}
+
+fn animatic(story: &Story, cast: &Cast, out: &Path, portrait: bool, silent: bool) -> Result<()> {
+	let started = Instant::now();
+	let format = if portrait {
+		Format::Portrait
+	} else {
+		Format::Landscape
+	};
+	let narration = if silent {
+		publish::Narration::Silent
+	} else {
+		publish::Narration::Voiced
+	};
+	let cut = publish::animatic(story, cast, out, format, narration)?;
+
+	if let Some(note) = &cut.note {
+		say!("  {note}")?;
+	}
+
+	done(&cut.path, started)
+}
+
+fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
+	let started = Instant::now();
+	let board = publish::storyboard(story, cast, out, portrait)?;
+
+	say!("{}", board.text)?;
+
+	for path in &board.images {
+		done(path, started)?;
+	}
+
+	done(&board.list, started)
 }
 
 fn done(path: &Path, started: Instant) -> Result<()> {
@@ -1546,7 +1822,7 @@ mod tests {
 	/// Runs `new_story` and reads the book it wrote.
 	fn new_book(world: &World, author: Option<&str>) -> Result<String> {
 		let path = world.stories().join("a-new-tale/story.md");
-		new_story(world, "A New Tale", "mo", author, None)?;
+		new_story(world, "A New Tale", "mo", None, None, author, None)?;
 		Ok(std::fs::read_to_string(path)?)
 	}
 
@@ -1575,5 +1851,89 @@ mod tests {
 			error.contains("--author") && error.contains("world.toml"),
 			"{error}"
 		);
+	}
+
+	#[test]
+	fn a_world_without_a_recipe_starts_from_the_default_flow() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"A. Writer\"\n");
+		std::fs::remove_file(world.dir.join("recipe.md")).unwrap();
+
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("flow = \"three-tries\""), "{script}");
+		assert!(script.contains("title = \"A New Tale\""), "{script}");
+	}
+
+	#[test]
+	fn a_named_flow_starts_from_that_flow() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"A. Writer\"\n");
+		let path = world.stories().join("a-new-tale/story.md");
+		new_story(
+			&world,
+			"A New Tale",
+			"mo",
+			None,
+			Some("gag-short"),
+			None,
+			None,
+		)
+		.unwrap();
+		let script = std::fs::read_to_string(path).unwrap();
+
+		assert!(script.contains("flow = \"gag-short\""), "{script}");
+		assert_eq!(script.matches("\n# ").count(), 7, "{script}");
+	}
+
+	#[test]
+	fn a_flow_that_needs_a_friend_without_one_names_the_flow_and_its_cast() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"A. Writer\"\n");
+		std::fs::write(
+			world.cast_file(),
+			"[mo]\nname = \"Mo\"\n[nan]\nname = \"Nan\"\nkind = \"grown-up\"\n",
+		)
+		.unwrap();
+
+		let error = format!(
+			"{:#}",
+			new_story(
+				&world,
+				"A New Tale",
+				"mo",
+				None,
+				Some("odd-couple"),
+				None,
+				None
+			)
+			.unwrap_err()
+		);
+		assert!(error.contains("two characters"), "{error}");
+		assert!(error.contains("mo, nan"), "{error}");
+	}
+
+	#[test]
+	fn a_new_book_starts_at_the_default_age() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("age = \"3-5\""), "{script}");
+		assert_eq!(script.matches("\nage").count(), 1, "{script}");
+	}
+
+	#[test]
+	fn a_recipe_that_names_its_own_age_keeps_it() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		std::fs::write(
+			world.dir.join("recipe.md"),
+			"+++\ntitle = \"{{title}}\"\nauthor = \"{{author}}\"\nstar = \"{{star}}\"\nage = \
+			 \"5-7\"\n+++\n\n# park\nHi.\n",
+		)
+		.unwrap();
+
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("age = \"5-7\""), "{script}");
+		assert_eq!(script.matches("\nage").count(), 1, "{script}");
 	}
 }
