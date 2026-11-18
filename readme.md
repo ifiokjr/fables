@@ -273,7 +273,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | `> A paragraph` | **Video only.** A summary line for the narrator. |
 | `*word*` | Bold. |
 | `**WORD**` | Shouted: big, red, in the display face. |
-| `// note` | A comment, ignored. It may also end a stage direction, as a pinned line does. |
+| `// note` | A comment, ignored. It may also end a stage direction, as a pinned line does: `@camera shot=wide move=push after=7.19 // pinned`. |
 
 ### Page headings
 
