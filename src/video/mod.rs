@@ -51,7 +51,7 @@ pub fn check_length(duration: f32) -> Result<()> {
 		duration.is_finite() && duration <= MAX_SECONDS,
 		"the video would run {duration:.0}s; fables makes videos of at most {MAX_SECONDS:.0} \
 		 seconds (30 minutes): trim the script with `~` book-only paragraphs, or shorten a \
-		 `@pause`"
+		 `@pause` or `@hold`"
 	);
 
 	Ok(())

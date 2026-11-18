@@ -133,6 +133,9 @@ pub struct Cx<'a> {
 	pub lines: Vec<Spoken<'a>>,
 	/// When the current scene key lands: the last direction anyone gave.
 	pub key_time: f32,
+	/// A `@hold` or `hold=` is a dead stop: breathing, weight shifts, the idle loop and idle
+	/// business all stop with the voice and the music.
+	pub hold: bool,
 }
 
 impl Cx<'_> {
@@ -143,6 +146,7 @@ impl Cx<'_> {
 			motion,
 			lines: Vec::new(),
 			key_time: 0.0,
+			hold: false,
 		}
 	}
 }
@@ -1051,22 +1055,22 @@ pub fn animate(puppet: &mut Puppet, cx: &Cx, time: f32, speaking: Option<&Speake
 		}
 	}
 
-	if cx.on {
+	if cx.on && !cx.hold {
 		idle_life(puppet.exerted, seed, state, cx, time, active.is_some());
 		business(puppet.heading, seed, state, cx, time);
 	}
 
 	let motion = cx.motion;
 
-	// An idle loop (a rubber-hose bounce) for everyone standing.
-	if state.lie < 0.5 && state.gait.is_none() {
+	// An idle loop (a rubber-hose bounce) for everyone standing, unless the page is a dead stop.
+	if !cx.hold && state.lie < 0.5 && state.gait.is_none() {
 		let (lift, squash) = motion.idle_at(time, seed);
 		puppet.lift += lift * puppet.scale;
 		state.squash *= squash;
 	}
 
 	// A moving hold: a pose held for long drifts a little, so it never freezes dead.
-	if motion.moving_hold > 0.0 {
+	if !cx.hold && motion.moving_hold > 0.0 {
 		state.tilt += (time * 0.7 + (seed % 17) as f32).sin() * motion.moving_hold;
 		state.head_tilt += (time * 0.5 + (seed % 11) as f32).sin() * motion.moving_hold;
 	}
@@ -1289,6 +1293,7 @@ fn business(heading: f32, seed: u64, state: &mut FigureState, cx: &Cx, time: f32
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::art::dials::Idle;
 	use crate::art::figure::Build;
 	use crate::art::figure::Pose;
 	use crate::art::pack::StylePack;
@@ -1331,6 +1336,7 @@ mod tests {
 			motion: Motion::default(),
 			lines: Vec::new(),
 			key_time: 0.0,
+			hold: false,
 		}
 	}
 
@@ -1356,6 +1362,7 @@ mod tests {
 			},
 			lines: Vec::new(),
 			key_time: 0.0,
+			hold: false,
 		}
 	}
 
@@ -1378,6 +1385,100 @@ mod tests {
 			peak: peak_of(envelope),
 			question: is_question(text),
 		}
+	}
+
+	#[test]
+	fn a_hold_stops_breathing_weight_shifts_and_idle_business() {
+		// The idle loop is on, so the lift is a visible sign of it.
+		let motion = Motion {
+			idle: Idle::Bounce,
+			..Motion::default()
+		};
+		let free = Cx {
+			on: true,
+			motion,
+			lines: Vec::new(),
+			key_time: 0.0,
+			hold: false,
+		};
+		let stopped = Cx {
+			on: true,
+			motion,
+			lines: Vec::new(),
+			key_time: 0.0,
+			hold: true,
+		};
+		let mut moving = kid(1200.0, Pose::Idle, Mood::Happy, 1.0, 0.0);
+		let mut held = moving.clone();
+		animate(&mut moving, &free, 1.3, None);
+		animate(&mut held, &stopped, 1.3, None);
+		let Body::Figure(a) = &moving.body else {
+			panic!("kid is a figure");
+		};
+		let Body::Figure(b) = &held.body else {
+			panic!("kid is a figure");
+		};
+
+		assert!(
+			moving.lift.abs() > 1e-3,
+			"the idle loop lifts the free figure"
+		);
+		assert!(held.lift.abs() < 1e-6, "and the held one stands still");
+		assert!(
+			(a.squash - b.squash).abs() > 1e-5,
+			"breathing fills the free figure's chest"
+		);
+		assert!(
+			(a.tilt - b.tilt).abs() > 1e-3,
+			"the weight shift leans the free figure"
+		);
+		assert!(b.tilt.abs() < 1e-6, "and the held one does not lean");
+
+		// Idle business waits four seconds, then bumps; with every other dial off, only the
+		// business can move a figure between 4 and 7 seconds.
+		let quiet = Motion {
+			idle: Idle::None,
+			breath: 0.0,
+			weight_shift: 0.0,
+			blink_every: f32::MAX,
+			..Motion::default()
+		};
+		let free = Cx {
+			on: true,
+			motion: quiet,
+			lines: Vec::new(),
+			key_time: 0.0,
+			hold: false,
+		};
+		let stopped = Cx {
+			on: true,
+			motion: quiet,
+			lines: Vec::new(),
+			key_time: 0.0,
+			hold: true,
+		};
+		let base = kid(1200.0, Pose::Idle, Mood::Happy, 1.0, 0.0);
+		let mut saw_business = false;
+
+		for step in 0..=40 {
+			let time = 3.5 + step as f32 * 0.1;
+			let mut free_one = base.clone();
+			let mut held_one = base.clone();
+			animate(&mut free_one, &free, time, None);
+			animate(&mut held_one, &stopped, time, None);
+
+			if format!("{:?}", free_one.body) != format!("{:?}", held_one.body) {
+				saw_business = true;
+			}
+
+			assert_eq!(
+				format!("{:?}", held_one.body),
+				format!("{:?}", base.body),
+				"nothing moves during a hold at {time:.1}s"
+			);
+		}
+
+		assert!(saw_business, "idle business moves the free figure");
 	}
 
 	#[test]

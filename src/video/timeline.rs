@@ -7,12 +7,22 @@
 //! With `cast-voices` on, a paragraph like `"Brush your teeth!" said Mum.` is split: Mum says
 //! the quoted words in her own voice, in the mood the script has her in, and the narrator says
 //! the rest (or, with `drop-tags`, nothing, so the scene plays like a show).
+//!
+//! The same pass plans the soundtrack's changes: which music cue plays when, where the music
+//! drops out for a shouted peak, where a `@hold` stops everything, and which ambience beds a
+//! scene's setting and light ask for.
+
+use std::collections::HashMap;
 
 use anyhow::Result;
 
+use crate::art::figure::Mood;
+use crate::art::light::Preset;
+use crate::art::settings::Bed;
 use crate::book;
 use crate::cast::Cast;
 use crate::cast::Kind;
+use crate::stage::Ambience;
 use crate::stage::Camera;
 use crate::stage::Rehearsal;
 use crate::stage::Scene;
@@ -20,9 +30,12 @@ use crate::stage::ShotSize;
 use crate::stage::Travel;
 use crate::story::Beat;
 use crate::story::Medium;
+use crate::story::Pacing;
 use crate::story::Story;
 use crate::story::Transition;
 use crate::story::plain_text;
+use crate::video::audio::Music;
+use crate::video::audio::MusicDefault;
 use crate::video::audio::Sound;
 use crate::video::director;
 use crate::video::voice::Delivery;
@@ -30,14 +43,41 @@ use crate::video::voice::Speech;
 use crate::video::voice::Utterance;
 use crate::video::voice::Voice;
 
-/// Silence before the first line of a shot, so the new scene can land.
-const LEAD_IN: f32 = 0.55;
-/// Silence between paragraphs.
-const GAP: f32 = 0.4;
-/// Silence between a quote and its dialogue tag within one paragraph.
-const BEAT: f32 = 0.18;
-/// Silence after the last line, before the page turns.
-const TAIL: f32 = 0.75;
+/// How long an action takes to reach its contact frame: a fall lands, a hop comes down.
+const CONTACT: f32 = 0.25;
+/// Effects triggered by an action land this long after its contact frame: three frames at 30.
+const AFTER_CONTACT: f32 = 0.1;
+/// How long before a shouted peak the music drops out.
+const SHOUT_DROPOUT: f32 = 0.5;
+/// How long after a shouted line the music comes back.
+const SHOUT_RETURN: f32 = 0.2;
+
+/// A stretch of the timeline.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Span {
+	pub start: f32,
+	pub end: f32,
+}
+
+impl Span {
+	pub fn contains(self, time: f32) -> bool {
+		time >= self.start && time < self.end
+	}
+}
+
+/// A music cue change: the cue from `time` until the next change.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MusicCue {
+	pub time: f32,
+	pub music: Music,
+}
+
+/// An ambience change: the beds from `time` until the next change. No beds is silence.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AmbienceCue {
+	pub time: f32,
+	pub beds: Vec<Bed>,
+}
 
 /// A scene state that takes effect at `time` (seconds from the start of the video).
 #[derive(Clone, Debug)]
@@ -203,6 +243,17 @@ pub struct Timeline {
 	pub speeches: Vec<Speech>,
 	pub cues: Vec<Cue>,
 	pub duration: f32,
+	/// The music cue changes, the first at time zero.
+	pub music: Vec<MusicCue>,
+	/// Where the music drops out for a shouted peak.
+	pub dropouts: Vec<Span>,
+	/// Dead stops (`@hold`): nothing sounds, and the performance layer can read [`in_hold`]
+	/// as its flag to stop the idle movement too.
+	///
+	/// [`in_hold`]: Timeline::in_hold
+	pub holds: Vec<Span>,
+	/// The ambience changes, the first at time zero; an empty list means no ambience at all.
+	pub ambience: Vec<AmbienceCue>,
 }
 
 impl Timeline {
@@ -217,6 +268,30 @@ impl Timeline {
 					.unwrap_or_else(|| unreachable!("a timeline always has a title shot"))
 			})
 	}
+
+	/// Whether the video is in a dead stop at `time`. The performance layer reads this to stop
+	/// the idle movement as well as the sound.
+	pub fn in_hold(&self, time: f32) -> bool {
+		self.holds.iter().any(|hold| hold.contains(time))
+	}
+
+	/// The music cue playing at `time`.
+	pub fn music_at(&self, time: f32) -> Music {
+		self.music
+			.iter()
+			.rev()
+			.find(|cue| cue.time <= time)
+			.map_or(Music::Play, |cue| cue.music)
+	}
+
+	/// The ambience beds playing at `time`.
+	pub fn ambience_at(&self, time: f32) -> &[Bed] {
+		self.ambience
+			.iter()
+			.rev()
+			.find(|cue| cue.time <= time)
+			.map_or(&[], |cue| cue.beds.as_slice())
+	}
 }
 
 /// Turns an utterance into speech: TTS in production, silence of a known length in tests.
@@ -227,6 +302,12 @@ struct Builder<'a, S: Speaker> {
 	story: &'a Story,
 	cast: &'a Cast,
 	speak: S,
+	/// The narrator as it will read this book: the age band's rate fills in only when the
+	/// narrator does not name one.
+	narrator: Voice,
+	pacing: Pacing,
+	/// `@music` moments, merged with the scene keys when the timeline is finished.
+	music_sets: Vec<MusicCue>,
 	timeline: Timeline,
 }
 
@@ -239,26 +320,50 @@ pub fn build(
 ) -> Result<Timeline> {
 	story.narrator().validate()?;
 
+	let pacing = story.pacing();
+	let mut narrator = story.narrator().clone();
+
+	if narrator.rate.is_none()
+		&& let Some(age) = story.age
+	{
+		narrator.rate = Some(age.pacing().rate);
+	}
+
 	let mut builder = Builder {
 		story,
 		cast,
 		speak,
+		narrator,
+		pacing,
+		music_sets: Vec::new(),
 		timeline: Timeline {
 			shots: Vec::new(),
 			speeches: Vec::new(),
 			cues: Vec::new(),
 			duration: 0.0,
+			music: Vec::new(),
+			dropouts: Vec::new(),
+			holds: Vec::new(),
+			ambience: Vec::new(),
 		},
 	};
 	let mut cursor = builder.title_shot(0.0)?;
+	let mut shown: Option<(String, Preset)> = None;
 
 	for rehearsal in rehearsals {
 		if !story.pages[rehearsal.page].in_video() {
 			continue;
 		}
 
+		let opening = &rehearsal.opening;
+		let place = (
+			opening.setting.name().to_owned(),
+			opening.weather.light.preset,
+		);
+		let new_place = shown.as_ref().is_some_and(|shown| *shown != place);
+		shown = Some(place);
 		builder.cue(cursor, Sound::PageTurn);
-		cursor = builder.page_shot(rehearsal, cursor)?;
+		cursor = builder.page_shot(rehearsal, cursor, new_place)?;
 	}
 
 	if let Some(moral) = &story.meta.moral {
@@ -269,6 +374,9 @@ pub fn build(
 	let mut timeline = builder.timeline;
 	timeline.duration = cursor;
 	timeline.cues.sort_by(|a, b| a.time.total_cmp(&b.time));
+	timeline.music = music_plan(&timeline.shots, &builder.music_sets, story);
+	timeline.ambience = ambience_plan(&timeline.shots, story);
+	timeline.dropouts = shouted_dropouts(&timeline);
 
 	// The director plans every shot's camera once, so the frame renderer only reads setups.
 	for shot in &mut timeline.shots {
@@ -285,13 +393,172 @@ pub fn build(
 	Ok(timeline)
 }
 
+/// The music cue changes: every scene key asks for a cue, `@music` can override one mid-page,
+/// and a book's own `[video] music` wins over the light.
+fn music_plan(shots: &[Shot], sets: &[MusicCue], story: &Story) -> Vec<MusicCue> {
+	let default = story.meta.video.music;
+	let mut moments: Vec<(f32, Option<Music>, Preset)> = Vec::new();
+
+	for shot in shots {
+		for key in &shot.keys {
+			moments.push((key.time, key.scene.music, key.scene.weather.light.preset));
+		}
+	}
+
+	for set in sets {
+		moments.push((set.time, Some(set.music), Preset::Day));
+	}
+
+	// The keys went in first, so a stable sort puts a scene at an `@music` moment before the
+	// `@music` itself, and the explicit cue wins.
+	moments.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+	let mut cues: Vec<MusicCue> = Vec::new();
+
+	for (time, music, light) in moments {
+		let music = match music {
+			Some(music) => music,
+			None => {
+				match default {
+					MusicDefault::Auto => Music::for_light(light),
+					MusicDefault::Cue(music) => music,
+				}
+			}
+		};
+
+		if cues.last().map(|cue| cue.music) != Some(music) {
+			cues.push(MusicCue {
+				time: time.max(0.0),
+				music,
+			});
+		}
+	}
+
+	if cues.is_empty() {
+		cues.push(MusicCue {
+			time: 0.0,
+			music: Music::Play,
+		});
+	} else if cues[0].time > 0.0 {
+		let music = cues[0].music;
+		cues.insert(0, MusicCue { time: 0.0, music });
+	}
+
+	cues
+}
+
+/// The ambience bed changes. Empty when the book has not asked for ambience: a book with an
+/// `age` gets it, and so does one with `[video] ambience = true`.
+fn ambience_plan(shots: &[Shot], story: &Story) -> Vec<AmbienceCue> {
+	if !story.ambience() {
+		return Vec::new();
+	}
+
+	let mut cues: Vec<AmbienceCue> = Vec::new();
+
+	for shot in shots {
+		for key in &shot.keys {
+			let beds = beds_at(&key.scene);
+
+			if cues.last().map(|cue| &cue.beds) != Some(&beds) {
+				cues.push(AmbienceCue {
+					time: key.time.max(0.0),
+					beds,
+				});
+			}
+		}
+	}
+
+	cues
+}
+
+/// The beds a scene asks for: its setting's own, plus what its light adds, unless the script
+/// turned ambience off or named its own.
+fn beds_at(scene: &Scene) -> Vec<Bed> {
+	match &scene.ambience {
+		Ambience::Off => Vec::new(),
+		Ambience::Beds(beds) => beds.clone(),
+		Ambience::Default => {
+			let mut beds = scene.setting.ambience().to_vec();
+
+			for bed in Bed::for_light(scene.weather.light.preset, scene.setting.indoors()) {
+				if !beds.contains(bed) {
+					beds.push(*bed);
+				}
+			}
+
+			beds
+		}
+	}
+}
+
+/// The music drops out before a shouted peak, but only when an actor's mood has just turned
+/// to a strong one: a shout from nowhere is not a peak, it is a loud line.
+fn shouted_dropouts(timeline: &Timeline) -> Vec<Span> {
+	let mut moods: HashMap<String, Mood> = HashMap::new();
+	let mut spans = Vec::new();
+
+	for shot in &timeline.shots {
+		// The title card is not a scene: the star's cover pose is not a mood that changes.
+		if shot.kind == ShotKind::Title {
+			continue;
+		}
+
+		for (index, key) in shot.keys.iter().enumerate() {
+			let next = shot.keys.get(index + 1).map_or(shot.end, |next| next.time);
+			let changed: Vec<(String, Mood)> = key
+				.scene
+				.actors
+				.iter()
+				.filter(|actor| moods.get(&actor.id).is_some_and(|mood| *mood != actor.mood))
+				.map(|actor| (actor.id.clone(), actor.mood))
+				.collect();
+
+			for line in &shot.lines {
+				if line.start + 1e-3 < key.time || line.start >= next {
+					continue;
+				}
+
+				let Some(speaker) = &line.voiced_by else {
+					continue;
+				};
+
+				if !line.text.contains("**") {
+					continue;
+				}
+
+				if changed
+					.iter()
+					.any(|(id, mood)| id == speaker && is_strong(*mood))
+				{
+					spans.push(Span {
+						start: line.start - SHOUT_DROPOUT,
+						end: line.start + line.duration + SHOUT_RETURN,
+					});
+				}
+			}
+
+			for actor in &key.scene.actors {
+				moods.insert(actor.id.clone(), actor.mood);
+			}
+		}
+	}
+
+	spans
+}
+
+/// The moods a shout can peak from: anger, defiance, shock and laughter. A proud or happy line
+/// can be loud without the music needing to get out of its way.
+fn is_strong(mood: Mood) -> bool {
+	matches!(
+		mood,
+		Mood::Cross | Mood::Defiant | Mood::Shocked | Mood::Laugh
+	)
+}
+
 impl<S: Speaker> Builder<'_, S> {
 	fn cue(&mut self, time: f32, sound: Sound) {
 		self.timeline.cues.push(Cue { time, sound });
-	}
-
-	fn narrator(&self) -> &Voice {
-		self.story.narrator()
 	}
 
 	/// Speaks `text` and returns the speech index and its length.
@@ -316,13 +583,7 @@ impl<S: Speaker> Builder<'_, S> {
 			.as_ref()
 			.and_then(|cover| cover.pose.clone())
 			.unwrap_or_else(|| "x=0.5 grin wave".into());
-		let scene = book::star_scene(
-			story,
-			self.cast,
-			&pose,
-			1.0,
-			&mut std::collections::HashMap::new(),
-		)?;
+		let scene = book::star_scene(story, self.cast, &pose, 1.0, &mut HashMap::new())?;
 		let mut text = story.meta.title.clone();
 
 		if let Some(subtitle) = &story.meta.subtitle {
@@ -330,7 +591,7 @@ impl<S: Speaker> Builder<'_, S> {
 		}
 
 		let line_start = start + 0.8;
-		let narrator = self.narrator().clone();
+		let narrator = self.narrator.clone();
 		let (speech, duration) = self.say(&text, &narrator, Delivery::default())?;
 		let speakers = scene
 			.actors
@@ -376,8 +637,8 @@ impl<S: Speaker> Builder<'_, S> {
 			actor.talked = false;
 		}
 
-		let line_start = start + LEAD_IN;
-		let narrator = self.narrator().clone();
+		let line_start = start + self.pacing.lead_in;
+		let narrator = self.narrator.clone();
 		let (speech, duration) = self.say(moral, &narrator, Delivery::default())?;
 		let end = line_start + duration + 1.6;
 
@@ -408,7 +669,7 @@ impl<S: Speaker> Builder<'_, S> {
 		Ok(end)
 	}
 
-	fn page_shot(&mut self, rehearsal: &Rehearsal, start: f32) -> Result<f32> {
+	fn page_shot(&mut self, rehearsal: &Rehearsal, start: f32, new_place: bool) -> Result<f32> {
 		let page = &self.story.pages[rehearsal.page];
 		let mut keys = vec![Key {
 			time: start,
@@ -417,11 +678,38 @@ impl<S: Speaker> Builder<'_, S> {
 			after: None,
 		}];
 		let mut lines = Vec::new();
-		let mut t = start + LEAD_IN;
+		// A reveal holds the page for the script's `hold=`, and a page in a new place is seen
+		// before it is talked over; both only apply to a book that has an age band, so a book
+		// written before any of this keeps the timing it was rendered with.
+		let mut lead = self.pacing.lead_in;
+
+		if new_place {
+			lead = lead.max(self.pacing.reveal);
+		}
+
+		let reveal = page.hold()?;
+
+		if reveal > 0.0 {
+			self.timeline.holds.push(Span {
+				start,
+				end: start + reveal,
+			});
+		}
+
+		lead += reveal;
+
+		let mut t = start + lead;
 		let mut opening = true;
 		let mut pending: Vec<Pending> = Vec::new();
 		let mut camera = keys[0].scene.camera.clone();
 		camera.after = None;
+		// An action's sound lands on its contact frame plus three frames, not before it. A book
+		// without an age keeps the timing every earlier video was rendered with.
+		let (action, fall) = if self.story.age.is_some() {
+			(CONTACT + AFTER_CONTACT, CONTACT + AFTER_CONTACT)
+		} else {
+			(0.0, CONTACT)
+		};
 
 		for (beat, scene) in page.beats.iter().zip(&rehearsal.after) {
 			// A camera change written with `after=` lands later than its line. Land it once
@@ -473,7 +761,14 @@ impl<S: Speaker> Builder<'_, S> {
 					if directive.actor != "camera"
 						&& let Some(previous) = keys.last()
 					{
-						auto_cues(&previous.scene, scene, at, &mut self.timeline.cues);
+						auto_cues(
+							&previous.scene,
+							scene,
+							at,
+							action,
+							fall,
+							&mut self.timeline.cues,
+						);
 					}
 
 					// A stage direction does not move the camera: only the camera that has
@@ -520,12 +815,30 @@ impl<S: Speaker> Builder<'_, S> {
 						self.cue(t, sound);
 					}
 				}
+				Beat::Hold { seconds, .. } => {
+					opening = false;
+					let seconds = seconds.max(0.0);
+
+					if seconds > 0.0 {
+						self.timeline.holds.push(Span {
+							start: t,
+							end: t + seconds,
+						});
+						t += seconds;
+					}
+				}
+				Beat::Music { music, .. } => {
+					self.music_sets.push(MusicCue {
+						time: t,
+						music: *music,
+					});
+				}
 			}
 		}
 
 		land(&mut keys, &mut pending, start, f32::INFINITY, &mut camera);
 
-		let end = (t - GAP + TAIL).max(start + LEAD_IN + TAIL);
+		let end = (t - self.pacing.gap + self.pacing.tail).max(start + lead + self.pacing.tail);
 
 		self.timeline.shots.push(Shot {
 			kind: ShotKind::Page(rehearsal.page),
@@ -584,14 +897,14 @@ impl<S: Speaker> Builder<'_, S> {
 						voiced_by: Some(actor.id.clone()),
 						line: script_line,
 					};
-					t += duration + BEAT;
+					t += duration + self.pacing.beat;
 					line
 				} else {
 					if options.drop_tags && is_dialogue_tag(&part) {
 						continue;
 					}
 
-					let narrator = self.narrator().clone();
+					let narrator = self.narrator.clone();
 					let (speech, duration) = self.say(&part, &narrator, Delivery::default())?;
 					let line = Line {
 						start: t,
@@ -602,17 +915,17 @@ impl<S: Speaker> Builder<'_, S> {
 						voiced_by: None,
 						line: script_line,
 					};
-					t += duration + BEAT;
+					t += duration + self.pacing.beat;
 					line
 				};
 
 				lines.push(line);
 			}
 
-			return Ok(t - BEAT + GAP);
+			return Ok(t - self.pacing.beat + self.pacing.gap);
 		}
 
-		let narrator = self.narrator().clone();
+		let narrator = self.narrator.clone();
 		let (speech, duration) = self.say(text, &narrator, Delivery::default())?;
 		lines.push(Line {
 			start: t,
@@ -624,7 +937,7 @@ impl<S: Speaker> Builder<'_, S> {
 			line: script_line,
 		});
 
-		Ok(t + duration + GAP)
+		Ok(t + duration + self.pacing.gap)
 	}
 }
 
@@ -789,35 +1102,45 @@ pub fn is_dialogue_tag(text: &str) -> bool {
 }
 
 /// Sound effects that follow from what happens on stage, so authors only add the special ones.
-fn auto_cues(before: &Scene, after: &Scene, time: f32, cues: &mut Vec<Cue>) {
+/// `action` is how long after the direction an action's sound lands and `fall` the same for a
+/// body hitting the floor: an older book keeps its timing, and a book with an age band lands
+/// both on the contact frame plus three frames.
+fn auto_cues(
+	before: &Scene,
+	after: &Scene,
+	time: f32,
+	action: f32,
+	fall: f32,
+	cues: &mut Vec<Cue>,
+) {
 	for actor in &after.actors {
 		let previous = before.actors.iter().find(|other| other.id == actor.id);
 
 		match previous {
 			None if !actor.hidden => {
 				cues.push(Cue {
-					time,
+					time: time + action,
 					sound: Sound::Pop,
 				});
 			}
 			Some(previous) => {
 				if actor.knocked > previous.knocked + 0.5 && !matches!(actor.kind, Kind::Bird(_)) {
 					cues.push(Cue {
-						time: time + 0.25,
+						time: time + fall,
 						sound: Sound::Bonk,
 					});
 				}
 
 				if actor.hops > previous.hops {
 					cues.push(Cue {
-						time,
+						time: time + action,
 						sound: Sound::Boing,
 					});
 				}
 
 				if actor.lively > previous.lively + 0.5 && matches!(actor.kind, Kind::Bird(_)) {
 					cues.push(Cue {
-						time,
+						time: time + action,
 						sound: Sound::Tweet,
 					});
 				}
@@ -832,6 +1155,7 @@ mod tests {
 	use super::*;
 	use crate::stage::rehearse;
 	use crate::story;
+	use crate::story::Age;
 	use crate::video::lipsync::Track;
 	use crate::video::voice::SAMPLE_RATE;
 
@@ -867,6 +1191,165 @@ mod tests {
 
 	fn timeline(script: &str) -> Timeline {
 		timeline_with("", script).0
+	}
+
+	/// Like [`timeline_with`], but records the rate each line was actually asked for, so the
+	/// age band's pace can be measured.
+	fn paced(front: &str, script: &str) -> (Timeline, Vec<u32>) {
+		let story = story::parse(&format!(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\nmoral = \"Be \
+			 kind.\"\n{front}\n+++\n{script}"
+		))
+		.unwrap();
+		let cast = Cast::parse(CAST).unwrap();
+		let rehearsals = rehearse(&story, &cast).unwrap();
+		let mut rates = Vec::new();
+		let timeline = build(&story, &cast, &rehearsals, |line: &Utterance<'_>| {
+			rates.push(line.voice.rate());
+			Ok(silence(line.text.len() as f32 * 0.08))
+		})
+		.unwrap();
+
+		(timeline, rates)
+	}
+
+	#[test]
+	fn a_book_with_no_age_keeps_the_timing_it_was_rendered_with() {
+		let (tl, rates) = paced("", "# park\nOne two.\n# garden\nThree four.\n");
+		assert!(rates.iter().all(|rate| *rate == 165), "{rates:?}");
+
+		let page = &tl.shots[1];
+		assert!(
+			(page.lines[0].start - page.start - Pacing::LEGACY.lead_in).abs() < 1e-4,
+			"the old lead-in"
+		);
+
+		// One play cue, no ambience and nothing that could move the sound.
+		assert_eq!(
+			tl.music,
+			vec![MusicCue {
+				time: 0.0,
+				music: Music::Play
+			}]
+		);
+		assert!(tl.ambience.is_empty(), "no ambience");
+		assert!(tl.holds.is_empty(), "no holds");
+		assert!(tl.dropouts.is_empty(), "no drop-outs");
+	}
+
+	#[test]
+	fn an_age_band_slows_the_narrator_and_leaves_room_to_look() {
+		let (tl, rates) = paced(
+			"age = \"under-3\"",
+			"# park\nOne two.\n# garden light=dusk\nThree.\n",
+		);
+		assert_eq!(rates[0], 125, "the band sets an unset narrator's rate");
+
+		let first = &tl.shots[1];
+		assert!((first.lines[0].start - first.start - Age::Under3.pacing().lead_in).abs() < 1e-4);
+
+		let new_place = &tl.shots[2];
+		assert!(
+			new_place.lines[0].start - new_place.start >= 1.5,
+			"a new place is seen first: {}",
+			new_place.lines[0].start - new_place.start
+		);
+	}
+
+	#[test]
+	fn a_narrator_with_its_own_rate_keeps_it() {
+		let (_, rates) = paced(
+			"age = \"under-3\"\n[voice]\nname = \"Daniel\"\nrate = 158",
+			"# park\nOne.\n",
+		);
+		assert_eq!(rates[0], 158);
+	}
+
+	#[test]
+	fn music_follows_the_light_and_the_script_can_say_otherwise() {
+		let (tl, _) = paced(
+			"age = \"3-5\"",
+			"# park light=storm\nOne.\n# park light=dusk\nTwo.\n# park light=moonlit\nThree.\n# \
+			 park light=day music=bright\nFour.\n# park light=day\n@music sad\nFive.\n",
+		);
+		let cues: Vec<Music> = tl.music.iter().map(|cue| cue.music).collect();
+		assert_eq!(
+			cues,
+			vec![
+				Music::Play,
+				Music::Tense,
+				Music::Calm,
+				Music::Sleepy,
+				Music::Bright,
+				Music::Play,
+				Music::Sad,
+				// The moral card is its own scene, back in the book's default light.
+				Music::Play,
+			],
+			"the title on day, then each page's light, then the script's own cues"
+		);
+
+		for pair in tl.music.windows(2) {
+			assert!(pair[0].time <= pair[1].time, "cues are in time order");
+		}
+	}
+
+	#[test]
+	fn a_book_that_names_play_holds_one_loop_through_every_light() {
+		let (tl, _) = paced(
+			"[video]\nmusic = \"play\"",
+			"# park light=storm\nOne.\n# park light=night\nTwo.\n",
+		);
+		assert_eq!(tl.music.len(), 1);
+		assert_eq!(tl.music[0].music, Music::Play);
+	}
+
+	#[test]
+	fn a_shout_without_a_change_of_mood_keeps_the_music() {
+		let (tl, _) = paced(
+			"[video]\ncast-voices = true",
+			"# park\n@kid cross talk\n\"**STOP!**\" said Kid.\n# park\n@kid cross \
+			 talk\n\"**AGAIN!**\" said Kid.\n",
+		);
+		assert!(tl.dropouts.is_empty(), "{:?}", tl.dropouts);
+	}
+
+	#[test]
+	fn hold_and_reveal_stop_everything() {
+		let (tl, _) = paced(
+			"age = \"3-5\"",
+			"# park\nOne.\n@hold 1.5\nTwo.\n# garden hold=2\nThree.\n",
+		);
+		assert_eq!(tl.holds.len(), 2);
+
+		let hold = tl.holds[0];
+		assert!((hold.end - hold.start - 1.5).abs() < 1e-4);
+		assert!(tl.in_hold(hold.start + 0.2));
+		assert!(!tl.in_hold(hold.start - 0.1));
+
+		let page = &tl.shots[2];
+		let reveal = tl.holds[1];
+		assert!((reveal.start - page.start).abs() < 1e-4);
+		assert!(
+			page.lines[0].start - page.start >= 2.0,
+			"the reveal holds the page: {}",
+			page.lines[0].start - page.start
+		);
+	}
+
+	#[test]
+	fn ambience_is_off_unless_the_book_asks_for_it_or_has_an_age() {
+		let (legacy, _) = paced("", "# park light=night\nOne.\n");
+		assert!(legacy.ambience.is_empty(), "legacy has no ambience");
+
+		let (aged, _) = paced("age = \"3-5\"\n[video]\nambience = false", "# park\nOne.\n");
+		assert!(
+			aged.ambience.is_empty(),
+			"`ambience = false` wins over the age"
+		);
+
+		let (asked, _) = paced("[video]\nambience = true", "# park\nOne.\n");
+		assert!(!asked.ambience.is_empty(), "ambience = true turns it on");
 	}
 
 	#[test]
@@ -982,6 +1465,256 @@ mod tests {
 			voices.iter().any(|v| v == "Daniel: \"Hello!\" said Mum."),
 			"{voices:?}"
 		);
+	}
+
+	/// Plans a book, recording the rate each line is asked for, with speech that lasts as long
+	/// as its words so the timing differences come from the pacing alone.
+	fn planned(front: &str, script: &str) -> (Timeline, Vec<u32>) {
+		let story = story::parse(&format!(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\nmoral = \"Be \
+			 kind.\"\n{front}\n+++\n{script}"
+		))
+		.unwrap();
+		let cast = Cast::parse(CAST).unwrap();
+		let rehearsals = rehearse(&story, &cast).unwrap();
+		let mut rates = Vec::new();
+		let timeline = build(&story, &cast, &rehearsals, |line: &Utterance<'_>| {
+			rates.push(line.voice.rate());
+			Ok(silence(line.text.split_whitespace().count() as f32 * 0.4))
+		})
+		.unwrap();
+
+		(timeline, rates)
+	}
+
+	fn pages(timeline: &Timeline) -> Vec<&Shot> {
+		timeline
+			.shots
+			.iter()
+			.filter(|shot| shot.kind.page().is_some())
+			.collect()
+	}
+
+	#[test]
+	fn a_book_with_no_age_keeps_its_rate_its_gaps_and_the_play_loop() {
+		let (timeline, rates) = planned("", "# park\nOne two.\n# garden\nThree.\n");
+		assert!(rates.iter().all(|rate| *rate == 165), "{rates:?}");
+		assert_eq!(
+			timeline.music,
+			vec![MusicCue {
+				time: 0.0,
+				music: Music::Play
+			}]
+		);
+		assert!(timeline.ambience.is_empty(), "no ambience");
+		assert!(timeline.holds.is_empty(), "no holds");
+		assert!(timeline.dropouts.is_empty(), "no drop-outs");
+
+		let first = pages(&timeline)[0];
+		assert!(
+			(first.lines[0].start - first.start - 0.55).abs() < 1e-4,
+			"today's lead-in"
+		);
+	}
+
+	#[test]
+	fn an_age_band_slows_the_narrator_and_lengthens_the_gaps() {
+		let (legacy, _) = planned("", "# park\nOne two three four.\n");
+		let (slow, rates) = planned("age = \"under-3\"", "# park\nOne two three four.\n");
+		assert_eq!(rates[0], 125, "the band's rate reaches the narrator");
+		assert!(
+			slow.duration > legacy.duration + 1.0,
+			"slower: {} against {}",
+			slow.duration,
+			legacy.duration
+		);
+
+		let first = pages(&slow)[0];
+		assert!(
+			first.lines[0].start - first.start >= 1.0,
+			"the band's lead-in"
+		);
+	}
+
+	#[test]
+	fn a_page_in_a_new_place_is_seen_before_it_is_talked_over() {
+		let (timeline, _) = planned(
+			"age = \"3-5\"",
+			"# park\nOne.\n# park\nTwo.\n# garden light=night\nThree.\n",
+		);
+		let page_shots = pages(&timeline);
+		// Two pages in the same place, then a garden at night: a new place for the first line.
+		let same_place = page_shots[1].lines[0].start - page_shots[1].start;
+		let new_place = page_shots[2].lines[0].start - page_shots[2].start;
+		assert!(
+			(same_place - 1.0).abs() < 1e-4,
+			"the band's lead-in: {same_place}"
+		);
+		assert!(
+			new_place >= 1.5,
+			"a new place gets room to look: {new_place}"
+		);
+		assert!(new_place > same_place);
+
+		let (under, _) = planned(
+			"age = \"under-3\"",
+			"# park\nOne.\n# garden light=night\nTwo.\n",
+		);
+		let under = pages(&under)[1].lines[0].start - pages(&under)[1].start;
+		assert!(under > new_place, "younger: {under} against {new_place}");
+	}
+
+	#[test]
+	fn a_page_hold_opens_silently_and_delays_the_first_line() {
+		let (timeline, _) = planned("age = \"3-5\"", "# park hold=2.0\nOne two.\n");
+		let page = pages(&timeline)[0];
+		assert!(
+			page.lines[0].start - page.start >= 2.0,
+			"the reveal: {}",
+			page.lines[0].start - page.start
+		);
+		assert_eq!(timeline.holds.len(), 1);
+		assert!((timeline.holds[0].start - page.start).abs() < 1e-4);
+		assert!((timeline.holds[0].end - timeline.holds[0].start - 2.0).abs() < 1e-4);
+	}
+
+	#[test]
+	fn a_mid_page_hold_stops_the_clock_and_every_sound() {
+		let (timeline, _) = planned("age = \"3-5\"", "# park\nOne.\n@hold 1.5\nTwo.\n");
+		let page = pages(&timeline)[0];
+		assert_eq!(timeline.holds.len(), 1);
+		let hold = timeline.holds[0];
+		assert!((hold.end - hold.start - 1.5).abs() < 1e-4);
+		assert!(timeline.in_hold(hold.start + 0.1));
+		assert!(!timeline.in_hold(hold.end + 0.1));
+		assert!(
+			page.lines[1].start >= hold.end - 1e-4,
+			"the next line waits for the hold"
+		);
+	}
+
+	#[test]
+	fn a_scene_light_picks_the_music_cue_and_a_page_can_override_it() {
+		let (timeline, _) = planned(
+			"age = \"3-5\"",
+			"# park light=storm\nOne.\n# park light=dusk\nTwo.\n# park light=golden \
+			 music=bright\nThree.\n# park light=moonlit\nFour.\n",
+		);
+		let cues: Vec<Music> = timeline.music.iter().map(|cue| cue.music).collect();
+		assert!(cues.contains(&Music::Tense), "{cues:?}");
+		assert!(cues.contains(&Music::Calm), "{cues:?}");
+		assert!(cues.contains(&Music::Bright), "{cues:?}");
+		assert!(cues.contains(&Music::Sleepy), "{cues:?}");
+
+		let bright_page = pages(&timeline)[2];
+		let cue = timeline
+			.music
+			.iter()
+			.find(|cue| (cue.time - bright_page.start).abs() < 1e-3)
+			.expect("a cue at the bright page");
+		assert_eq!(cue.music, Music::Bright, "the heading wins over golden");
+	}
+
+	#[test]
+	fn a_mid_page_music_direction_changes_the_cue_there() {
+		let (timeline, _) = planned(
+			"age = \"3-5\"",
+			"# park light=day\nOne.\n@music sad\nTwo.\n@scene light=storm\nThree.\n",
+		);
+		let page = pages(&timeline)[0];
+		let sad = timeline
+			.music
+			.iter()
+			.find(|cue| (cue.time - page.lines[1].start).abs() < 1e-3)
+			.expect("a cue at the second line");
+		assert_eq!(sad.music, Music::Sad);
+		let storm = timeline
+			.music
+			.iter()
+			.find(|cue| (cue.time - page.lines[2].start).abs() < 1e-3)
+			.expect("a cue at the third line");
+		assert_eq!(storm.music, Music::Tense, "a mid-page storm overrides sad");
+	}
+
+	#[test]
+	fn music_play_holds_one_loop_through_every_light() {
+		let (timeline, _) = planned(
+			"age = \"3-5\"\n[video]\nmusic = \"play\"",
+			"# park light=storm\nOne.\n# park light=moonlit\nTwo.\n",
+		);
+		assert_eq!(timeline.music.len(), 1, "{:?}", timeline.music);
+		assert_eq!(timeline.music[0].music, Music::Play);
+	}
+
+	#[test]
+	fn a_shouted_peak_from_a_fresh_strong_mood_drops_the_music_out() {
+		let (timeline, _) = planned(
+			"[video]\ncast-voices = true",
+			"# park\n@kid happy talk\n\"Hello.\"\n# park\n@kid defiant talk\n\"**STOP!**\" said \
+			 Kid.\n",
+		);
+		let line = timeline
+			.shots
+			.iter()
+			.flat_map(|shot| &shot.lines)
+			.find(|line| line.text.contains("STOP"))
+			.expect("the shouted line");
+		assert_eq!(timeline.dropouts.len(), 1);
+		let dropout = timeline.dropouts[0];
+		assert!((dropout.start - (line.start - 0.5)).abs() < 1e-3);
+		assert!(dropout.end >= line.start + line.duration);
+	}
+
+	#[test]
+	fn a_shout_without_a_fresh_strong_mood_keeps_its_music() {
+		let (timeline, _) = planned(
+			"[video]\ncast-voices = true",
+			"# park\n@kid happy talk\n\"Hello.\"\n# park\n@kid happy talk\n\"**STOP!**\" said \
+			 Kid.\n",
+		);
+		assert!(timeline.dropouts.is_empty(), "{:?}", timeline.dropouts);
+	}
+
+	#[test]
+	fn ambience_comes_from_the_setting_and_the_light() {
+		let (timeline, _) = planned(
+			"age = \"3-5\"",
+			"# park\nOne.\n# bathroom light=night\nTwo.\n# park light=night\nThree.\n# hilltop \
+			 light=storm\nFour.\n",
+		);
+		let page_shots = pages(&timeline);
+		assert_eq!(
+			timeline.ambience_at(page_shots[0].start + 0.1),
+			&[Bed::Birds, Bed::Breeze]
+		);
+		assert_eq!(
+			timeline.ambience_at(page_shots[1].start + 0.1),
+			&[Bed::Room],
+			"an indoor night keeps the crickets outside"
+		);
+		assert_eq!(
+			timeline.ambience_at(page_shots[2].start + 0.1),
+			&[Bed::Birds, Bed::Breeze, Bed::Crickets]
+		);
+		assert_eq!(
+			timeline.ambience_at(page_shots[3].start + 0.1),
+			&[Bed::Wind, Bed::Breeze, Bed::Rain]
+		);
+	}
+
+	#[test]
+	fn a_scene_can_silence_its_ambience_and_a_legacy_book_has_none() {
+		let (timeline, _) = planned("age = \"3-5\"", "# park\n@scene ambience=none\nOne.\n");
+		let page = pages(&timeline)[0];
+		assert!(
+			timeline.ambience_at(page.start + 0.1).is_empty(),
+			"silenced"
+		);
+
+		let (legacy, _) = planned("[video]\nambience = true", "# park\nOne.\n");
+		assert!(!legacy.ambience.is_empty(), "asked for, it is on");
+		let (off, _) = planned("age = \"3-5\"\n[video]\nambience = false", "# park\nOne.\n");
+		assert!(off.ambience.is_empty(), "and false turns it off");
 	}
 
 	#[test]

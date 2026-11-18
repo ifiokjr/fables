@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100" data-ambience="room" data-indoors="true">
   <title>Kitchen: a long counter with the sink under the window, a stove with a pot, a tall fridge and a checked floor</title>
   <path id="far-sky" d="M460 500 Q818.6 500 1220 500 Q1220 916 1220 1220 Q850.9 1220 460 1220 Q460 812.8 460 500 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="840" cy="1240" data-glow="512 white 0.5" data-time="day"/>

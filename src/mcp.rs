@@ -42,8 +42,8 @@ use crate::studio::WorldBrief;
 const GUIDE: &str = include_str!("../docs/directing.md");
 
 /// The guide's topics, which are its `##` headings.
-const GUIDE_TOPICS: [&str; 8] = [
-	"overview", "story", "staging", "camera", "light", "acting", "mixing", "workflow",
+const GUIDE_TOPICS: [&str; 9] = [
+	"overview", "story", "staging", "camera", "light", "acting", "mixing", "sound", "workflow",
 ];
 
 /// The guide's `##` sections, as (heading, body), in file order.
@@ -73,7 +73,7 @@ To design a character:
 1. `world_list`, or `world_create` for a new series.
 2. `style_describe` to learn the parts a figure is drawn with and the space each is drawn in.
 3. `character_create` with who they are and their colours. Their parts start as the style's \
-	 template.
+	 template for their build: a grown-up's are cut for a grown-up.
 4. `character_sheet` to see them. `character_parts` reads parts back as SVG path data (name kit \
 	 parts to see the shared ones).
 5. `character_set_parts` to redraw parts, then look at the sheet again. Repeat until they read as \
@@ -84,7 +84,7 @@ Changes that would break a figure are refused with the part check's findings. A 
 
 To make a book:
 1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
-	 mixing and workflow.
+	 mixing, sound and workflow.
 2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
 3. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
 	 pages that start `# setting`, with narration and `@actor` stage directions). It is checked \
@@ -112,7 +112,7 @@ pub struct StyleParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GuideParams {
-	/// The topic: overview, story, staging, camera, light, acting, mixing or workflow. Leave
+	/// The topic: overview, story, staging, camera, light, acting, mixing, sound or workflow. Leave
 	/// it out for the overview and the topic list.
 	pub topic: Option<String>,
 }
@@ -438,8 +438,8 @@ impl StudioServer {
 
 	#[tool(
 		description = "The director's guide, by topic: overview, story, staging, camera, light, \
-		               acting, mixing or workflow. No topic returns the overview and the topic \
-		               list. Read it before directing a book or a cartoon."
+		               acting, mixing, sound or workflow. No topic returns the overview and the \
+		               topic list. Read it before directing a book or a cartoon."
 	)]
 	#[expect(
 		clippy::unused_self,
@@ -468,7 +468,7 @@ impl StudioServer {
 	#[tool(
 		description = "Add a character to a world's cast: their id, name, build (kid or \
 		               grown-up), who they are, their habit and colours. Their drawing starts as \
-		               the style's template; redraw it with character_set_parts."
+		               the style's template for their build; redraw it with character_set_parts."
 	)]
 	fn character_create(
 		&self,
@@ -496,8 +496,9 @@ impl StudioServer {
 
 	#[tool(
 		description = "Write or replace a character's parts as SVG path data, or remove their own \
-		               parts. The whole figure is checked; changes that leave errors are not \
-		               written. Returns whether it was written and the findings."
+		               parts. The whole figure is checked, and posed on their body to make sure \
+		               its parts still join; changes that leave errors are not written. Returns \
+		               whether it was written and the findings."
 	)]
 	fn character_set_parts(
 		&self,

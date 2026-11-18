@@ -24,7 +24,7 @@ the shots and their text shot list, `storyboard_pin` to make the plan editable, 
 for the timing, and `video_frames` for moments in time. Video is the slow, expensive output; do
 not use it to discover problems the review already names.
 
-The topics: `story`, `staging`, `camera`, `light`, `acting`, `mixing`, `workflow`.
+The topics: `story`, `staging`, `camera`, `light`, `acting`, `mixing`, `sound`, `workflow`.
 
 ## Story
 
@@ -55,16 +55,18 @@ change it once at the end. Shout it (`**WORD**`) where the story peaks; the vide
 too.
 
 **Read-aloud rhythm.** Say every page out loud before you keep it. About 45 words a page is
-a breath; over that, a reader starts skipping. Whole books land between 250 and 900 words:
+a breath; over that, a reader starts skipping. Whole books land between 250 and 900 words.
+The band's own limits live in one table, `Age::READ_ALOUD` in `src/story.rs`, so a future
+review can vary its figures by band without a second copy:
 
 | Age band | Words a page | Words a book |
 | --- | --- | --- |
-| Under 3 | 5 to 15 | up to 200 |
-| 3 to 5 | 20 to 40 | 250 to 500 |
-| 5 to 7 | 30 to 45 | 400 to 900 |
+| `under-3` | 1 to 25 | up to 250 |
+| `3-5` | 15 to 45 | 250 to 900 |
+| `5-7` | 25 to 60 | 400 to 1400 |
 
 `fables check` reports the word count; `fables review` flags pages over the limit and books
-outside the range.
+outside the range. The band also sets how fast the narrator reads; see `sound`.
 
 **The world's recipe.** `worlds/<world>/recipe.md` is a twelve-beat outline `fables new`
 starts a book from. Map your want-obstacle-change onto its beats; they are already in page
@@ -219,6 +221,40 @@ the risk is mush.
 - Motion is the host's: everyone on a page moves with the host story's `[motion]`, so a
   manga guest in a cartoon book moves on ones, not threes. Keep that in mind when a guest's
   way of moving is part of who they are.
+
+## Sound
+
+Sound is what brings a young child's eyes back to the screen. Use it as punctuation, not as
+wallpaper.
+
+- **Choose the cue by the scene's feeling, not by the page number.** `play` is the bouncy
+  default; `calm` (slower, sparser, major) for golden light and safe moments; `tense` (minor,
+  a low pulse) for storms and the beat before a fright; `sad` for the low point; `sleepy` (a
+  music box) for bedtime, moonlight and candlelight; `bright` for a celebration, and `none`
+  for a page that should be heard as a place rather than a tune. A page's `light=` picks one
+  for you; `music=` on the heading or `@music` mid-page says otherwise, and `[video] music =
+  "play"` holds one loop for the whole film.
+- **Put silence before a peak.** A shouted line from a character whose mood has just turned
+  cross, defiant, shocked or laughing gets half a second with no music before it and a breath
+  after it: the line lands in air instead of on top of a strum. Do not stack a `@sfx` on the
+  same beat; let the silence do the work.
+- **One sound idea a beat.** An entrance pops, a faint bonks, a hop boings, and the picture
+  gets those for free. Add `@sfx` only where the beat needs a sound the picture does not
+  already have: `@sfx tada` for the win, `@sfx drum-roll` before the reveal, `@sfx heartbeat`
+  for the quiet scare, `@sfx thud` for the fall that hurts. Two effects on one beat is a
+  cartoon clatter, not a story.
+- **Let ambience carry the quiet pages.** A setting's `data-ambience` and the scene's light
+  give the film birds, breeze, waves, rain, wind, crickets, a room tone or a crowd, mixed 25 dB
+  under the narration. On a page with little text, set `music=none` and let the place be
+  heard; `@scene ambience=none` silences it when the story wants nothing at all.
+- **Stop for a look.** `hold=1.2` on a heading, or `@hold 1.5` mid-page, is a dead stop: the
+  voice, the music and the ambience all rest, and the performance stops fidgeting. Use it for
+  a reveal that needs a beat, never for a page that is already quiet.
+- **Pace it for the listener.** `age = "under-3" | "3-5" | "5-7"` in the front matter sets the
+  narration rate (about 125, 135 and 150 words a minute) and the air around the words: longer
+  gaps and tail, and a page in a new place is seen for at least a second and a half before it
+  is talked over. A narrator with an explicit `rate` keeps it, and a book with no `age` keeps
+  the older, brisker timing; `fables check` suggests one.
 
 ## Workflow
 
