@@ -315,6 +315,11 @@ pub enum Pose {
 	Catch,
 }
 
+/// How far a figure catching something turns towards it: no more than halfway round, so the
+/// hand it reaches up with, on that side, stays in front of the body and clear of the face
+/// instead of crossing it (a figure turned further raises its near hand instead).
+pub const CATCH_TURN: f32 = 0.15;
+
 impl Pose {
 	pub const ALL: [(&'static str, Pose); 16] = [
 		("idle", Pose::Idle),
@@ -412,8 +417,8 @@ impl Pose {
 				)
 			}
 			Pose::Pick => (idle, reach(Anchor::Nose, 0.0, 0.18)),
-			// A hand up above the head, open to catch what comes down.
-			Pose::Catch => (idle, reach(Anchor::Shoulder, 0.45, -1.55)),
+			// A hand up and out above the head, open to catch what comes down.
+			Pose::Catch => (idle, reach(Anchor::Shoulder, 0.8, -1.45)),
 		}
 	}
 
@@ -680,9 +685,13 @@ impl Frame {
 			+ pt(side * reach.x * self.reach.x, reach.y * self.reach.y)
 	}
 
-	/// Hand positions for a named pose.
+	/// Hand positions for a named pose. A catch reaches with the hand on the side the figure
+	/// turns to (see [`CATCH_TURN`]).
 	pub fn hands(&self, pose: Pose, facing: f32) -> (Pt, Pt) {
-		let (left, right) = pose.reaches();
+		let (left, right) = match pose.reaches() {
+			(idle, reaching) if pose == Pose::Catch && facing < 0.0 => (reaching, idle),
+			reaches => reaches,
+		};
 
 		(
 			self.resolve(left, -1.0, facing),

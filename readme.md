@@ -177,12 +177,14 @@ A prop is drawn in its own coordinate space, and its root `<svg>` says how a han
 | `data-grip="x y"` | The point that sits in the fist. |
 | `data-hands` | `one`, or `two` to bring both hands to the grip (a crate, a parcel). |
 | `data-angle` | Degrees the prop leans in a relaxed hand. |
+| `data-carry` | How somebody standing at ease carries it: `hand` (in the fist at the side, the default), `up` (held up beside the head, clear of the face: a torch, a flower), `front` (in both hands before the chest: a cake, a drum), `string` (the grip is a string's end and the prop floats above: a balloon) or `head` (worn: a hat). A pose that uses the hands (`hold`, `reach-out`, `wave`…) overrides it. |
+| `data-held-scale` | A factor on the held-scale rule, for a prop that should be bigger or smaller in a hand than the rule makes it. |
 | `data-about` | A sentence on what it is. |
 | `data-use="brush"` | A toothbrush's behaviour: it points at the mouth when it comes near it, and scrubs it with foam. |
 
-Each part is a `<path>` whose `id` is its name, drawn in file order. `fill` is a palette name or hex code; `data-shade="1"` gives the part the style's cel shadow, `data-line="detail"` or `"none"` changes its outline, and a line part has `fill="none"` with a `stroke`, a `stroke-width` and optionally `data-opacity`. Parts take the scene's light and the style's line like everything else. A prop grows with the hand that holds it, so a grown-up holds the same ball bigger than a kid, and it sits in the fist under the fingers at the grip.
+Each part is a `<path>` whose `id` is its name, drawn in file order. `fill` is a palette name or hex code; `data-shade="1"` gives the part the style's cel shadow, `data-line="detail"` or `"none"` changes its outline, and a line part has `fill="none"` with a `stroke`, a `stroke-width` and optionally `data-opacity`. Parts take the scene's light and the style's line like everything else. A prop grows with the hand that holds it, so a grown-up holds the same ball bigger than a kid, and it sits in the fist under the fingers at the grip. Small things are drawn larger than life in a hand, the way picture books draw them: the held-scale rule grows a key, a letter or a pebble towards the size of the hand that holds it, so a four-year-old sees what it is, and leaves things already that big as they are.
 
-The twenty-three built-in props are `ball`, `balloon`, `basket`, `bell`, `book`, `box`, `cup`, `flower`, `jam`, `jar`, `key`, `kite`, `kite-spool`, `lantern`, `leaf`, `letter`, `parcel`, `pebble`, `ruler`, `spoon`, `star`, `toothbrush` and `umbrella`. `fables sheets` writes `<world>-props.png` with each one alone and in the hand of the world's first figure. Over MCP, `prop_list`, `prop_create`, `prop_parts`, `prop_set_parts` and `prop_render` do the same as the setting tools.
+The thirty-five built-in props are `apple`, `ball`, `balloon`, `basket`, `bell`, `book`, `box`, `bucket`, `cake`, `cup`, `drum`, `flower`, `hat`, `jam`, `jar`, `key`, `kite`, `kite-spool`, `ladder`, `lantern`, `leaf`, `letter`, `map`, `paintbrush`, `parcel`, `pebble`, `ruler`, `sandwich`, `spoon`, `star`, `teddy`, `telescope`, `toothbrush`, `torch` and `umbrella`. `fables sheets` writes `<world>-props.png` with each one alone and in the hand of the world's first figure. Over MCP, `prop_list`, `prop_create`, `prop_parts`, `prop_set_parts` and `prop_render` do the same as the setting tools.
 
 A prop can stand on the stage as an actor, with `size=`, `z=`, `hide`/`show` and `enter=`/`exit=` like anyone:
 
@@ -190,12 +192,16 @@ A prop can stand on the stage as an actor, with `size=`, `z=`, `hide`/`show` and
 @kite x=0.7 y=sky tether=hana
 ```
 
-`tether=<actor>` draws a string from the prop to that actor's hand, which sags under its own weight and sways gently in video. Giving and taking are two directions written together, so no new machinery is needed:
+At `size=1` a prop on the stage is the size a kid's hand holds it at, so a kite let go of is the kite that was held; `size=` scales from there. `y=sky` flies it over the cast's heads, low enough that a wide landscape shot, which keeps the ground in view, still shows it whole; on a book page it moves beside the text card, or below it, never under it. A number (`y=0.3`, the prop's base that far down the stage) is never moved. A flyer (a bird) placed `y=sky`, or flying with no height given, keeps clear of the card the same way, and `land` puts it on the ground out from under the card.
+
+`tether=<actor>` draws a string from the prop to that actor's hand, in the style's line, which sags under its own weight and sways gently in video; `tether=nothing` lets it go. Giving and taking are two directions written together:
 
 ```text
 @hana holds=nothing
 @mo holds=kite-spool
 ```
+
+In video a give plays as one: the two reach towards each other, the hands meet at the smaller one's chest, and the thing passes there. A string that changes hands is tied to the new hand when it gets there, so `@mo jump catch` with `@kite tether=mo` reads as a leap and a catch: the catching hand reaches up on the side of what it catches, and the string is caught at the top of the leap.
 
 ## Designing characters with an agent (MCP)
 
@@ -349,11 +355,11 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | --- | --- |
 | Moods | `happy` `grin` `laugh` `sad` `grumpy` `cross` `defiant` `shocked` `disgusted` `fainted` `dizzy` `sleepy` `dreamy` `worried` `proud` |
 | Poses | `idle` `wave` `point` `arms-crossed` `hips` `cheer` `hold-nose` `cover-mouth` `brush` `shrug` `droop` `hold` `think` `reach-out` `pick` `catch` |
-| Stances (legs and spine) | `stand` `crouch` `sit` `kneel` `jump` `bow` `tiptoe` |
+| Stances (legs and spine) | `stand` `crouch` `sit` `kneel` `jump` `bow` `tiptoe` (in video a `jump` is a leap that lands) |
 | Gaits | `walk` `run` (cycles on the spot in video) `still` |
 | Actions | `talk` (mouth moves with the next paragraph) `faint` `wake` `fly` `land` `wag` `calm` `hop` `flip` `hide` `show` `notice` `quiet` |
-| Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (for flyers and props), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
-| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=<prop>`/`nothing` (any world or built-in prop, or empty hands), `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers), `tether=<actor>` (a stage prop's string) |
+| Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (a flyer high over the cast, a prop flying over their heads; on a book page, clear of the text card), `y=0.3` (a bird's body, or a prop's base, that far down the stage: 0 is the top, 1 the bottom; a number is never moved), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
+| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=<prop>`/`nothing` (any world or built-in prop, or empty hands), `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers), `tether=<actor>`/`nothing` (a stage prop's string, or letting it go) |
 | Eyes | `see=<actor>`/`<prop>`/`mine`/`up`/`down`/`left`/`right`/`front`/`away` (`mine` is what the actor holds): it holds until it is changed, `front` releases it, and the eyes lead the head. `notice` plays a small beat first: the eyes flick to the `see=` target (or whoever spoke last), hold for about half a second, and then the rest of the direction lands. |
 | Entrances | `enter=left`/`right`, `exit=left`/`right` (figures walk on and off in video, critters keep their own entrances; in the book they just appear or vanish) |
 | Scene | `light=golden` or a bare preset (`dusk`), `wilt=1`, `stink=1`, `mint=1`, `tint=sunflower`, `music=calm`, `ambience=birds` (or `none`), `speed=1`, `impact=1` |

@@ -107,6 +107,9 @@ pub struct Actor {
 	pub x: Option<f32>,
 	/// Vertical position (fraction of stage) for things in the air; `None` stands on the ground.
 	pub y: Option<f32>,
+	/// Placed by name rather than by number, so a book page keeps it where its text card leaves
+	/// clear (see [`Clear`]). A numeric `y=` clears it: a number stays exactly where it is put.
+	pub clear: Option<Clear>,
 	pub size: f32,
 	/// -1 faces left, 0 faces out of the page, 1 faces right; `None` faces the middle.
 	pub facing: Option<f32>,
@@ -139,6 +142,20 @@ pub struct Actor {
 	pub stance: Stance,
 	/// Walking or running (in place unless the actor is also moving).
 	pub gait: Option<Gait>,
+}
+
+/// Where a prop placed `y=sky` stands its base, as a fraction of the stage: it flies over the
+/// cast's heads, and a wide landscape shot, which keeps the ground in view, still shows it
+/// whole. A flyer's `sky` is its body's height instead (see `position`).
+const PROP_SKY: f32 = 0.58;
+
+/// Where on a book page an actor placed by name goes, clear of the text card: in the sky
+/// (`y=sky`, or flying with no height given), high in the part the card leaves clear, beside
+/// it or below it; or on the ground (`land`), out from under it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clear {
+	Sky,
+	Ground,
 }
 
 /// How big a person is drawn on the page. The pages are composed around each build's height
@@ -177,6 +194,7 @@ impl Actor {
 			kind,
 			x: None,
 			y: None,
+			clear: None,
 			size,
 			facing: None,
 			z: 0,
@@ -766,7 +784,15 @@ fn apply_actor_token(
 
 	match token.key.as_str() {
 		"x" => actor.x = Some(position(token, value, line)?),
-		"y" => actor.y = Some(position(token, value, line)?),
+		"y" => {
+			let sky = value == "sky";
+			actor.y = Some(if sky && matches!(actor.kind, Kind::Prop(_)) {
+				PROP_SKY
+			} else {
+				position(token, value, line)?
+			});
+			actor.clear = sky.then_some(Clear::Sky);
+		}
 		"size" => actor.size = number(token, value, line)?,
 		"z" => {
 			actor.z = value
@@ -850,11 +876,17 @@ fn apply_actor_token(
 				"line {line}: tether is for a prop standing on stage, not `{}`",
 				actor.id
 			);
-			ensure!(
-				cast.resolve(value).is_ok() || props.get(value).is_some(),
-				"line {line}: tether `{value}` is not an actor or a prop"
-			);
-			actor.tether = Some(value.to_owned());
+
+			// `nothing` lets the string go.
+			actor.tether = if value == "nothing" {
+				None
+			} else {
+				ensure!(
+					cast.resolve(value).is_ok() || props.get(value).is_some(),
+					"line {line}: tether `{value}` is not an actor, a prop or nothing"
+				);
+				Some(value.to_owned())
+			};
 		}
 		"mouth" => actor.mouth = Some(number(token, value, line)?.clamp(0.0, 1.0)),
 		"stink" => actor.stink = number(token, value, line)?.max(0.0),
@@ -904,6 +936,7 @@ fn apply_actor_word(actor: &mut Actor, word: &str, line: usize) -> Result<()> {
 			actor.knocked = 1.0;
 			actor.lively = 0.0;
 			actor.y = None;
+			actor.clear = None;
 
 			if actor.kind.is_figure() {
 				actor.mood = Mood::Fainted;
@@ -919,11 +952,18 @@ fn apply_actor_word(actor: &mut Actor, word: &str, line: usize) -> Result<()> {
 		"fly" => {
 			actor.lively = 1.0;
 			actor.knocked = 0.0;
+
+			// Flying with no height given is flying in the sky.
+			if actor.y.is_none() {
+				actor.clear = Some(Clear::Sky);
+			}
+
 			actor.y = actor.y.or(Some(0.4));
 		}
 		"land" => {
 			actor.lively = 0.0;
 			actor.y = None;
+			actor.clear = Some(Clear::Ground);
 		}
 		"wag" | "excited" => actor.lively = 1.0,
 		"calm" => actor.lively = 0.0,

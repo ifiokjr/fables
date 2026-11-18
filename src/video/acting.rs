@@ -30,6 +30,7 @@ use std::f32::consts::FRAC_2_PI;
 use std::f32::consts::FRAC_PI_2;
 use std::f32::consts::PI;
 use std::f32::consts::TAU;
+use std::sync::Arc;
 
 use crate::art::Pt;
 use crate::art::STAGE;
@@ -38,9 +39,14 @@ use crate::art::dials::Travel;
 use crate::art::figure::FigureState;
 use crate::art::figure::HandShape;
 use crate::art::figure::Mood;
+use crate::art::figure::Pose;
 use crate::art::lerp;
+use crate::art::props::Carry;
+use crate::art::props::Prop;
 use crate::art::pt;
 use crate::art::rig::Gait;
+use crate::art::rig::Legs;
+use crate::art::rig::Stance;
 use crate::art::seed_of;
 use crate::cast::Kind;
 use crate::compose::Body;
@@ -1024,6 +1030,144 @@ pub fn hop(puppet: &mut Puppet, since: f32, squash: f32) {
 	}
 }
 
+/// How long a leap takes, from the crouch that gathers it to the feet planted again.
+pub(crate) const LEAP: f32 = 0.8;
+/// The part of a leap spent gathering in a crouch before the feet leave the ground.
+const LEAP_GATHER: f32 = 0.2;
+/// The part of a leap spent in the air.
+const LEAP_AIR: f32 = 0.6;
+/// How high a leap carries the soles, as a fraction of the figure's height.
+const LEAP_HEIGHT: f32 = 0.2;
+
+/// When a figure that springs into a `jump` this key leaves the ground, in seconds since the
+/// key: at the end of the run or walk that carries it there, or at once.
+pub fn leap_start(old: &Puppet, new: &Puppet, cx: &Cx) -> f32 {
+	plan_between(old, new, cx).map_or(0.0, |plan| plan.duration * 0.85)
+}
+
+/// The top of a leap that starts at `start`: the moment a catch is made.
+pub fn leap_top(start: f32) -> f32 {
+	start + LEAP * (LEAP_GATHER + LEAP_AIR * 0.5)
+}
+
+/// The legs part of the way from `a` to `b`.
+fn mix_legs(a: Legs, b: Legs, t: f32) -> Legs {
+	Legs {
+		feet: (a.feet.0.lerp(b.feet.0, t), a.feet.1.lerp(b.feet.1, t)),
+		crouch: lerp(a.crouch, b.crouch, t),
+		bend: lerp(a.bend, b.bend, t),
+	}
+}
+
+/// A `jump` in video: a leap that lands. The figure gathers in a crouch, springs up with its
+/// legs tucked under it (the drawing a page keeps), comes down with a squash and stands.
+/// `since` counts from take-off's gather; before it, and after landing, the figure stands.
+pub fn leap(puppet: &mut Puppet, since: f32, squash: f32) {
+	let Kind::Figure(look) = &puppet.kind else {
+		return;
+	};
+	let frame = look.frame();
+	let limbs = frame.limbs();
+	let height = frame.height() * LEAP_HEIGHT * puppet.scale;
+	let Body::Figure(state) = &mut puppet.body else {
+		return;
+	};
+	let standing = limbs.stance(Stance::Stand, state.facing);
+	let gathered = limbs.stance(Stance::Crouch, state.facing);
+	let tucked = limbs.stance(Stance::Jump, state.facing);
+	let u = since / LEAP;
+	let air = (u - LEAP_GATHER) / LEAP_AIR;
+	let landing = (u - LEAP_GATHER - LEAP_AIR) / (1.0 - LEAP_GATHER - LEAP_AIR);
+
+	if u < 0.0 || landing >= 1.0 {
+		if state.gait.is_none() {
+			state.legs = standing;
+		}
+
+		return;
+	}
+
+	if air < 0.0 {
+		let t = smoothstep(u / LEAP_GATHER);
+		state.legs = mix_legs(standing, gathered, t);
+		state.squash = 1.0 - 0.08 * squash * t;
+	} else if air < 1.0 {
+		// Thrown up out of the crouch: the legs tuck fast and reach down again to land.
+		state.legs = if air < 0.3 {
+			mix_legs(gathered, tucked, smoothstep(air / 0.3))
+		} else {
+			mix_legs(tucked, standing, smoothstep((air - 0.75) / 0.25))
+		};
+		puppet.lift += (air * PI).sin() * height;
+		state.squash = 1.0 + 0.1 * squash * (air * PI).sin();
+	} else {
+		state.legs = mix_legs(gathered, standing, smoothstep(landing));
+		state.squash = 1.0 - 0.14 * squash * (landing * PI).sin();
+	}
+
+	state.gait = None;
+}
+
+/// How long a give takes: the reach, the hands meeting while the thing changes hands, and
+/// each settling back into its own pose.
+pub(crate) const GIVE: f32 = 1.1;
+/// When, in seconds since the key, the hands meet in a give and the thing passes.
+pub(crate) const GIVE_MEET: f32 = 0.5;
+
+/// A give: what `giver` held passes to `taker`. Both reach the hand it is held in towards
+/// the space between them, the hands meet, it passes there, and each settles into the pose
+/// the script gave it. Before the meeting the giver still holds it; after, the taker does.
+pub fn give(giver: &mut Puppet, taker: &mut Puppet, prop: &Arc<Prop>, since: f32) {
+	if !(0.0..GIVE).contains(&since) {
+		return;
+	}
+
+	let reach = smoothstep(since / GIVE_MEET)
+		* (1.0 - smoothstep((since - GIVE_MEET - 0.1) / (GIVE - GIVE_MEET - 0.1)));
+	let passed = since >= GIVE_MEET;
+	// Where something is held out to show it, in stage units: the hands meet halfway between
+	// the two, at the smaller one's chest.
+	let held_out = |puppet: &Puppet| {
+		let Kind::Figure(look) = &puppet.kind else {
+			return puppet.at;
+		};
+		puppet.at + look.frame().hands(Pose::Hold, 0.0).1 * puppet.scale
+	};
+	let between = pt(
+		f32::midpoint(giver.at.x, taker.at.x),
+		held_out(giver).y.max(held_out(taker).y),
+	);
+
+	for (puppet, holds) in [(giver, !passed), (taker, passed)] {
+		let Kind::Figure(look) = &puppet.kind else {
+			continue;
+		};
+		let frame = look.frame();
+		// The hand goes towards the meeting, as far out as an arm reaching out goes.
+		let out = frame.hands(Pose::ReachOut, 0.0).1.x.abs();
+		let toward = (between - puppet.at) * (1.0 / puppet.scale.max(0.01));
+		let meet = pt(toward.x.clamp(-out, out), toward.y);
+		let Body::Figure(state) = &mut puppet.body else {
+			continue;
+		};
+
+		// What a figure holds is in its page-right hand, so that is the hand that gives and
+		// the one that takes.
+		state.hands.1 = state.hands.1.lerp(meet, reach);
+		state.prop = holds.then(|| Arc::clone(prop));
+
+		if reach > 0.01 {
+			state.carry = Carry::Hand;
+			state.at_ease = false;
+			state.hand_shapes.1 = if holds {
+				HandShape::Fist
+			} else {
+				HandShape::Open
+			};
+		}
+	}
+}
+
 /// After a move, loose parts keep going and swing back: a damped spring, solved in closed form
 /// so any frame can be rendered on its own (frames are drawn in parallel).
 pub fn follow_through(puppet: &mut Puppet, before: &Puppet, since: f32, amount: f32) {
@@ -1389,7 +1533,6 @@ mod tests {
 	use super::*;
 	use crate::art::dials::Idle;
 	use crate::art::figure::Build;
-	use crate::art::figure::Pose;
 	use crate::art::pack::StylePack;
 	use crate::cast::template_look;
 

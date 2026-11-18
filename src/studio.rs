@@ -505,6 +505,9 @@ pub struct PropSummary {
 	pub grip: [f32; 2],
 	/// `one` or `two`.
 	pub hands: String,
+	/// How somebody standing at ease carries it (`data-carry`): `hand`, `up`, `front`,
+	/// `string` or `head`.
+	pub carry: &'static str,
 	/// `world` for the world's own, `built-in` for fables' own.
 	pub from: &'static str,
 }
@@ -516,6 +519,7 @@ impl PropSummary {
 			about: prop.about.clone(),
 			grip: [prop.grip.x, prop.grip.y],
 			hands: prop.hands.name().to_owned(),
+			carry: prop.carry.name(),
 			from,
 		}
 	}

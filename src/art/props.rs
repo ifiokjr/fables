@@ -621,6 +621,19 @@ impl Prop {
 		self.draw_at(svg, corner, scale, 0.0, &ink);
 	}
 
+	/// Draws the string a stage prop is tied by, from its grip at `start` to the hand at `end`
+	/// (stage units), in its own style's detail line, as thick however small the prop flies:
+	/// slack, so it sags under its own weight, and drifting sideways by `sway` (-1 to 1) as the
+	/// prop bobs.
+	pub fn draw_tether(&self, svg: &mut Svg, (start, end): (Pt, Pt), sway: f32) {
+		let length = (end - start).len();
+		let slack = start.lerp(end, 0.5) + pt(sway * length * 0.03, length * 0.12 + 8.0);
+		let path = Path::new().move_to(start).quad_to(slack, end);
+		let saved = svg.use_brush(Brush::new(self.style.line, &self.style.shade, INK));
+		svg.brush_line(&path, INK, self.style.finish.detail * STAGE_SIZE);
+		svg.brush = saved;
+	}
+
 	/// Where the grip sits when the prop stands with its base at `base` (bottom centre).
 	pub fn base_grip(&self, base: Pt, scale: f32) -> Pt {
 		let (lo, hi) = self.bounds();

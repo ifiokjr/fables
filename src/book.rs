@@ -18,6 +18,7 @@ use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::cast::Cast;
 use crate::compose;
+use crate::stage::Clear;
 use crate::stage::Rehearsal;
 use crate::stage::Scene;
 use crate::stage::Traits;
@@ -40,6 +41,9 @@ pub const SAFE: f32 = STAGE * 0.375 / 8.5;
 
 /// Body text size in stage units (about 30 pt on an 8.5" page).
 const BODY_SIZE: f32 = 116.0;
+
+/// The gap kept between a text card and an actor placed clear of it, in stage units.
+const CARD_GAP: f32 = 40.0;
 
 /// A block of text on a page.
 #[derive(Clone, Debug)]
@@ -106,7 +110,7 @@ pub fn assemble(story: &Story, cast: &Cast) -> Result<Vec<BookPage>> {
 
 fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 	let page = &story.pages[rehearsal.page];
-	let scene = rehearsal.finale().clone();
+	let mut scene = rehearsal.finale().clone();
 	let paragraphs = page.book_text();
 	let mut texts = Vec::new();
 
@@ -147,6 +151,8 @@ fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 		});
 	}
 
+	keep_clear(&mut scene, &cards(&texts));
+
 	BookPage {
 		// Named after the script page so proofs map straight back to the script.
 		label: format!("story-{:02}", rehearsal.page + 1),
@@ -156,6 +162,71 @@ fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 		decor: Decor::None,
 		style: Style::default(),
 	}
+}
+
+/// Keeps actors placed by name clear of the page's text cards (see [`Clear`]), measured from
+/// their drawings. One in the sky that would sit under a card stays as high as it can: beside
+/// the card at the height it was put, if there is room, or else just below it — never under
+/// it. A flyer that landed under a card walks along the ground to the nearer side clear of it.
+/// Actors placed with a number stay exactly where they were put.
+fn keep_clear(scene: &mut Scene, cards: &[Bounds]) {
+	if cards.is_empty() || scene.actors.iter().all(|actor| actor.clear.is_none()) {
+		return;
+	}
+
+	for puppet in compose::puppets(scene, 0.0, true) {
+		let Some(actor) = scene.actors.iter_mut().find(|actor| actor.id == puppet.id) else {
+			continue;
+		};
+		let Some(clear) = actor.clear else {
+			continue;
+		};
+		let drawn = puppet.extents().subject;
+		let Some(lowest) = cards
+			.iter()
+			.filter(|card| overlaps(drawn, **card))
+			.map(|card| card.3)
+			.reduce(f32::max)
+		else {
+			continue;
+		};
+
+		match (clear, beside(drawn, cards)) {
+			(_, Some(across)) => actor.x = Some((puppet.at.x + across) / STAGE),
+			(Clear::Sky, None) => {
+				let drop = lowest + CARD_GAP - drawn.1;
+				actor.y = Some((puppet.at.y + drop) / STAGE);
+			}
+			(Clear::Ground, None) => {}
+		}
+	}
+}
+
+/// How far a box must move across the page to sit beside every card it overlaps, inside the
+/// page's safe margins and clear of the cards: the shorter way, or `None` if neither fits.
+fn beside(drawn: Bounds, cards: &[Bounds]) -> Option<f32> {
+	let hits: Vec<&Bounds> = cards
+		.iter()
+		.filter(|card| overlaps(drawn, **card))
+		.collect();
+	let left = hits.iter().map(|card| card.0).reduce(f32::min)? - CARD_GAP - drawn.2;
+	let right = hits.iter().map(|card| card.2).reduce(f32::max)? + CARD_GAP - drawn.0;
+	let fits = |across: f32| {
+		let moved = (drawn.0 + across, drawn.1, drawn.2 + across, drawn.3);
+		moved.0 >= SAFE
+			&& moved.2 <= STAGE - SAFE
+			&& !cards.iter().any(|card| overlaps(moved, *card))
+	};
+
+	[left, right]
+		.into_iter()
+		.filter(|across| fits(*across))
+		.min_by(|a, b| a.abs().total_cmp(&b.abs()))
+}
+
+/// Whether two boxes share any area.
+fn overlaps(a: Bounds, b: Bounds) -> bool {
+	a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
 }
 
 /// The cover star on the cover background, posed by `pose` (e.g. `"x=0.5 grin wave"`).
@@ -800,10 +871,15 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 /// card's padding. Still framing reads this to keep its subject in the part of the page the
 /// card leaves clear, so the rectangle here is the rectangle the drawn card covers.
 pub fn card_rects(page: &BookPage) -> Vec<Bounds> {
+	cards(&page.texts)
+}
+
+/// The cards behind `texts` that have one (see [`card_rects`]).
+fn cards(texts: &[TextSpec]) -> Vec<Bounds> {
 	const PAD_X: f32 = 80.0;
 	const PAD_Y: f32 = 60.0;
 
-	page.texts
+	texts
 		.iter()
 		.filter(|spec| spec.card && !spec.block.pieces.is_empty())
 		.map(|spec| {

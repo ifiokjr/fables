@@ -523,6 +523,17 @@ fn calls_taking_a_name(name: &str) -> Vec<(&'static str, Value)> {
 			"setting_render",
 			json!({ "world": "nibbleton", "setting": name }),
 		),
+		("prop_list", json!({ "world": name })),
+		(
+			"prop_create",
+			json!({ "world": "nibbleton", "prop": name, "about": "Probe" }),
+		),
+		("prop_parts", json!({ "world": "nibbleton", "prop": name })),
+		(
+			"prop_set_parts",
+			json!({ "world": "nibbleton", "prop": name, "parts": [] }),
+		),
+		("prop_render", json!({ "world": "nibbleton", "prop": name })),
 	]
 }
 
@@ -570,6 +581,11 @@ fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
 		"setting_create",
 		&json!({ "world": "nibbleton", "setting": "harbour", "about": "The harbour wall" }),
 	);
+	// And a prop of its own, so its `props/` folder exists too.
+	session.json(
+		"prop_create",
+		&json!({ "world": "nibbleton", "prop": "lamp", "about": "A lamp" }),
+	);
 
 	let forms = [
 		// `setting_create` appends `.svg`, so the reported exploit names the decoy without it.
@@ -611,6 +627,22 @@ fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
 			json!(true),
 			"setting_create copied `{form}`: {result}"
 		);
+
+		// So is `prop_create`'s: a prop started from a file outside the root.
+		let result = session.request(
+			"tools/call",
+			&json!({
+				"name": "prop_create",
+				"arguments": {
+					"world": "nibbleton", "prop": "stolen", "about": "Probe", "from": form
+				}
+			}),
+		);
+		assert_eq!(
+			result["isError"],
+			json!(true),
+			"prop_create copied `{form}`: {result}"
+		);
 	}
 
 	// A display name is slugified rather than refused, and lands under `worlds/`.
@@ -643,6 +675,10 @@ fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
 	assert!(
 		!root.join("worlds/nibbleton/settings/stolen.svg").exists(),
 		"nothing was copied into the world"
+	);
+	assert!(
+		!root.join("worlds/nibbleton/props/stolen.svg").exists(),
+		"no prop was copied into the world"
 	);
 }
 

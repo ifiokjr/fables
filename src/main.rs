@@ -354,7 +354,7 @@ enum PuppetAction {
 
 #[derive(Subcommand)]
 enum PropAction {
-	/// Every prop the world can use, with where it comes from, its hands and its grip.
+	/// Every prop the world can use, with where it comes from, its hands, its carry and its grip.
 	List,
 	/// Start a world's own prop to redraw, from a built-in or another prop.
 	New {
@@ -1311,14 +1311,15 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 	Ok(())
 }
 
-/// Every prop the world can use: its name, source, hands, grip and what it is.
+/// Every prop the world can use: its name, source, hands, carry, grip and what it is.
 fn prop_list(world: &World) -> Result<()> {
 	for prop in fables::studio::list_props(world)? {
 		say!(
-			"{:<12} {:<9} {:<4} grip {:.0},{:.0}  {}",
+			"{:<12} {:<9} {:<4} {:<6} grip {:.0},{:.0}  {}",
 			prop.name,
 			prop.from,
 			prop.hands,
+			prop.carry,
 			prop.grip[0],
 			prop.grip[1],
 			prop.about

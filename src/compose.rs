@@ -12,6 +12,7 @@ use crate::art::Svg;
 use crate::art::critters;
 use crate::art::critters::CritterState;
 use crate::art::figure;
+use crate::art::figure::CATCH_TURN;
 use crate::art::figure::FigureState;
 use crate::art::figure::HandShape;
 use crate::art::figure::Mood;
@@ -125,14 +126,13 @@ impl Puppet {
 		}
 	}
 
-	/// The hand nearest `near`, in stage units: where a tether is tied.
+	/// The hand nearest `near`, in stage units: where a tether is tied. A figure's hands are
+	/// kept the page's way round (left on the left) whichever way it faces.
 	pub fn hand_near(&self, near: Pt) -> Option<Pt> {
 		let Body::Figure(state) = &self.body else {
 			return None;
 		};
-		let mirror = if state.facing < 0.0 { -1.0 } else { 1.0 };
-		let hands = [state.hands.0, state.hands.1]
-			.map(|hand| self.at + pt(hand.x * mirror, hand.y) * self.scale);
+		let hands = [state.hands.0, state.hands.1].map(|hand| self.at + hand * self.scale);
 
 		hands
 			.into_iter()
@@ -229,8 +229,8 @@ fn aim(puppet: &mut Puppet, actor: &Actor, focus: &[(String, Pt)]) {
 	let Body::Figure(state) = &mut puppet.body else {
 		return;
 	};
-	let mirror = if state.facing < 0.0 { -1.0 } else { 1.0 };
-	let mine = at + pt(state.hands.1.x * mirror, state.hands.1.y) * scale;
+	// What a figure holds is in its page-right hand, whichever way it faces.
+	let mine = at + state.hands.1 * scale;
 	let found = match see {
 		See::Actor(id) => {
 			focus
@@ -249,6 +249,12 @@ fn aim(puppet: &mut Puppet, actor: &Actor, focus: &[(String, Pt)]) {
 	state.gaze_y = aim.gaze_y;
 	state.facing = aim.turn * 0.7;
 
+	// A catch turns partway to what it catches and reaches up for it on that side.
+	if actor.pose == Pose::Catch {
+		state.facing = state.facing.clamp(-CATCH_TURN, CATCH_TURN);
+		state.hands = frame.hands(Pose::Catch, state.facing);
+	}
+
 	match see {
 		See::Up => state.head_tilt -= 9.0,
 		See::Down => state.head_tilt += 7.0,
@@ -266,6 +272,12 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 		_ => toward_middle,
 	};
 	let facing = actor.facing.unwrap_or(heading * 0.5).clamp(-1.0, 1.0) * 0.7;
+	// A catch turns only partway, so the reaching hand stays clear of the face.
+	let facing = if actor.pose == Pose::Catch {
+		facing.clamp(-CATCH_TURN, CATCH_TURN)
+	} else {
+		facing
+	};
 	let (body, lift) = match &actor.kind {
 		Kind::Figure(look) => {
 			let frame = look.frame();
@@ -487,23 +499,35 @@ pub fn tether_points(scene: &Scene, puppets: &[Puppet], id: &str) -> Option<(Pt,
 	};
 	let holder = puppets.iter().find(|puppet| puppet.id == target)?;
 	let start = kind.base_grip(prop.at, prop.scale);
-	let end = holder.hand_near(start)?;
+	// A catch has the string in the hand it reached up with; otherwise the nearer hand holds it.
+	let catching = scene
+		.actors
+		.iter()
+		.any(|actor| actor.id == target && actor.pose == Pose::Catch);
+	let end = if catching {
+		holder.hand_near(holder.at - pt(0.0, STAGE))?
+	} else {
+		holder.hand_near(start)?
+	};
 
 	Some((start, end))
 }
 
-/// Strings from stage props to the hands that hold them: they sag under their own weight and
-/// sway gently in video, where `time` moves.
+/// Strings from stage props to the hands that hold them, in each prop's own line: they sag
+/// under their own weight and sway gently in video, where `time` moves.
 fn draw_tethers(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	for actor in &scene.actors {
-		let Some((start, end)) = tether_points(scene, puppets, &actor.id) else {
+		let Some(ends) = tether_points(scene, puppets, &actor.id) else {
 			continue;
 		};
-		let length = (end - start).len();
-		let sway = (time * 1.4 + seed_of(&actor.id) as f32 % 6.3).sin() * length * 0.02;
-		let mid = start.lerp(end, 0.5) + pt(sway, length * 0.12 + 8.0);
-		let path = Path::new().move_to(start).quad_to(mid, end);
-		svg.stroke_alpha(&path, palette::INK, 2.6, 0.75);
+		let Some(puppet) = puppets.iter().find(|puppet| puppet.id == actor.id) else {
+			continue;
+		};
+		let Kind::Prop(prop) = &puppet.kind else {
+			continue;
+		};
+		let sway = (time * 1.4 + seed_of(&actor.id) as f32 % 6.3).sin();
+		prop.draw_tether(svg, ends, sway);
 	}
 }
 
