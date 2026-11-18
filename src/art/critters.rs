@@ -38,18 +38,27 @@ impl Default for CritterState {
 }
 
 fn eye(svg: &mut Svg, c: Pt, r: f32, knocked: f32) {
+	// In shadow theatre an eye is a hole the light comes through.
+	let cut = svg.solid().map(|solid| solid.cut);
+	let ink = cut.unwrap_or(palette::INK);
+
 	if knocked > 0.5 {
 		let k = r * 0.9;
 		svg.stroke(
 			&Path::new().move_to(c + pt(-k, -k)).line_to(c + pt(k, k)),
-			palette::INK,
+			ink,
 			svg.line,
 		);
 		svg.stroke(
 			&Path::new().move_to(c + pt(k, -k)).line_to(c + pt(-k, k)),
-			palette::INK,
+			ink,
 			svg.line,
 		);
+		return;
+	}
+
+	if let Some(cut) = cut {
+		svg.fill(&Path::circle(c, r * 0.85), cut);
 		return;
 	}
 

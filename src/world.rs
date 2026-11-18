@@ -432,7 +432,13 @@ impl World {
 			tone: style.shade.tone,
 			palette: style.shade.palette,
 			motion: style.motion,
+			card: style.page.card,
 		};
+
+		// The style's page turn applies unless the book named its own.
+		if story.meta.video.transition.is_none() {
+			story.meta.video.transition = style.page.transition;
+		}
 
 		// The world's author credits its books unless the script names one.
 		if story.meta.author.is_empty()
@@ -864,5 +870,39 @@ mod tests {
 			"cartoon",
 			"but she is inked with the host's line and shade"
 		);
+	}
+
+	#[test]
+	fn a_world_inherits_its_styles_page_unless_a_book_overrides() {
+		let dir = tempfile::tempdir().unwrap();
+		let lane = World::load(&world(dir.path(), "lane", "style = \"silhouette\"\n")).unwrap();
+		let book = &mut crate::story::parse("+++\ntitle = \"T\"\n+++\n# plain\nHi.\n").unwrap();
+		lane.furnish(book).unwrap();
+		assert_eq!(book.style().name.name(), "shadow");
+		assert_eq!(book.style().card, crate::art::style::Card::Caption);
+		assert_eq!(
+			book.meta.video.transition,
+			Some(crate::story::Transition::Dissolve)
+		);
+
+		let own = &mut crate::story::parse(
+			"+++\ntitle = \"T\"\nstyle = \"riso\"\ncard = \"paper\"\n[video]\ntransition = \
+			 \"cut\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		lane.furnish(own).unwrap();
+		assert_eq!(own.style().name.name(), "riso");
+		assert_eq!(own.style().card, crate::art::style::Card::Paper);
+		assert_eq!(
+			own.meta.video.transition,
+			Some(crate::story::Transition::Cut)
+		);
+
+		// A style without a page table changes nothing: paper, and the book's own page turn.
+		let plain = World::load(&world(dir.path(), "plain", "")).unwrap();
+		let book = &mut crate::story::parse("+++\ntitle = \"T\"\n+++\n# plain\nHi.\n").unwrap();
+		plain.furnish(book).unwrap();
+		assert_eq!(book.style().card, crate::art::style::Card::Paper);
+		assert_eq!(book.meta.video.transition, None);
 	}
 }

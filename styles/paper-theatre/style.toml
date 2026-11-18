@@ -1,0 +1,166 @@
+# The paper-theatre style: a toy theatre cut from card. Every part of a figure is its own piece
+# of card with a white cut edge, lifted a little off the page so it drops a hard shadow on the
+# piece under it; nothing is outlined and nothing is shaded. Its figures are the mid-century
+# templates (styles/mid-century/), whose straight-edged shapes are what scissors cut. It moves
+# as card on sliders does: held poses that snap between keys on twos. Pages print in the `card`
+# skin, where the far, near and front layers of a setting stand as sheets one behind another.
+name = "paper-theatre"
+description = "Paper theatre: every part a piece of card with a white cut edge and a hard drop shadow, flat colour, no line and no shading, held poses that snap between keys on twos."
+
+# The page the look sits on. A world's books inherit it; a book's own front matter overrides.
+[page]
+skin = "card"           # settings cut from card too, each layer a sheet casting on the last
+card = "paper"
+transition = "push"     # the next scene slides in, as a toy theatre changes its backdrop
+
+[finish]
+line = 3.4              # the white cut edge shows this wide all round a piece
+detail = 2.4
+light = [-8.0, -8.0]
+cel-shadow = "#d8cfc0"
+far = "#6a6458"
+
+[line]
+stroke = "cut"          # no line: a white cut edge, and a hard shadow on what's underneath
+
+[shade]
+tones = 0               # card is flat
+fill = "flat"
+
+[motion]
+timing = "twos"
+easing = "snap"         # hold a pose, then snap to the next
+squash = 0.0
+follow-through = 0.2
+blink-every = 4.0
+mouth-rate = 6.0
+overlap = 0.2
+breath = 0.0            # card does not breathe
+weight-shift = 0.0
+business = 0.0
+takes = 0.4
+
+[face]
+turn = 0.42
+radius = 108.0
+slide = 120.0
+
+# Small almond eyes, a triangle nose, straight brows.
+[features]
+eye = [32.0, -6.0]
+brow = [33.0, -34.0]
+brow-weight = 2.0
+blush = [54.0, 34.0]
+blush-size = [10.0, 6.0]
+nose = [6.0, 26.0]
+nose-scale = 1.0
+nose-shine = false
+mouth = [0.0, 62.0]
+mouth-scale = 0.85
+
+[eyes]
+size = [11.0, 6.5]
+iris = [5.0, 6.0]
+iris-dark = 1.0
+iris-band = 0.0
+pupil = [0.0, 0.0]
+rim = 0.0
+shines = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+gaze = [4.0, 1.5]
+lash = 3.4
+lower-lid = 2.4
+lower-lash = 0.0
+lashes = false
+
+[inks]
+blush = "#ee6a5a"
+eye = "#fffcf5"
+maw = "#6a2034"
+tongue = "#e9747c"
+sock = "#f8f1e4"
+sole = "#f2e4c8"
+clean-teeth = "#fff5da"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#fffcf5"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#c9473d"
+badge = "#f2c24b"
+satchel = "#a85a3c"
+apron = "#f8f1e4"
+mud = "#6e4a30"
+
+# What the templates and kit draw of their own, by the names a cast picks them with. The
+# templates and kit draw their other hair, brows and noses beside them as variants.
+[own]
+kid-hair = "flat-top"
+grown-up-hair = "flat-top"
+brows = "bold"
+nose = "button"
+
+# A kid: a big faceted head on a wedge of a neck, an A-line body, and limbs cut as wedges: each
+# thigh and upper arm narrows straight to the joint, and the calf and forearm flare below it and
+# taper to a point at the ankle and wrist.
+[bodies.kid]
+neck = [0.0, -336.0]
+head-above-neck = 126.0
+shoulder-y = -318.0
+shoulder-half = 36.0
+shoulders-turned = [-32.0, 26.0]
+hips-turned = [-14.0, 18.0]
+hem-y = -196.0
+body-radius = 58.0
+leg-width = [12.0, 10.0]
+forearm-width = [10.0, 8.0]
+hand-scale = 0.95
+reach = [52.0, 120.0]
+leg-profile = [28.0, 22.0, 16.0, 11.0, 20.0, 13.0, 6.5]
+arm-profile = [16.0, 14.0, 12.0, 9.0, 14.0, 10.0, 6.0]
+floor = true
+
+# A stout build fills out the slim body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
+
+[bodies.kid.limbs]
+pelvis-y = -190.0
+ankle-y = -24.0
+hip-spread = 20.0
+thigh = 86.0
+shin = 86.0
+upper-arm = 76.0
+forearm = 70.0
+
+[bodies.grown-up]
+neck = [0.0, -660.0]
+head-above-neck = 130.0
+shoulder-y = -634.0
+shoulder-half = 62.0
+shoulders-turned = [-56.0, 44.0]
+hips-turned = [-20.0, 26.0]
+hem-y = -386.0
+body-radius = 76.0
+leg-width = [16.0, 12.0]
+forearm-width = [12.0, 9.0]
+hand-scale = 1.2
+reach = [90.0, 232.0]
+leg-profile = [34.0, 27.0, 20.0, 13.5, 24.0, 15.5, 7.5]
+arm-profile = [20.0, 17.5, 15.0, 11.0, 17.0, 12.0, 7.0]
+foot-scale = 1.25
+floor = true
+
+# A stout build fills out the slim body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
+
+[bodies.grown-up.limbs]
+pelvis-y = -386.0
+ankle-y = -24.0
+hip-spread = 28.0
+thigh = 185.0
+shin = 185.0
+upper-arm = 150.0
+forearm = 136.0

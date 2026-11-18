@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 use crate::art::Color;
 use crate::art::escape;
 use crate::art::palette;
+use crate::art::style::Card;
 use crate::raster;
 use crate::story::RunStyle;
 use crate::story::runs;
@@ -294,6 +295,23 @@ impl Default for Ink {
 		Self {
 			body: palette::INK,
 			shout: palette::TOMATO,
+		}
+	}
+}
+
+impl Ink {
+	/// These inks as they read on a text card: as they are on paper, and in paper's own
+	/// colours on a caption's dark band.
+	#[must_use]
+	pub fn on(self, card: Card) -> Ink {
+		match card {
+			Card::Paper => self,
+			Card::Caption => {
+				Ink {
+					body: palette::PAPER,
+					shout: palette::SUNFLOWER,
+				}
+			}
 		}
 	}
 }

@@ -150,7 +150,7 @@ A drawing style is a folder in `styles/` that characters are drawn from, so a ne
 
 ```text
 styles/cartoon/
-  style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page skin that suits the look
+  style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page that suits the look (`[page]`: its skin, text card and page turn)
   kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes
   template.svg    a plain kid's own parts, which new kids are drawn from
   template-grown-up.svg
@@ -176,15 +176,26 @@ Every style has two bodies, `kid` and `grown-up`, and a template for each, so a 
 | `clear-line` | Clear line: one even line weight everywhere, inside and out, with no hatching; flat vivid colour with no shading; simple characters with dot eyes, a short neck and gently tapering limbs with a knee and an elbow, for detailed settings that get their depth from layered planes; restrained, eased motion. Pages read best in the `clear` skin. |
 | `mid-century` | Mid-century modern: angular, geometric characters on a wedge of a neck, with limbs cut as wedges and flat, pointed shoes; a small flat palette that every colour (settings included) snaps to; clean, even angular lines with the colour printed off them by one fixed slip, the same on every part; no shading; held poses that snap between keys on twos. Abstract settings suit it, in the riso skin. |
 | `chibi` | Tiny characters about two heads tall: the anime face with enormous eyes, mitten hands, stubby limbs, soft self-coloured lines with a rim light, and springy, bouncy motion with a gentle idle bob. |
+| `silhouette` | Shadow theatre. Every figure is one ink, a jointed puppet held against a lit screen: the whites of the eyes and an open mouth are holes the light comes through, brows and a shut mouth are slits, and a pin shows at the neck and at every shoulder, elbow, hip and knee, so the cut-out rig is the look. The head has a nose that breaks its edge as it turns, so three-quarters reads as a profile. It moves on twos with no squash or stretch. Pages print in the `shadow` skin, where the setting is shadows too, with the words on a caption band; it looks best under `dusk` and `moonlit`. Tell characters apart by hair and build, since nobody has colours. |
+| `paper-theatre` | A toy theatre cut from card: every part of a figure is its own piece with a white cut edge, lifted off the page so it drops a hard shadow on the piece under it. Flat colour, no line and no shading, on the mid-century figure's straight-edged shapes (it shares that kit and template). Held poses that snap between keys on twos. Pages print in the `card` skin, where the far, near and front layers of a setting stand as sheets one behind another. |
+| `soft-flat` | Flat vector shapes with no line anywhere: the cartoon's round figure (it shares that kit and template) with its parts meeting edge to edge, told apart by colour and by one soft tone of shade. Gentle, eased motion. Pages print in the `tv` skin, which draws settings without outlines too. |
 
-Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. Every style also names the **page skin** that suits it (`skin` in its `style.toml`): `clear-line` prints in `clear`, and the others print in `riso`. A book uses that skin unless its script or `--style` names another (see [Art styles](#art-styles)). [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one, [`worlds/tramline/`](worlds/tramline) a clear-line one with its own square, [`worlds/sundial-heights/`](worlds/sundial-heights) a mid-century one with an abstract plaza, and [`worlds/teacup-town/`](worlds/teacup-town) a chibi one; their stars, Hana, Ren, Clem, Zia, Otto and Mochi, were designed entirely through the MCP tools below.
+Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. Every style also names the **page** that suits it, in a `[page]` table in its `style.toml`, so the type's card, the skin and the page turn match the drawing without a writer choosing them:
+
+| `[page]` | Meaning |
+| --- | --- |
+| `skin` | The page skin its books print in (see [Art styles](#art-styles)): `clear-line` prints in `clear`, `silhouette` in `shadow`, `paper-theatre` in `card`, `soft-flat` in `tv`, and the others in `riso`. A style may still write `skin` at the top of the file instead, as every style did before `[page]`; writing both is an error. |
+| `card` | What the words sit on, in the book and in a video's title and captions: `paper` (the default: a cream card with a wobbly edge, inked the way the skin inks) or `caption` (a plain dark band with light letters, which `silhouette` uses). |
+| `transition` | How a video enters each page unless the book or the page says: `silhouette` and `soft-flat` dissolve, `paper-theatre` pushes the next scene in. Left out, the book's own default applies (a wipe). |
+
+A world's books inherit the table, and a book overrides it in its own front matter: `style = "…"` for the skin, `card = "…"` for the card, `[video] transition = "…"` for the page turn (and `--style` or a heading's `transition=` over those). [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one, [`worlds/tramline/`](worlds/tramline) a clear-line one with its own square, [`worlds/sundial-heights/`](worlds/sundial-heights) a mid-century one with an abstract plaza, and [`worlds/teacup-town/`](worlds/teacup-town) a chibi one; their stars, Hana, Ren, Clem, Zia, Otto and Mochi, were designed entirely through the MCP tools below. The three line-free styles each have a small world with one short book: [`worlds/lantern-lane/`](worlds/lantern-lane) (silhouette), [`worlds/foldaway-square/`](worlds/foldaway-square) (paper-theatre) and [`worlds/pillow-hill/`](worlds/pillow-hill) (soft-flat), whose casts were made with `fables character new` and are drawn from the templates.
 
 A style is four dials: its construction (bodies, features, eyes and kit), and three tables in `style.toml` whose defaults are the cartoon look:
 
 | Dial | Settings |
 | --- | --- |
-| `[line]` | `stroke` (brush thick-and-thin, uniform, broken or none), `colour` (ink, or `self`: each part's fill darkened), `register` (fills off-register from their lines). Weights are `line` and `detail` in `[finish]`. |
-| `[shade]` | `tones` (0, 1 or 2), `highlight` (none or rim), `fill` (flat, a limited `palette`, or screentone), `tone` (dots or lines). |
+| `[line]` | `stroke` (brush thick-and-thin, uniform, broken, none, or `cut`: no line, a white cut edge and a hard drop shadow under every part), `colour` (ink, or `self`: each part's fill darkened), `register` (fills off-register from their lines). Weights are `line` and `detail` in `[finish]`. |
+| `[shade]` | `tones` (0, 1 or 2), `highlight` (none or rim), `fill` (flat, a limited `palette`, screentone, or `silhouette`: every part one ink, with the eyes, mouth and a pin at each joint cut out), `tone` (dots or lines). |
 | `[motion]` | `timing` (ones, twos or threes) and `modulate` (moves on ones, holds on threes), `easing` (eased or snap) with `anticipation` and `overshoot`, `squash`, `moving-hold`, `smears`, `limbs` (jointed or hose), `follow-through`, `blink-every`, `mouth-rate`, an `idle` loop (bounce) with `idle-amount` and `idle-tempo`, and the acting layer: `lead` (eyes first), `overlap` (parts arriving one after another), `arcs`, `takes`, `breath`, `weight-shift`, `gesture`, `listen`, `business`, and `travel` (walk or slide). See [docs/animation.md](docs/animation.md). |
 
 Each body (`[bodies.kid]`, `[bodies.grown-up]`) can also say how it is built. Left out, every one of these draws the body exactly as before (round tube limbs, a plain neck, cartoon shoes):
@@ -200,7 +211,7 @@ The kit can draw two more parts: `neck` (front and three-quarter, in bone units 
 
 `fables rig <id> --motion <style>` shows a character moving the way another style moves.
 
-The built-in drawing styles are compiled into fables, so a world anywhere on disk can name one. A drawing style is not a page skin: the page skins (`riso`, `tv`, `bold`, `cut-paper`, `crayon`, `storybook`, `clear`) print a page, and each drawing style names the skin that suits its look (`skin` in its `style.toml`).
+The built-in drawing styles are compiled into fables, so a world anywhere on disk can name one. A drawing style is not a page skin: the page skins (`riso`, `tv`, `bold`, `cut-paper`, `crayon`, `storybook`, `clear`, `shadow`, `card`) print a page, and each drawing style names the skin that suits its look (`[page] skin` in its `style.toml`).
 
 ## Settings
 
@@ -333,9 +344,9 @@ Every command also takes `--style`, the **page skin**, so any render can print i
 
 - `--style storybook` prints in one skin;
 - `--style bold,tv` prints in each listed skin;
-- `--style all` prints in all seven.
+- `--style all` prints in all nine.
 
-A book's skin is, in order: `--style` on the command line, `style` in the script's front matter, the page skin its world's drawing style names (`skin` in `styles/<style>/style.toml`), then `riso`. Without `--style` and a front-matter `style`, a chibi world prints in `riso` and a clear-line one in `clear`. Each skin renders to its own folder, `out/<book>/<skin>/`, so skins sit side by side and never overwrite each other. The voice cache is shared, so re-rendering a video in another skin records nothing new.
+A book's skin is, in order: `--style` on the command line, `style` in the script's front matter, the page skin its world's drawing style names (`[page] skin` in `styles/<style>/style.toml`), then `riso`. Without `--style` and a front-matter `style`, a chibi world prints in `riso` and a clear-line one in `clear`. Each skin renders to its own folder, `out/<book>/<skin>/`, so skins sit side by side and never overwrite each other. The voice cache is shared, so re-rendering a video in another skin records nothing new.
 
 Install with `cargo install --path .`, or use `cargo run --release --` in place of `fables`.
 
@@ -381,7 +392,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `age` sets how the book is read aloud: the narration rate (about 125, 135 and 150 words a minute for `under-3`, `3-5` and `5-7`), the gaps between lines and the tail after a page, and how long a page in a new place is seen before it is talked over. A world sets a default in its `world.toml`, a book's own `age` wins, and a narrator with an explicit `rate` keeps it. A book with no `age` anywhere keeps the older, brisker timing (165 words a minute), so its video does not change; `fables check` suggests one.
 
-- **In the book**, each page shows the stage *at the end of the page*. The text sits on a paper card, at the top unless the heading says `text=bottom`.
+- **In the book**, each page shows the stage *at the end of the page*. The text sits on a paper card, at the top unless the heading says `text=bottom`. `card = "caption"` in the front matter sets it on a dark caption band with light letters instead (and `card = "paper"` puts the paper back in a world whose drawing style asks for a caption).
 - **In the video**, each `@` line takes effect *when the narrator reaches it*. Above, Mum points and talks during the first line; Stanley crosses his arms and his mouth moves during the second.
 
 ### Text
@@ -535,7 +546,7 @@ A person drawn from the template can be drawn more than one way, so a cast of te
 
 | Field | Words |
 | --- | --- |
-| `hair` | `short`, `bob`, `bun`, `curls`, `spikes`, `pigtails`, `long` and `bald` in every drawing style, plus a style's own: `tuft` (cartoon and rubber-hose kids), `bowl` (chibi), `flat-top` (mid-century) |
+| `hair` | `short`, `bob`, `bun`, `curls`, `spikes`, `pigtails`, `long` and `bald` in every drawing style, plus a style's own: `tuft` (cartoon, soft-flat and rubber-hose kids), `bowl` (chibi), `flat-top` (mid-century and paper-theatre) |
 | `build` | `slim`, `plain` (the body as the style draws it) or `stout` |
 | `brows` | `bold`, `arched` or `thin` |
 | `nose` | `button`, `round`, `long` or `none` where the style draws them: chibi draws only `button`, anime and manga have no `round`, and rubber-hose faces always have a nose |
@@ -560,7 +571,7 @@ Colours are palette names (see the bible) or `#rrggbb`. A character with a `habi
 
 ## Art styles
 
-**A page skin is how the page prints.** Choose one per book with `style = "..."` in the front matter, or render in any others with `--style` (one, a comma list, or `all`). `fables styles <story>` draws the same pages in every skin so you can compare. A book that names neither uses the page skin its world's **drawing style** recommends (`skin` in `styles/<style>/style.toml`: `clear` for clear-line, `riso` for the others).
+**A page skin is how the page prints.** Choose one per book with `style = "..."` in the front matter, or render in any others with `--style` (one, a comma list, or `all`). `fables styles <story>` draws the same pages in every skin so you can compare. A book that names neither uses the page skin its world's **drawing style** recommends (`[page] skin` in `styles/<style>/style.toml`: `clear` for clear-line, `shadow` for silhouette, `card` for paper-theatre, `tv` for soft-flat, `riso` for the others).
 
 | Page skin | Look |
 | --- | --- |
@@ -571,6 +582,8 @@ Colours are palette names (see the bible) or `#rrggbb`. A character with a `habi
 | `crayon` | Waxy scribbled colour that strays over the lines |
 | `storybook` | Pencil lines over soft watercolour washes on textured paper |
 | `clear` | One even outline everywhere, flat colour, no shading or texture (for the clear-line drawing style) |
+| `shadow` | Shadow theatre: every setting is ink shadows on a lit screen, paler the farther back a part stands, so the actors read in front. The screen is the scene light's own sky, brightest at the ground (lamplight in flat daylight), the sun and moon are the lamp behind it, and critters are shadows too (for the silhouette drawing style) |
+| `card` | Paper theatre: every shape is card with a white cut edge and a hard shadow, with paper fibres, and the near and front layers of a setting each cast a shadow on the layer behind (for the paper-theatre drawing style) |
 
 The drawing style decides how a figure is built (chibi, clear-line, rubber-hose…); the page skin decides how every page prints. `fables check` and every render say which is which: `drawing: chibi · skin: riso`.
 

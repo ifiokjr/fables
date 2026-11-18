@@ -5,14 +5,16 @@
 //!
 //! ```toml
 //! [line]
-//! stroke = "brush"        # brush (thick-and-thin), uniform, broken or none
+//! stroke = "brush"        # brush (thick-and-thin), uniform, broken, none, or cut: a white
+//!                         # cut edge and a hard drop shadow, as card lifted off the page
 //! colour = "ink"          # ink, or self: each part's own fill, darkened
 //! register = [0.0, 0.0]   # fills off-register from their lines
 //!
 //! [shade]
 //! tones = 1               # 0, 1 or 2 tones of cel shadow
 //! highlight = "none"      # none, or rim: a light edge on the lit side
-//! fill = "flat"           # flat, palette (the colours below) or screentone
+//! fill = "flat"           # flat, palette (the colours below), screentone, or silhouette:
+//!                         # every part ink, with the eyes, mouth and pin joints cut out
 //! tone = "dots"           # screentone as dots or as line tone
 //! palette = []            # the colours a limited palette snaps to
 //!
@@ -71,6 +73,9 @@ pub enum Stroke {
 	Broken,
 	/// No lines: shapes meet edge to edge.
 	None,
+	/// No lines: every part is a piece of card with a white cut edge, lifted off the page so
+	/// it drops a hard shadow on whatever is under it.
+	Cut,
 }
 
 /// What colour lines are.
@@ -122,6 +127,9 @@ pub enum Fill {
 	Palette,
 	/// Black ink on white paper, with colours as screentone.
 	Screentone,
+	/// Shadow theatre: every part of a figure is one ink, with the eyes and mouth cut out
+	/// of it and a pin showing at every joint.
+	Silhouette,
 }
 
 /// The pattern screentone is cut from.
