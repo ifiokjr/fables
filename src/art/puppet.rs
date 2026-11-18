@@ -1419,6 +1419,9 @@ fn draw_leg(
 		svg.end();
 	}
 
+	// Hems and cuffs are drawn in a darker shade of the legwear; creases are fine ink lines.
+	let hem_ink = far(inks.bottom, is_far, inks.finish.far).darken(0.25);
+
 	// Trousers ride on the shin, over the top of the shoe.
 	if let Some(trouser) = trouser {
 		let angle = begin_bone(svg, knee, ankle);
@@ -1432,12 +1435,17 @@ fn draw_leg(
 		);
 
 		if let Some(cuff) = puppet.part("legwear-shin-cuff", t) {
-			svg.brush_line(
-				&cuff.path(),
-				far(inks.bottom, is_far, inks.finish.far).darken(0.25),
-				inks.finish.detail,
-			);
+			svg.brush_line(&cuff.path(), hem_ink, inks.finish.detail);
 		}
+
+		draw_creases(
+			svg,
+			puppet,
+			"legwear-shin-crease",
+			side,
+			ink,
+			inks.finish.detail,
+		);
 
 		svg.end();
 	}
@@ -1455,14 +1463,35 @@ fn draw_leg(
 		);
 
 		if let Some(hem) = puppet.part("legwear-leg-hem", t) {
-			svg.brush_line(
-				&hem.path(),
-				far(inks.bottom, is_far, inks.finish.far).darken(0.25),
-				inks.finish.detail,
-			);
+			svg.brush_line(&hem.path(), hem_ink, inks.finish.detail);
 		}
 
+		draw_creases(
+			svg,
+			puppet,
+			"legwear-leg-crease",
+			side,
+			ink,
+			inks.finish.detail,
+		);
+
 		svg.end();
+	}
+}
+
+/// Draws a trouser leg's numbered creases (`name-1`, `name-2`, …) in its bone's frame: as they
+/// are drawn, on the page-right leg (`side` 1), and mirrored on the page-left one, so a seam on
+/// the inside of the leg stays there.
+fn draw_creases(
+	svg: &mut Svg,
+	puppet: &Authored,
+	name: &str,
+	side: f32,
+	colour: Color,
+	width: f32,
+) {
+	for crease in puppet.copies(name, 0.0) {
+		svg.brush_line(&crease.map(|p| pt(p.x * side, p.y)).path(), colour, width);
 	}
 }
 
