@@ -1,6 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -80 120 100" data-grip="0 0" data-hands="one" data-about="A sealed letter with a stamp.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -34 100 68" data-grip="-34 8" data-hands="one" data-about="A cream envelope with a stamp and a red heart seal.">
   <title>A letter</title>
-  <path id="envelope" d="M-44 -56 L44 -56 L44 0 L-44 0 Z" fill="cream" data-shade="1"/>
-  <path id="flap" d="M-42 -54 L0 -26 L42 -54" fill="none" stroke="#c9865a" stroke-width="4"/>
-  <path id="stamp" d="M24 -50 L38 -50 L38 -38 L24 -38 Z" fill="tomato" data-line="none"/>
+  <path id="envelope" d="M-42 -30 L42 -30 C44.2 -30 46 -28.2 46 -26 L46 26 C46 28.2 44.2 30 42 30 L-42 30 C-44.2 30 -46 28.2 -46 26 L-46 -26 C-46 -28.2 -44.2 -30 -42 -30 Z" fill="cream" data-shade="1"/>
+  <path id="fold-left" d="M-44 28 L-8 2" fill="none" stroke="#c9b48a" stroke-width="3"/>
+  <path id="fold-right" d="M44 28 L8 2" fill="none" stroke="#c9b48a" stroke-width="3"/>
+  <path id="flap" d="M-45 -29 L0 8 L45 -29 C30 -30 -30 -30 -45 -29 Z" fill="#f6e3c0" data-line="detail"/>
+  <path id="seal" d="M0 14 C-10 6 -12 -2 -6 -4 C-3 -5 -1 -3 0 0 C1 -3 3 -5 6 -4 C12 -2 10 6 0 14 Z" fill="tomato" data-line="detail"/>
+  <path id="stamp" d="M26 -24 L38 -24 C39.1 -24 40 -23.1 40 -22 L40 -8 C40 -6.9 39.1 -6 38 -6 L26 -6 C24.9 -6 24 -6.9 24 -8 L24 -22 C24 -23.1 24.9 -24 26 -24 Z" fill="sky" data-line="detail"/>
+  <path id="postmark" d="M14 -20 C18 -24 22 -16 26 -20 C30 -24 34 -16 38 -20" fill="none" stroke="#5e6a84" stroke-width="2" data-opacity="0.8"/>
 </svg>

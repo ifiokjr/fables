@@ -167,8 +167,8 @@ impl Actor {
 			Kind::Dog(_) => 1.8,
 			Kind::Worm => 1.4,
 			Kind::Toothbrush(_) => 1.5,
-			// A stage prop starts at its own drawing size: its file is drawn for a hand, and a
-			// lantern or a kite on stage reads true at 1.
+			// A stage prop's `size=` scales from the size a kid holds it at (see
+			// `props::STAGE_SIZE`), so 1 is the kite that was in the hand.
 			Kind::Flower(..) | Kind::Tree(_) | Kind::Prop(_) => 1.0,
 		};
 

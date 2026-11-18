@@ -1,9 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -170 80 190" data-grip="0 0" data-hands="one" data-about="A wooden ruler with five ticks.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -84 24 168" data-grip="0 30" data-hands="one" data-angle="15" data-about="A yellow wooden ruler with a row of ticks.">
   <title>A ruler</title>
-  <path id="body" d="M-12 -140 L12 -140 L12 0 L-12 0 Z" fill="sunflower" data-shade="1"/>
-  <path id="tick-1" d="M-12 -120 L0 -120" fill="none" stroke="#8a5a44" stroke-width="3"/>
-  <path id="tick-2" d="M-12 -100 L-4 -100" fill="none" stroke="#8a5a44" stroke-width="3"/>
-  <path id="tick-3" d="M-12 -80 L0 -80" fill="none" stroke="#8a5a44" stroke-width="3"/>
-  <path id="tick-4" d="M-12 -60 L-4 -60" fill="none" stroke="#8a5a44" stroke-width="3"/>
-  <path id="tick-5" d="M-12 -40 L0 -40" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="ruler" d="M-7 -80 L7 -80 C8.7 -80 10 -78.7 10 -77 L10 77 C10 78.7 8.7 80 7 80 L-7 80 C-8.7 80 -10 78.7 -10 77 L-10 -77 C-10 -78.7 -8.7 -80 -7 -80 Z" fill="sunflower" data-shade="1"/>
+  <path id="ticks" d="M-10 -64 L-1 -64 L-10 -64 L-10 -48 L-5 -48 L-10 -48 L-10 -32 L-1 -32 L-10 -32 L-10 -16 L-5 -16 L-10 -16 L-10 0 L-1 0 L-10 0 L-10 16 L-5 16 L-10 16 L-10 32 L-1 32 L-10 32 L-10 48 L-5 48 L-10 48 L-10 64 L-1 64" fill="none" stroke="#8a5a44" stroke-width="2.5"/>
+  <path id="hole" d="M1 -70 C1 -71.7 2.3 -73 4 -73 C5.7 -73 7 -71.7 7 -70 C7 -68.3 5.7 -67 4 -67 C2.3 -67 1 -68.3 1 -70 Z" fill="#c9865a" data-line="none"/>
+  <path id="shine" d="M5 -54 L5 70" fill="none" stroke="#ffffff" stroke-width="3" data-opacity="0.55"/>
 </svg>

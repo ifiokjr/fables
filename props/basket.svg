@@ -1,8 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -100 120 120" data-grip="0 -78" data-hands="one" data-about="A woven basket with an arched handle.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-62 0 124 122" data-grip="0 23" data-hands="one" data-about="A woven picnic basket with an arched handle and a checked cloth.">
   <title>A basket</title>
-  <path id="handle" d="M-26 -48 C-20 -82 20 -82 26 -48" fill="none" stroke="#c9865a" stroke-width="6"/>
-  <path id="body" d="M-38 -44 L38 -44 L28 0 L-28 0 Z" fill="#c9865a" data-shade="1"/>
-  <path id="rim" d="M-40 -50 L40 -50 L37 -40 L-37 -40 Z" fill="#8a5a44"/>
-  <path id="weave-1" d="M-32 -28 L32 -28" fill="none" stroke="#8a5a44" stroke-width="3"/>
-  <path id="weave-2" d="M-30 -14 L30 -14" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="handle" d="M-46 62 C-46 10 46 10 46 62" fill="none" stroke="#a8673e" stroke-width="9"/>
+  <path id="basket" d="M-56 60 L56 60 C54 80 50 100 44 118 C20 121 -20 121 -44 118 C-50 100 -54 80 -56 60 Z" fill="toffee" data-shade="1"/>
+  <path id="cloth" d="M-34 58 C-28 40 -10 34 2 44 C12 32 32 36 38 58 Z" fill="tomato" data-line="detail"/>
+  <path id="rim" d="M-60 54 C-20 50 20 50 60 54 C61 58 61 62 60 66 C20 62 -20 62 -60 66 C-61 62 -61 58 -60 54 Z" fill="#a8673e" data-shade="1"/>
+  <path id="weave-1" d="M-52 84 C-20 81 20 81 52 84" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="weave-2" d="M-48 102 C-20 99 20 99 48 102" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="rib-1" d="M-24 66 L-20 118" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="rib-2" d="M0 66 L0 119" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="rib-3" d="M24 66 L20 118" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="shine" d="M-48 74 C-46 86 -44 98 -40 108" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.45"/>
 </svg>

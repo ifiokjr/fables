@@ -12,6 +12,8 @@
 //! | `data-grip` | `x y`: the point that sits in the fist. |
 //! | `data-hands` | `one`, or `two` to bring both hands to the grip. |
 //! | `data-angle` | Degrees the prop leans in a relaxed hand. |
+//! | `data-carry` | How it is carried standing at ease: `hand` (in the fist at the side), `up` (held up beside the head), `front` (in both hands before the chest), `string` (floating on a string from the fist) or `head` (worn). |
+//! | `data-held-scale` | A factor on the held-scale rule, which draws small things bigger than life. |
 //! | `data-about` | A sentence on what it is (a `<title>` does the same). |
 //! | `data-use` | `brush`: a toothbrush's behaviour — it points at the mouth when it comes near, and scrubs it with foam. |
 //! | `data-foam` | A brush's foam colour. |
@@ -23,9 +25,10 @@
 //! `fill="none"`, a `stroke` and a `stroke-width`, with `data-opacity` for a soft one (a
 //! highlight). Parts draw in file order.
 //!
-//! The built-in twenty-three are `ball`, `balloon`, `basket`, `bell`, `book`, `box`, `cup`,
-//! `flower`, `jam`, `jar`, `key`, `kite`, `kite-spool`, `lantern`, `leaf`, `letter`, `parcel`,
-//! `pebble`, `ruler`, `spoon`, `star`, `toothbrush` and `umbrella`.
+//! The built-in thirty-five are `apple`, `ball`, `balloon`, `basket`, `bell`, `book`, `box`,
+//! `bucket`, `cake`, `cup`, `drum`, `flower`, `hat`, `jam`, `jar`, `key`, `kite`, `kite-spool`,
+//! `ladder`, `lantern`, `leaf`, `letter`, `map`, `paintbrush`, `parcel`, `pebble`, `ruler`,
+//! `sandwich`, `spoon`, `star`, `teddy`, `telescope`, `toothbrush`, `torch` and `umbrella`.
 
 use std::collections::BTreeMap;
 use std::path::Path as FilePath;
@@ -55,29 +58,41 @@ use super::shape::Shape;
 pub const INK: Color = Color(0x2B_1D_2E);
 
 /// The props compiled into fables, by name.
-const BUILT_IN: [(&str, &str); 23] = [
+const BUILT_IN: [(&str, &str); 35] = [
+	("apple", include_str!("../../props/apple.svg")),
 	("ball", include_str!("../../props/ball.svg")),
 	("balloon", include_str!("../../props/balloon.svg")),
 	("basket", include_str!("../../props/basket.svg")),
 	("bell", include_str!("../../props/bell.svg")),
 	("book", include_str!("../../props/book.svg")),
 	("box", include_str!("../../props/box.svg")),
+	("bucket", include_str!("../../props/bucket.svg")),
+	("cake", include_str!("../../props/cake.svg")),
 	("cup", include_str!("../../props/cup.svg")),
+	("drum", include_str!("../../props/drum.svg")),
 	("flower", include_str!("../../props/flower.svg")),
+	("hat", include_str!("../../props/hat.svg")),
 	("jam", include_str!("../../props/jam.svg")),
 	("jar", include_str!("../../props/jar.svg")),
 	("key", include_str!("../../props/key.svg")),
 	("kite", include_str!("../../props/kite.svg")),
 	("kite-spool", include_str!("../../props/kite-spool.svg")),
+	("ladder", include_str!("../../props/ladder.svg")),
 	("lantern", include_str!("../../props/lantern.svg")),
 	("leaf", include_str!("../../props/leaf.svg")),
 	("letter", include_str!("../../props/letter.svg")),
+	("map", include_str!("../../props/map.svg")),
+	("paintbrush", include_str!("../../props/paintbrush.svg")),
 	("parcel", include_str!("../../props/parcel.svg")),
 	("pebble", include_str!("../../props/pebble.svg")),
 	("ruler", include_str!("../../props/ruler.svg")),
+	("sandwich", include_str!("../../props/sandwich.svg")),
 	("spoon", include_str!("../../props/spoon.svg")),
 	("star", include_str!("../../props/star.svg")),
+	("teddy", include_str!("../../props/teddy.svg")),
+	("telescope", include_str!("../../props/telescope.svg")),
 	("toothbrush", include_str!("../../props/toothbrush.svg")),
+	("torch", include_str!("../../props/torch.svg")),
 	("umbrella", include_str!("../../props/umbrella.svg")),
 ];
 
@@ -117,6 +132,64 @@ impl Hands {
 		}
 	}
 }
+
+/// How a prop is carried by somebody standing at ease (`data-carry`). A pose that does
+/// something with its hands (`hold` shows a prop off, `reach-out` offers it) overrides it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Carry {
+	/// In the fist at the side: a cup, a key, a jar of jam.
+	Hand,
+	/// Held up beside the head at shoulder height, clear of the face: a torch, a flower.
+	Up,
+	/// In both hands in front of the chest: a cake, a drum.
+	Front,
+	/// The grip is the end of a string, and the prop floats above and to the side: a balloon.
+	String,
+	/// Worn on the head, leaving both hands free: a hat.
+	Head,
+}
+
+impl Carry {
+	pub const ALL: [Carry; 5] = [
+		Carry::Hand,
+		Carry::Up,
+		Carry::Front,
+		Carry::String,
+		Carry::Head,
+	];
+
+	pub fn parse(value: &str) -> Option<Carry> {
+		Carry::ALL.into_iter().find(|carry| carry.name() == value)
+	}
+
+	pub fn name(self) -> &'static str {
+		match self {
+			Carry::Hand => "hand",
+			Carry::Up => "up",
+			Carry::Front => "front",
+			Carry::String => "string",
+			Carry::Head => "head",
+		}
+	}
+}
+
+/// How much bigger than its drawing a prop stands on the stage at `size=1`: the size a kid's
+/// hand holds it at, so a kite let go of is the kite that was held. `size=` scales from here.
+pub const STAGE_SIZE: f32 = 2.25;
+
+/// Below this many units on its longest side a held prop is drawn bigger than life, so a key
+/// or a pebble still reads in a hand on a page seen across a room. The jar of jam (83), the
+/// toothbrush (85) and the parcel (100) are big enough already, and are drawn as they always
+/// were.
+const HELD_LONGEST: f32 = 80.0;
+
+/// Below this much presence (the side of a square of the same area) a held prop is drawn
+/// bigger too, so a thin thing (a ruler, a spoon) is not lost.
+const HELD_PRESENCE: f32 = 60.0;
+
+/// How much bigger than life the held-scale rule may draw a prop: enough for a pebble to read,
+/// not so much that it becomes a boulder.
+const HELD_GROWTH: f32 = 2.4;
 
 /// A behaviour a prop has beyond its drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,6 +259,8 @@ pub struct Held<'a> {
 	pub time: f32,
 	/// How many of the cartoon fist's 32 units the kit draws its fist.
 	pub fist_size: f32,
+	/// Degrees the prop leans, when the way it is carried decides rather than its file.
+	pub angle: Option<f32>,
 	pub ink: Ink<'a>,
 }
 
@@ -205,6 +280,11 @@ pub struct Prop {
 	pub hands: Hands,
 	/// Degrees it leans in a relaxed hand.
 	pub angle: f32,
+	/// How it is carried by somebody standing at ease.
+	pub carry: Carry,
+	/// A factor on the held-scale rule's size, for a prop that should be bigger or smaller in
+	/// a hand than the rule makes it.
+	pub held_scale: f32,
 	pub use_kind: Use,
 	pub foam: Color,
 	pub parts: Arc<Vec<PropPart>>,
@@ -218,6 +298,8 @@ pub struct PropFile {
 	pub grip: Pt,
 	pub hands: Hands,
 	pub angle: f32,
+	pub carry: Carry,
+	pub held_scale: f32,
 	pub about: String,
 	pub use_kind: Use,
 	pub foam: Color,
@@ -225,12 +307,14 @@ pub struct PropFile {
 }
 
 impl Default for PropFile {
-	/// A one-handed prop with its grip at the origin and no parts yet.
+	/// A one-handed prop carried in the fist, with its grip at the origin and no parts yet.
 	fn default() -> PropFile {
 		PropFile {
 			grip: pt(0.0, 0.0),
 			hands: Hands::One,
 			angle: 0.0,
+			carry: Carry::Hand,
+			held_scale: 1.0,
 			about: String::new(),
 			use_kind: Use::Plain,
 			foam: palette::WHITE,
@@ -246,14 +330,6 @@ impl PropFile {
 		let document = roxmltree::Document::parse(source).context("not a valid SVG file")?;
 		let root = document.root_element();
 		let meta = read_root(root)?;
-		let (grip, hands, angle, about, use_kind, foam) = (
-			meta.grip,
-			meta.hands,
-			meta.angle,
-			meta.about,
-			meta.use_kind,
-			meta.foam,
-		);
 		let parts = root
 			.descendants()
 			.filter(|node| node.has_tag_name("path"))
@@ -264,12 +340,14 @@ impl PropFile {
 			.collect();
 
 		Ok(PropFile {
-			grip,
-			hands,
-			angle,
-			about,
-			use_kind,
-			foam,
+			grip: meta.grip,
+			hands: meta.hands,
+			angle: meta.angle,
+			carry: meta.carry,
+			held_scale: meta.held_scale,
+			about: meta.about,
+			use_kind: meta.use_kind,
+			foam: meta.foam,
 			parts,
 		})
 	}
@@ -287,6 +365,14 @@ impl PropFile {
 
 		if self.angle != 0.0 {
 			let _ = write!(root, " data-angle=\"{:.1}\"", self.angle);
+		}
+
+		if self.carry != Carry::Hand {
+			let _ = write!(root, " data-carry=\"{}\"", self.carry.name());
+		}
+
+		if (self.held_scale - 1.0).abs() > f32::EPSILON {
+			let _ = write!(root, " data-held-scale=\"{:.2}\"", self.held_scale);
 		}
 
 		if self.use_kind == Use::Brush {
@@ -312,19 +398,46 @@ struct Root {
 	grip: Pt,
 	hands: Hands,
 	angle: f32,
+	carry: Carry,
+	held_scale: f32,
 	about: String,
 	use_kind: Use,
 	foam: Color,
+}
+
+/// A number in a prop file: finite, or an error naming the attribute and what it should be.
+fn finite(value: &str, what: &str, example: &str) -> Result<f32> {
+	let parsed = value
+		.trim()
+		.parse::<f32>()
+		.ok()
+		.filter(|number| number.is_finite());
+
+	parsed.with_context(|| format!("{what} needs a finite number, e.g. `{example}`, not `{value}`"))
+}
+
+/// An optional number attribute on `node`, checked by [`finite`].
+fn attribute_number(
+	node: roxmltree::Node<'_, '_>,
+	name: &str,
+	example: &str,
+) -> Result<Option<f32>> {
+	node.attribute(name)
+		.map(|value| finite(value, name, example))
+		.transpose()
 }
 
 fn read_root(root: roxmltree::Node<'_, '_>) -> Result<Root> {
 	let grip = root
 		.attribute("data-grip")
 		.context("the <svg> needs data-grip, the point that sits in the hand")?;
-	let (x, y) = grip.split_once(' ').context("data-grip is `x y`")?;
+	let (x, y) = grip
+		.trim()
+		.split_once(' ')
+		.with_context(|| format!("data-grip is `x y`, e.g. `0 -40`, not `{grip}`"))?;
 	let grip = pt(
-		x.trim().parse().context("the grip's x is not a number")?,
-		y.trim().parse().context("the grip's y is not a number")?,
+		finite(x, "the grip's x", "0 -40")?,
+		finite(y, "the grip's y", "0 -40")?,
 	);
 	let hands = match root.attribute("data-hands") {
 		None => Hands::One,
@@ -333,16 +446,21 @@ fn read_root(root: roxmltree::Node<'_, '_>) -> Result<Root> {
 				.with_context(|| format!("data-hands is one or two, not `{value}`"))?
 		}
 	};
-	let angle = root
-		.attribute("data-angle")
-		.map(|value| {
-			value
-				.trim()
-				.parse::<f32>()
-				.context("data-angle is not a number")
-		})
-		.transpose()?
-		.unwrap_or(0.0);
+	let angle = attribute_number(root, "data-angle", "-20")?.unwrap_or(0.0);
+	let carry = match root.attribute("data-carry") {
+		None => Carry::Hand,
+		Some(value) => {
+			Carry::parse(value).with_context(|| {
+				let names: Vec<&str> = Carry::ALL.iter().map(|carry| carry.name()).collect();
+				format!("data-carry is {}, not `{value}`", names.join(", "))
+			})?
+		}
+	};
+	let held_scale = attribute_number(root, "data-held-scale", "1.2")?.unwrap_or(1.0);
+	ensure!(
+		held_scale > 0.0,
+		"data-held-scale is a size above 0, e.g. `1.2`, not `{held_scale}`"
+	);
 	let about = root
 		.attribute("data-about")
 		.or_else(|| {
@@ -367,6 +485,8 @@ fn read_root(root: roxmltree::Node<'_, '_>) -> Result<Root> {
 		grip,
 		hands,
 		angle,
+		carry,
+		held_scale,
 		about,
 		use_kind,
 		foam,
@@ -386,14 +506,6 @@ impl Prop {
 	pub fn parse(name: &str, source: &str, style: &Arc<StylePack>) -> Result<Prop> {
 		let document = roxmltree::Document::parse(source).context("not a valid SVG file")?;
 		let meta = read_root(document.root_element())?;
-		let (grip, hands, angle, about, use_kind, foam) = (
-			meta.grip,
-			meta.hands,
-			meta.angle,
-			meta.about,
-			meta.use_kind,
-			meta.foam,
-		);
 		let mut parts = Vec::new();
 		let mut problems = Vec::new();
 
@@ -419,22 +531,32 @@ impl Prop {
 			!parts.is_empty(),
 			"it has no parts (a <path> whose id is its name)"
 		);
-		ensure!(
-			grip.x.is_finite() && grip.y.is_finite(),
-			"the grip is not a point"
-		);
 
 		Ok(Prop {
 			name: name.to_owned(),
-			about,
-			grip,
-			hands,
-			angle,
-			use_kind,
-			foam,
+			about: meta.about,
+			grip: meta.grip,
+			hands: meta.hands,
+			angle: meta.angle,
+			carry: meta.carry,
+			held_scale: meta.held_scale,
+			use_kind: meta.use_kind,
+			foam: meta.foam,
 			parts: Arc::new(parts),
 			style: Arc::clone(style),
 		})
+	}
+
+	/// How many times its own size the prop is drawn in a hand: small things larger than life,
+	/// so they read on the page (see [`HELD_LONGEST`]), times the file's `data-held-scale`.
+	pub fn held_size(&self) -> f32 {
+		let (lo, hi) = self.bounds();
+		let (width, height) = ((hi.x - lo.x).max(1.0), (hi.y - lo.y).max(1.0));
+		let grow = (HELD_LONGEST / width.max(height))
+			.max(HELD_PRESENCE / (width * height).sqrt())
+			.clamp(1.0, HELD_GROWTH);
+
+		grow * self.held_scale
 	}
 
 	/// The part names, in drawing order.
@@ -492,6 +614,13 @@ impl Prop {
 		svg.brush = saved;
 	}
 
+	/// Draws the prop upright with its grip at `at`, `scale` times its own size: worn (a hat on
+	/// a head), not held in a hand.
+	pub fn draw_worn(&self, svg: &mut Svg, at: Pt, scale: f32, ink: Ink<'_>) {
+		let corner = pt(at.x - self.grip.x * scale, at.y - self.grip.y * scale);
+		self.draw_at(svg, corner, scale, 0.0, &ink);
+	}
+
 	/// Where the grip sits when the prop stands with its base at `base` (bottom centre).
 	pub fn base_grip(&self, base: Pt, scale: f32) -> Pt {
 		let (lo, hi) = self.bounds();
@@ -520,11 +649,35 @@ impl Prop {
 			return;
 		}
 
-		let at = pt(
-			held.at.x - self.grip.x * held.scale,
-			held.at.y - self.grip.y * held.scale,
-		);
-		self.draw_at(svg, at, held.scale, self.angle, &held.ink);
+		let scale = held.scale * self.held_size();
+		let angle = held.angle.unwrap_or(self.angle);
+		// Leaning turns it about the grip, which stays in the fist.
+		let at = held.at - (self.grip * scale).rotate(angle);
+		self.draw_at(svg, at, scale, angle, &held.ink);
+	}
+
+	/// The box the prop covers when held at `at` (its grip) by a hand of `scale`, leaning by
+	/// `angle` degrees: each part's outline turned about the grip, so a tilted umbrella's canopy
+	/// and its handle are boxed apart rather than as one square.
+	pub fn held_box(&self, at: Pt, scale: f32, angle: f32) -> (Pt, Pt) {
+		let scale = scale * self.held_size();
+
+		self.parts
+			.iter()
+			.map(|part| {
+				part.shape
+					.map(|p| at + ((p - self.grip) * scale).rotate(angle))
+					.bounds()
+			})
+			.fold(
+				(pt(f32::MAX, f32::MAX), pt(f32::MIN, f32::MIN)),
+				|(lo, hi), (a, b)| {
+					(
+						pt(lo.x.min(a.x), lo.y.min(a.y)),
+						pt(hi.x.max(b.x), hi.y.max(b.y)),
+					)
+				},
+			)
 	}
 
 	/// A brush points at the mouth when it comes near it, and scrubs; otherwise it lies across
@@ -542,12 +695,13 @@ impl Prop {
 		};
 		let angle = dir.y.atan2(dir.x).to_degrees();
 		let flip = if dir.x < 0.0 { -1.0 } else { 1.0 };
+		let scale = held.scale * self.held_size();
 		svg.begin(&format!(
 			"translate({:.2} {:.2}) rotate({angle:.2}) scale({:.3} {:.3})",
 			held.at.x + scrub,
 			held.at.y,
-			held.scale,
-			flip * held.scale
+			scale,
+			flip * scale
 		));
 		self.draw_parts(svg, held.ink);
 		svg.end();
@@ -637,25 +791,8 @@ impl PropPart {
 					.context("a line (fill=\"none\") needs a stroke")?;
 				let colour =
 					Color::parse(colour).with_context(|| format!("`{colour}` is not a colour"))?;
-				let width = node
-					.attribute("stroke-width")
-					.map(|value| {
-						value
-							.trim()
-							.parse::<f32>()
-							.context("stroke-width is not a number")
-					})
-					.transpose()?
-					.unwrap_or(4.0);
-				let opacity = node
-					.attribute("data-opacity")
-					.map(|value| {
-						value
-							.trim()
-							.parse::<f32>()
-							.context("data-opacity is not a number")
-					})
-					.transpose()?
+				let width = attribute_number(node, "stroke-width", "4")?.unwrap_or(4.0);
+				let opacity = attribute_number(node, "data-opacity", "0.6")?
 					.unwrap_or(1.0)
 					.clamp(0.0, 1.0);
 				Mark::Stroke {
@@ -833,28 +970,40 @@ mod tests {
 		assert_eq!(
 			names,
 			[
+				"apple",
 				"ball",
 				"balloon",
 				"basket",
 				"bell",
 				"book",
 				"box",
+				"bucket",
+				"cake",
 				"cup",
+				"drum",
 				"flower",
+				"hat",
 				"jam",
 				"jar",
 				"key",
 				"kite",
 				"kite-spool",
+				"ladder",
 				"lantern",
 				"leaf",
 				"letter",
+				"map",
+				"paintbrush",
 				"parcel",
 				"pebble",
 				"ruler",
+				"sandwich",
 				"spoon",
 				"star",
+				"teddy",
+				"telescope",
 				"toothbrush",
+				"torch",
 				"umbrella",
 			]
 		);
@@ -902,6 +1051,84 @@ mod tests {
 		)
 		.unwrap_err();
 		assert!(format!("{error:#}").contains("one or two"), "{error:#}");
+	}
+
+	#[test]
+	fn a_number_that_is_not_finite_names_its_attribute_and_an_example() {
+		let refused = |attributes: &str| {
+			let source = format!(r#"<svg {attributes}><path id="a" d="M0 0 L9 9 Z"/></svg>"#);
+			format!(
+				"{:#}",
+				Prop::parse("test", &source, &cartoon()).unwrap_err()
+			)
+		};
+
+		let message = refused(r#"data-grip="0 0" data-angle="NaN""#);
+		assert!(
+			message.contains("data-angle") && message.contains("e.g. `-20`"),
+			"{message}"
+		);
+		let message = refused(r#"data-grip="0 inf""#);
+		assert!(
+			message.contains("grip's y") && message.contains("e.g. `0 -40`"),
+			"{message}"
+		);
+		let message = refused(r#"data-grip="0 0" data-held-scale="-inf""#);
+		assert!(message.contains("data-held-scale"), "{message}");
+		let message = refused(r#"data-grip="0 0" data-held-scale="0""#);
+		assert!(message.contains("above 0"), "{message}");
+	}
+
+	#[test]
+	fn a_carry_reads_back_as_written_and_a_wrong_one_lists_the_ways() {
+		for carry in Carry::ALL {
+			assert_eq!(Carry::parse(carry.name()), Some(carry));
+		}
+
+		let file = PropFile {
+			carry: Carry::String,
+			held_scale: 0.8,
+			parts: vec![("a".into(), r#"<path id="a" d="M0 0 L9 9 Z"/>"#.into())],
+			..PropFile::default()
+		};
+		let again = PropFile::read(&file.write()).unwrap();
+		assert_eq!(again.carry, Carry::String);
+		assert!((again.held_scale - 0.8).abs() < 1e-6);
+		// The defaults are left out of the file, so an old prop is written as it was.
+		assert!(!PropFile::default().write().contains("data-carry"));
+		assert!(!PropFile::default().write().contains("data-held-scale"));
+
+		let error = Prop::parse(
+			"test",
+			r#"<svg data-grip="0 0" data-carry="pocket"/>"#,
+			&cartoon(),
+		)
+		.unwrap_err();
+		assert!(
+			format!("{error:#}").contains("hand, up, front, string, head"),
+			"{error:#}"
+		);
+	}
+
+	#[test]
+	fn the_held_scale_rule_leaves_the_old_props_as_they_were_and_grows_small_ones() {
+		// Kerfuffle's books hold these three: they must draw exactly as before the rule.
+		let library = Library::built_in();
+
+		for name in ["jam", "toothbrush", "parcel"] {
+			let prop = library.find(name).unwrap();
+			assert!(
+				(prop.held_size() - 1.0).abs() < f32::EPSILON,
+				"{name} is held at {}",
+				prop.held_size()
+			);
+		}
+
+		// A pebble would be lost in a fist on a page seen across a room, so the rule grows it,
+		// and its file's own factor scales that.
+		let pebble = library.find("pebble").unwrap();
+		let grown = pebble.held_size() / pebble.held_scale;
+		assert!(grown > 1.2 && grown <= HELD_GROWTH, "{grown}");
 	}
 
 	#[test]

@@ -209,6 +209,295 @@ fn fist_size(fist: &Shape) -> f32 {
 	fist.bounds().1.y / 32.0
 }
 
+/// How big a held prop is drawn, before its own held-scale rule. Props are drawn for the
+/// cartoon kid, and the stage stands every kid as tall as a cartoon kid, so a prop is drawn the
+/// same size on the page in every style's hands — a guest from another world holds the same
+/// ball — and a grown-up's bigger hand holds it bigger, as the style draws that hand.
+fn prop_scale(puppet: &Authored, build: Build) -> f32 {
+	let kid = |style: &StylePack| Frame::authored(style, Build::Kid).height();
+
+	props::held_scale(&puppet.style, build) * (kid(&puppet.style) / kid(&StylePack::default_pack()))
+}
+
+/// How far a fist's centre sits from the wrist, in figure units (see [`grip`]).
+fn fist_reach(puppet: &Authored, build: Build) -> f32 {
+	grip(&puppet.required("hand-fist", 0.0)) * props::held_scale(&puppet.style, build)
+}
+
+/// The gap a carried prop keeps from the eyes and mouth, in the cartoon fist's units: a third
+/// of a fist.
+const FACE_CLEARANCE: f32 = 12.0;
+
+/// How far a mood or a nod may tilt the head either way, in degrees: the face a carried prop
+/// keeps clear of is wherever the head tilts within this, so a prop stays put while a figure's
+/// mood changes.
+const HEAD_TILT_ROOM: f32 = 10.0;
+
+/// The box round a figure's eyes and mouth, in its own units with its head turned by `t` (0
+/// front-on, 1 three-quarters towards +x) and tilted on its neck by up to [`HEAD_TILT_ROOM`]:
+/// where a carried prop must never go. Brows, ears and hair may be covered; the eyes and mouth,
+/// which carry the acting, never are.
+fn face_zone(puppet: &Authored, build: Build, t: f32) -> (Pt, Pt) {
+	let style = &puppet.style;
+	let body = style.body(build);
+	let (features, eyes, face) = (style.features, style.eyes, style.face);
+	let (mouth_lo, mouth_hi) = puppet
+		.part("mouth-smile", 0.0)
+		.map_or((pt(-30.0, -12.0), pt(30.0, 18.0)), |mouth| mouth.bounds());
+	// A laugh or a shout opens the mouth wider than its smile.
+	let mouth = (
+		features.mouth + mouth_lo * features.mouth_scale * 1.35,
+		features.mouth + mouth_hi * features.mouth_scale * 1.5,
+	);
+	let eye = (
+		features.eye - eyes.size * 1.2,
+		features.eye + eyes.size * 1.2,
+	);
+	let (mut left, mut right) = (f32::MAX, f32::MIN);
+
+	for x in [eye.0.x, eye.1.x, -eye.0.x, -eye.1.x, mouth.0.x, mouth.1.x] {
+		let turned = wrap(pt(x, 0.0), t, face.radius, face.turn).x;
+		(left, right) = (left.min(turned), right.max(turned));
+	}
+
+	let (top, bottom) = (eye.0.y.min(mouth.0.y), eye.1.y.max(mouth.1.y));
+	let (mut lo, mut hi) = (pt(f32::MAX, f32::MAX), pt(f32::MIN, f32::MIN));
+
+	// The head hinges at the neck (see `head_transform`).
+	for tilt in [-HEAD_TILT_ROOM, 0.0, HEAD_TILT_ROOM] {
+		for corner in [
+			pt(left, top),
+			pt(right, top),
+			pt(left, bottom),
+			pt(right, bottom),
+		] {
+			let at = body.neck + pt(corner.x, corner.y - body.head_above_neck).rotate(tilt);
+			(lo, hi) = (
+				pt(lo.x.min(at.x), lo.y.min(at.y)),
+				pt(hi.x.max(at.x), hi.y.max(at.y)),
+			);
+		}
+	}
+
+	(lo, hi)
+}
+
+/// How a figure turned `facing` is drawn: how far round it turns (0 to 1), and whether it is
+/// mirrored to face left (see [`Posed::of`]).
+fn turned(facing: f32) -> (f32, bool) {
+	let turn = (facing / STAGED_FACING).clamp(-1.0, 1.0);
+	(turn.abs(), turn < 0.0)
+}
+
+/// Where the fist on `side` (-1 near, 1 far) lands, in the figure's own units, when a figure
+/// standing at ease turned `facing` sends that hand to `target` (in the same units).
+fn fist_for(
+	puppet: &Authored,
+	build: Build,
+	facing: f32,
+	carry: props::Carry,
+	side: f32,
+	target: Pt,
+) -> Pt {
+	let (_, mirrored) = turned(facing);
+	let body = puppet.style.body(build);
+	let mut state = FigureState::new(&Frame::authored(&puppet.style, build));
+	state.facing = facing;
+	state.carry = carry;
+	let page = if mirrored {
+		pt(-target.x, target.y)
+	} else {
+		target
+	};
+
+	if (side > 0.0) == mirrored {
+		state.hands.0 = page;
+	} else {
+		state.hands.1 = page;
+	}
+
+	let posed = Posed::of(&state, &puppet.style, build);
+	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
+	let (_, elbow, wrist) = solved.arm(&posed, side);
+
+	wrist + (wrist - elbow).norm() * fist_reach(puppet, build)
+}
+
+/// The target, in the figure's own units, that puts the fist on `side` at `fist`, as near as
+/// the arm reaches.
+fn aim(
+	puppet: &Authored,
+	build: Build,
+	facing: f32,
+	carry: props::Carry,
+	side: f32,
+	fist: Pt,
+) -> Pt {
+	let mut target = fist + pt(0.0, fist_reach(puppet, build));
+
+	for _ in 0..5 {
+		let landed = fist_for(puppet, build, facing, carry, side, target);
+		target = target + (fist - landed);
+	}
+
+	target
+}
+
+/// How a prop held up beside the head is placed, in the figure's own units for a figure turned
+/// `facing`: the near hand holds it, on the side the face turns away from, the way an animator
+/// stages it so the arm never crosses the face. Returns where its fist goes and how far the
+/// prop leans out from the head, in degrees.
+fn up_place(puppet: &Authored, build: Build, prop: &Prop, facing: f32) -> (Pt, f32) {
+	let (t, _) = turned(facing);
+	let body = puppet.style.body(build);
+	let zone = face_zone(puppet, build, t);
+	let scale = prop_scale(puppet, build);
+	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
+	let arm = body.limbs.upper_arm + body.limbs.forearm;
+	let shoulder = pt(
+		lerp(-body.shoulder_half, body.shoulders_turned.0, t),
+		body.shoulder_y,
+	);
+	// How far the near fist falls short of a place, with the arm solved as it will be drawn.
+	let short = |fist: Pt| {
+		let target = aim(puppet, build, facing, props::Carry::Up, -1.0, fist);
+		(fist_for(puppet, build, facing, props::Carry::Up, -1.0, target) - fist).len() - arm * 0.03
+	};
+	let beside = |(lift, lean): (f32, f32)| {
+		let (_, hi) = prop.held_box(pt(0.0, 0.0), scale, lean);
+		let fist = pt(
+			(shoulder.x - arm * 0.45).min(zone.0.x - room - hi.x),
+			shoulder.y - arm * lift,
+		);
+		(fist, lean)
+	};
+	// Over the head, all of it above the eyes.
+	let (_, over_hi) = prop.held_box(pt(0.0, 0.0), scale, -8.0);
+	let overhead = (
+		pt(shoulder.x - arm * 0.15, zone.0.y - room - over_hi.y),
+		-8.0,
+	);
+	// Raised up and out beside the head with the elbow below the fist; lower or leaning away
+	// from the head if a short arm only nearly reaches past the face; over the head if a long
+	// one can; and if none is in reach, the nearest, so the arm stretches as far as it goes.
+	let places = [0.5, 0.35, 0.2, 0.0]
+		.into_iter()
+		.flat_map(|lift| [0.0, -12.0, -24.0, -36.0].map(|lean| beside((lift, lean))))
+		.chain([overhead]);
+
+	places
+		.clone()
+		.find(|(fist, _)| short(*fist) < 0.0)
+		.or_else(|| places.min_by(|a, b| short(a.0).total_cmp(&short(b.0))))
+		.unwrap_or(overhead)
+}
+
+/// How a figure turned `facing` carries a prop standing at ease: where its hands go, as
+/// [`FigureState::hands`] and [`FigureState::hand_shapes`] have them (the page-right hand
+/// holds), given where the pose put them. `None` leaves them as the pose has them.
+pub fn carry_hands(
+	look: &Look,
+	puppet: &Authored,
+	prop: &Prop,
+	carry: props::Carry,
+	facing: f32,
+	(hands, shapes): ((Pt, Pt), (HandShape, HandShape)),
+) -> Option<((Pt, Pt), (HandShape, HandShape))> {
+	use props::Carry;
+
+	let build = look.build;
+	let (t, mirrored) = turned(facing);
+	let page = |p: Pt| if mirrored { pt(-p.x, p.y) } else { p };
+
+	match carry {
+		Carry::Hand | Carry::Head => None,
+		Carry::Up => {
+			// The near hand: the page-left one, or the page-right one mirrored.
+			let (fist, _) = up_place(puppet, build, prop, facing);
+			let target = page(aim(puppet, build, facing, carry, -1.0, fist));
+
+			if mirrored {
+				Some(((hands.0, target), (shapes.0, HandShape::Fist)))
+			} else {
+				Some(((target, hands.1), (HandShape::Fist, shapes.1)))
+			}
+		}
+		Carry::Front => {
+			// Centred on the body with the hands low enough that the elbows hang and bend
+			// outwards (a drawn arm cannot point its forearm at the reader), its top kept
+			// under the mouth, held at its grip by the far hand and at the mirrored grip by
+			// the near one.
+			let body = puppet.style.body(build);
+			let arm = body.limbs.upper_arm + body.limbs.forearm;
+			let zone = face_zone(puppet, build, t);
+			let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
+			let (lo, hi) = prop.held_box(pt(0.0, 0.0), prop_scale(puppet, build), 0.0);
+			let (near, far) = body.shoulders_turned;
+			let centre = lerp(0.0, f32::midpoint(near, far), t);
+			// The arms nearly straight, so the elbows only just bow out.
+			let x = centre - f32::midpoint(lo.x, hi.x);
+			let across = (x - body.shoulder_half).abs();
+			let drop = ((arm * 0.85).powi(2) - across * across)
+				.max((arm * 0.5).powi(2))
+				.sqrt();
+			// No lower than the hem, so a short-armed kid holds things at the tummy, unless the
+			// arms are long enough to keep their elbows in lower down.
+			let floor = body.hem_y.max(body.shoulder_y + arm * 0.7);
+			let mut fist = pt(x, (body.shoulder_y + drop).min(floor));
+			fist.y = fist.y.max(zone.1.y + room - lo.y);
+			let far_hand = aim(puppet, build, facing, carry, 1.0, fist);
+			let other = pt(centre * 2.0 - fist.x, fist.y);
+			let near_hand = aim(puppet, build, facing, carry, -1.0, other);
+			let (left, right) = if mirrored {
+				(page(far_hand), page(near_hand))
+			} else {
+				(near_hand, far_hand)
+			};
+			Some(((left, right), (HandShape::Fist, HandShape::Fist)))
+		}
+		Carry::String => {
+			// The hand hangs at the side, out of the way of the face, with the string's end in
+			// its fist.
+			let zone = face_zone(puppet, build, t);
+			let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
+			let edge = if mirrored { -zone.0.x } else { zone.1.x };
+			let out = pt(hands.1.x.max(edge + room * 2.0), hands.1.y);
+			Some(((hands.0, out), (shapes.0, HandShape::Fist)))
+		}
+	}
+}
+
+/// Where a prop carried on a string floats, from the fist that holds the string's end (in the
+/// figure's own units, on `side`, for a figure turned `facing`): above the eyes and out beside
+/// the face, bobbing in the air as `time` goes by. Returns its grip and its lean in degrees.
+fn float_place(
+	puppet: &Authored,
+	build: Build,
+	prop: &Prop,
+	(fist, side): (Pt, f32),
+	facing: f32,
+	time: f32,
+) -> (Pt, f32) {
+	let (t, _) = turned(facing);
+	let body = puppet.style.body(build);
+	let zone = face_zone(puppet, build, t);
+	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
+	let (lo, hi) = prop.held_box(pt(0.0, 0.0), prop_scale(puppet, build), 0.0);
+	let length = (body.limbs.upper_arm + body.limbs.forearm) * 0.9;
+	let across = if side > 0.0 {
+		(fist.x + length * 0.3).max(zone.1.x + room - lo.x)
+	} else {
+		(fist.x - length * 0.3).min(zone.0.x - room - hi.x)
+	};
+	let up = (fist.y - length).min(zone.0.y - room - hi.y);
+	let bob = pt(
+		(time * 1.1 + side).sin() * length * 0.04,
+		(time * 1.7).sin() * length * 0.025,
+	);
+
+	(pt(across, up) + bob, (time * 1.1 + side).sin() * 5.0)
+}
+
 /// A character's authored puppet: their part file over their style's kit, read and checked once.
 #[derive(Clone, Debug)]
 pub struct Authored {
@@ -655,6 +944,8 @@ struct Posed {
 	follow: f32,
 	/// A prop, and whether the far hand (rather than the near one) holds it.
 	prop: Option<(Arc<Prop>, bool)>,
+	/// How the prop is carried (see [`carry_hands`]).
+	carry: props::Carry,
 	teeth: Teeth,
 	/// Turned three-quarters, the far arm is drawn behind the body and head: hanging down, or
 	/// raised (a cheer) so the hand shows beside the head instead of across the face.
@@ -689,7 +980,11 @@ impl Posed {
 		// the near hand does it instead, the way an animator would stage it. A hand reaching for
 		// the face (brushing, holding the nose) is meant to be there and stays.
 		let face_x = t * style.face.slide * STAGED_FACING;
-		let swapped = t > 0.5
+		// A prop held up beside the head is placed clear of the face already (see
+		// [`carry_hands`]), in the hand the plan chose.
+		let carrying_up = state.carry == props::Carry::Up;
+		let swapped = !carrying_up
+			&& t > 0.5
 			&& far.y < shoulder_y - 30.0
 			&& far.x > 70.0
 			&& (far.x - face_x).abs() >= 30.0
@@ -702,10 +997,12 @@ impl Posed {
 
 		let far_arm_behind =
 			t > 0.5 && far.x > -10.0 && (far.y > shoulder_y || (far.x - face_x).abs() >= 30.0);
-		(near, far) = (
-			clear_of_head(near, -1.0, face_x, shoulder_y, hand_size),
-			clear_of_head(far, 1.0, face_x, shoulder_y, hand_size),
-		);
+		if !carrying_up {
+			(near, far) = (
+				clear_of_head(near, -1.0, face_x, shoulder_y, hand_size),
+				clear_of_head(far, 1.0, face_x, shoulder_y, hand_size),
+			);
+		}
 		let (near_foot, far_foot) = if mirrored {
 			(state.legs.feet.1, state.legs.feet.0)
 		} else {
@@ -738,10 +1035,15 @@ impl Posed {
 			mouth_open: state.mouth_open,
 			hands: (near, far),
 			hand_shapes: (hand(near_shape, near), hand(far_shape, far)),
-			wrists: (
-				wrist(near_shape, near, -1.0, shoulder_y),
-				wrist(far_shape, far, 1.0, shoulder_y),
-			),
+			// Fists carrying something in front hold it, not the hips.
+			wrists: if state.carry == props::Carry::Front {
+				(0.0, 0.0)
+			} else {
+				(
+					wrist(near_shape, near, -1.0, shoulder_y),
+					wrist(far_shape, far, 1.0, shoulder_y),
+				)
+			},
 			legs,
 			gait: state.gait,
 			tilt: state.tilt * sign,
@@ -768,7 +1070,8 @@ impl Posed {
 			prop: state
 				.prop
 				.as_ref()
-				.map(|prop| (Arc::clone(prop), mirrored == swapped)),
+				.map(|prop| (Arc::clone(prop), !carrying_up && mirrored == swapped)),
+			carry: state.carry,
 			teeth: state.teeth,
 			far_arm_behind,
 		}
@@ -1041,6 +1344,42 @@ fn hang(puppet: &Authored, body: &Proportions, t: f32) -> f32 {
 /// its head — hair and anything riding on it — in the document's units, for whoever is
 /// measuring (see [`Svg::begin_measure`]).
 pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) -> Option<Bounds> {
+	draw_figure(svg, look, puppet, state).0
+}
+
+/// Where a figure's eyes and mouth are drawn, as measured from the drawing.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FaceMarks {
+	pub eyes: Option<Bounds>,
+	pub mouth: Option<Bounds>,
+}
+
+/// Measures where an authored figure's eyes and mouth are drawn, and what it holds, in the
+/// figure's own units with the soles at the origin: what a carried prop must keep clear of.
+pub fn face_and_held(
+	look: &Look,
+	puppet: &Authored,
+	state: &FigureState,
+) -> (FaceMarks, Option<Bounds>) {
+	let mut svg = Svg::new();
+	svg.measuring(true);
+	let (_, face) = draw_figure(&mut svg, look, puppet, state);
+	let mut svg = Svg::new();
+	svg.measuring(true);
+	svg.begin_measure();
+	draw_held(&mut svg, look, puppet, state);
+	let held = svg.end_measure();
+
+	(face, held)
+}
+
+/// [`draw`], also returning where the eyes and mouth were drawn when measuring.
+fn draw_figure(
+	svg: &mut Svg,
+	look: &Look,
+	puppet: &Authored,
+	state: &FigureState,
+) -> (Option<Bounds>, FaceMarks) {
 	let frame = look.frame();
 	let body = puppet.style.body(look.build);
 	let posed = Posed::of(state, &puppet.style, look.build);
@@ -1061,25 +1400,34 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 
-	// A far hand holding something keeps it in front, where it can be seen.
+	// A far hand holding something keeps it in front, where it can be seen, and so do both
+	// hands carrying something in front of the chest.
 	let far_holds = posed.prop.as_ref().is_some_and(|(_, in_far)| *in_far);
-	let far_arm_behind = posed.far_arm_behind && !far_holds;
+	let far_arm_behind = posed.far_arm_behind && !far_holds && posed.carry != props::Carry::Front;
 
-	// What each hand holds, and where the mouth is (a toothbrush near it is brushing).
+	// What each hand holds, and where the mouth is (a toothbrush near it is brushing). A prop
+	// carried in front or worn is drawn on its own, not in one hand.
 	let mouth = mouth_on_body(&solved, &posed, inks.face, inks.features.mouth);
+	let holding = |prop: &Arc<Prop>| {
+		Held {
+			prop: Arc::clone(prop),
+			mouth,
+			time: state.time,
+			scale: props::held_scale(&puppet.style, look.build),
+			size: prop_scale(puppet, look.build),
+			carry: posed.carry,
+			build: look.build,
+			facing: state.facing,
+			at_ease: state.at_ease,
+		}
+	};
 	let held = |side: f32| {
 		posed
 			.prop
 			.as_ref()
 			.filter(|(_, in_far)| *in_far == (side > 0.0))
-			.map(|(prop, _)| {
-				Held {
-					prop: Arc::clone(prop),
-					mouth,
-					time: state.time,
-					scale: props::held_scale(&puppet.style, look.build),
-				}
-			})
+			.filter(|_| !matches!(posed.carry, props::Carry::Front | props::Carry::Head))
+			.map(|(prop, _)| holding(prop))
 	};
 	let arm = Arm {
 		puppet,
@@ -1100,14 +1448,30 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	svg.begin(&solved.torso_transform());
 	draw_torso(svg, puppet, look, &inks, &solved);
 	svg.begin_measure();
-	svg.begin(&format!(
-		"translate({:.1} {:.1}) rotate({:.2}) translate(0 {:.1})",
-		body.neck.x, body.neck.y, posed.head_tilt, -body.head_above_neck
-	));
-	draw_head(svg, puppet, look, &inks, &posed, state.time);
+	svg.begin(&head_transform(body, &posed));
+	let face = draw_head(svg, puppet, look, &inks, &posed, state.time);
+
+	if posed.carry == props::Carry::Head
+		&& let Some((prop, _)) = &posed.prop
+	{
+		draw_hat(svg, puppet, &inks, prop, posed.t);
+	}
+
 	svg.end();
 	let head = svg.end_measure();
 	svg.end();
+
+	// A prop carried in front of the chest goes under both hands.
+	if posed.carry == props::Carry::Front
+		&& let Some((prop, _)) = &posed.prop
+	{
+		// The prop's grip is its own right-hand side, which the far hand holds.
+		let side = 1.0;
+		let (_, elbow, wrist) = solved.arm(&posed, side);
+		let along = (wrist - elbow).norm();
+		let fist = wrist + along * fist_reach(puppet, look.build);
+		draw_prop(svg, puppet, inks.line, &holding(prop), fist, along, side);
+	}
 
 	// Arms that fold across the body draw the lower arm last so it sits on top.
 	let order: [f32; 2] = if posed.hands.0.x > 0.0 {
@@ -1134,7 +1498,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	svg.end();
 	svg.brush = saved;
 
-	head
+	(head, face)
 }
 
 /// Draws only what a puppet holds, exactly where its hand draws it, for measuring.
@@ -1150,22 +1514,75 @@ pub fn draw_held(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureSt
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 
 	if let Some((prop, in_far)) = &posed.prop {
-		let side = if *in_far { 1.0 } else { -1.0 };
-		let (_, elbow, wrist) = solved.arm(&posed, side);
-		let along = (wrist - elbow).norm();
-		let scale = props::held_scale(&puppet.style, look.build);
-		let fist = wrist + along * grip(&puppet.required("hand-fist", 0.0)) * scale;
-		let held = Held {
-			prop: Arc::clone(prop),
-			mouth: mouth_on_body(&solved, &posed, inks.face, inks.features.mouth),
-			time: state.time,
-			scale,
-		};
-		draw_prop(svg, puppet, inks.line, &held, fist, along, side);
+		if posed.carry == props::Carry::Head {
+			svg.begin(&solved.torso_transform());
+			svg.begin(&head_transform(body, &posed));
+			draw_hat(svg, puppet, &inks, prop, posed.t);
+			svg.end();
+			svg.end();
+		} else {
+			let side = if *in_far || posed.carry == props::Carry::Front {
+				1.0
+			} else {
+				-1.0
+			};
+			let (_, elbow, wrist) = solved.arm(&posed, side);
+			let along = (wrist - elbow).norm();
+			let fist = wrist + along * fist_reach(puppet, look.build);
+			let held = Held {
+				prop: Arc::clone(prop),
+				mouth: mouth_on_body(&solved, &posed, inks.face, inks.features.mouth),
+				time: state.time,
+				scale: props::held_scale(&puppet.style, look.build),
+				size: prop_scale(puppet, look.build),
+				carry: posed.carry,
+				build: look.build,
+				facing: state.facing,
+				at_ease: state.at_ease,
+			};
+			draw_prop(svg, puppet, inks.line, &held, fist, along, side);
+		}
 	}
 
 	svg.end();
 	svg.brush = saved;
+}
+
+/// The head's transform on the torso: hinged at the neck, tilted, with its own origin above.
+fn head_transform(body: &Proportions, posed: &Posed) -> String {
+	format!(
+		"translate({:.1} {:.1}) rotate({:.2}) translate(0 {:.1})",
+		body.neck.x, body.neck.y, posed.head_tilt, -body.head_above_neck
+	)
+}
+
+/// A prop worn on the head (a hat), in the head's own units: sized to the head, its grip on
+/// the crown, and its lowest point kept above the eyes.
+fn draw_hat(svg: &mut Svg, puppet: &Authored, inks: &Inks, prop: &Prop, t: f32) {
+	let (head_lo, head_hi) = puppet.required("head", t).bounds();
+	// Wide enough to sit over the hair, which is often wider than the head.
+	let (hair_lo, hair_hi) = puppet.required("hair", t).bounds();
+	let width = (head_hi.x.max(hair_hi.x) - head_lo.x.min(hair_lo.x)).max(1.0);
+	let (lo, hi) = prop.bounds();
+	let size = width * 1.05 / (hi.x - lo.x).max(1.0);
+	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
+	let eyes = inks.features.eye.y - inks.eyes.size.y * 1.3 - room;
+	let crown = lerp(head_lo.y, eyes, 0.5);
+	let low = crown + (hi.y - prop.grip.y) * size;
+	let at = pt(
+		f32::midpoint(head_lo.x, head_hi.x),
+		crown - (low - eyes).max(0.0),
+	);
+
+	prop.draw_worn(
+		svg,
+		at,
+		size,
+		props::Ink::Brushed {
+			finish: &inks.finish,
+			ink: inks.line,
+		},
+	);
 }
 
 /// A soft contact shadow under the feet, so the figure stands on the ground.
@@ -1681,8 +2098,16 @@ struct Held {
 	/// Where the mouth is: a toothbrush near it is brushing.
 	mouth: Pt,
 	time: f32,
-	/// Props are drawn for a kid's hand; a grown-up's bigger hand holds them bigger.
+	/// A grown-up's bigger hand holds things further from the wrist.
 	scale: f32,
+	/// How big the prop is drawn: it grows with the fist that holds it (see [`prop_scale`]).
+	size: f32,
+	carry: props::Carry,
+	build: Build,
+	/// Which way the figure is turned, for where a carry puts the prop.
+	facing: f32,
+	/// Standing at ease, so a prop in the hand leans out of the face (see [`hand_lean`]).
+	at_ease: bool,
 }
 
 /// Where the middle of the mouth is in figure units, after the head and body have moved.
@@ -1904,22 +2329,107 @@ fn draw_prop(
 ) {
 	let finish = puppet.style.finish;
 	let fist_size = fist_size(&puppet.required("hand-fist", 0.0));
+	// Held up, a prop leans away from the head; on a string, it floats above and beside it.
+	let (at, angle) = match held.carry {
+		props::Carry::Up => {
+			(
+				fist,
+				Some(up_place(puppet, held.build, &held.prop, held.facing).1),
+			)
+		}
+		props::Carry::String => {
+			let (at, lean) = float_place(
+				puppet,
+				held.build,
+				&held.prop,
+				(fist, side),
+				held.facing,
+				held.time,
+			);
+			draw_string(svg, fist, at, ink, finish.detail, held.time);
+			(at, Some(lean))
+		}
+		props::Carry::Hand => {
+			// Its own lean tips it out from the hand that holds it, away from the body.
+			let own = held.prop.angle * side;
+			let lean = if held.at_ease {
+				hand_lean(puppet, held.build, &held.prop, (fist, own), held.facing)
+			} else {
+				own
+			};
+			(fist, Some(lean))
+		}
+		props::Carry::Front | props::Carry::Head => (fist, None),
+	};
+
 	held.prop.draw_held(
 		svg,
 		&props::Held {
-			at: fist,
-			scale: held.scale,
+			at,
+			scale: held.size,
 			along,
 			side,
 			mouth: held.mouth,
 			time: held.time,
 			fist_size,
+			angle,
 			ink: props::Ink::Brushed {
 				finish: &finish,
 				ink,
 			},
 		},
 	);
+}
+
+/// How far a prop in a hand at ease leans, in degrees, so none of it covers the eyes or mouth
+/// (in the figure's own units, held at `fist` by a figure turned `facing`): its `own` lean when
+/// that is clear; otherwise tipped further away from the face, a little at a time, until it
+/// clears, and level at most.
+fn hand_lean(
+	puppet: &Authored,
+	build: Build,
+	prop: &Prop,
+	(fist, own): (Pt, f32),
+	facing: f32,
+) -> f32 {
+	let (t, _) = turned(facing);
+	let zone = face_zone(puppet, build, t);
+	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
+	let scale = prop_scale(puppet, build);
+	let clear = |lean: f32| {
+		let (lo, hi) = prop.held_box(fist, scale, lean);
+		hi.x < zone.0.x - room
+			|| lo.x > zone.1.x + room
+			|| hi.y < zone.0.y - room
+			|| lo.y > zone.1.y + room
+	};
+
+	if clear(own) {
+		return own;
+	}
+
+	let away = if fist.x < f32::midpoint(zone.0.x, zone.1.x) {
+		-1.0
+	} else {
+		1.0
+	};
+	let level = away * 90.0;
+
+	(1..=9)
+		.map(|step| (own + away * 10.0 * step as f32).clamp(-90.0, 90.0))
+		.find(|lean| clear(*lean))
+		.unwrap_or(level)
+}
+
+/// A prop's string, from the fist to where the prop is tied: slack, so it curves, and drifting
+/// a little as the prop bobs. It is drawn in the style's line.
+fn draw_string(svg: &mut Svg, from: Pt, to: Pt, ink: Color, weight: f32, time: f32) {
+	let length = (to - from).len();
+	let slack = (to - from).perp().norm() * length * (0.07 + (time * 1.3).sin() * 0.025);
+	let path = Path::new()
+		.move_to(from)
+		.quad_to(from.lerp(to, 0.5) + slack, to);
+	svg.brush_line(&path, ink, weight * 0.6);
 }
 
 fn draw_hand(svg: &mut Svg, puppet: &Authored, hand: Hand, skin: Color, ink: Color, light: Pt) {
@@ -1946,7 +2456,15 @@ fn draw_hand(svg: &mut Svg, puppet: &Authored, hand: Hand, skin: Color, ink: Col
 	}
 }
 
-fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: &Posed, time: f32) {
+/// Draws the head, and returns where its eyes and mouth were drawn when measuring.
+fn draw_head(
+	svg: &mut Svg,
+	puppet: &Authored,
+	look: &Look,
+	inks: &Inks,
+	posed: &Posed,
+	time: f32,
+) -> FaceMarks {
 	let t = posed.t;
 	let ink = inks.line;
 	let face = &posed.face;
@@ -2070,10 +2588,13 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		}
 	}
 
+	svg.begin_measure();
+
 	for (index, side) in [-1.0_f32, 1.0].into_iter().enumerate() {
 		draw_eye(svg, inks, posed, face.eyes[index], side, time);
 	}
 
+	let eyes = svg.end_measure();
 	draw_nose(svg, puppet, inks, t, face.wrinkle);
 
 	if look.has(Extra::Bogey)
@@ -2083,7 +2604,9 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 		svg.brushed(&drip.path(), inks.kit.bogey, ink, inks.finish.detail);
 	}
 
+	svg.begin_measure();
 	draw_mouth(svg, puppet, inks, posed, time);
+	let mouth = svg.end_measure();
 
 	if look.has(Extra::Moustache)
 		&& let Some(moustache) = puppet.part("moustache", t)
@@ -2258,6 +2781,8 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			.map(warp);
 		svg.brushed(&shape.path(), inks.hair, ink, inks.features.brow_weight);
 	}
+
+	FaceMarks { eyes, mouth }
 }
 
 /// Whether hair hangs down past the ears (they sit about y = 8 in head units).
@@ -2797,6 +3322,73 @@ struct Gap {
 	pose: String,
 }
 
+/// Checks that every built-in prop, carried the way it is by a kid and a grown-up drawn from
+/// this style's templates, standing at ease front-on and turned three-quarters either way, keeps
+/// clear of their eyes and mouth: measured from the drawing, prop against eyes and mouth.
+pub fn props_clear_of_the_face(style: &Arc<StylePack>) -> Vec<Finding> {
+	let library = props::Library::built_in();
+	let mut findings = Vec::new();
+
+	for build in [Build::Kid, Build::Grownup] {
+		let look = match crate::cast::template_look(style, build) {
+			Ok(look) => look,
+			Err(error) => {
+				findings.push(Finding {
+					level: Level::Error,
+					part: format!("{} template", crate::art::pack::body_name(build)),
+					message: format!("cannot be drawn to hold props: {error:#}"),
+				});
+				continue;
+			}
+		};
+		let Some(puppet) = look.puppet.clone() else {
+			continue;
+		};
+		let frame = look.frame();
+
+		for prop in library.props() {
+			for facing in [0.0, STAGED_FACING, -STAGED_FACING] {
+				let mut state = FigureState::new(&frame);
+				state.facing = facing;
+				state.hands = frame.hands(Pose::Idle, facing);
+				state.hand_shapes = Pose::Idle.hand_shapes();
+				state.prop = Some(Arc::clone(prop));
+				super::figure::carry(&look, Pose::Idle, &mut state);
+				let (face, held) = face_and_held(&look, &puppet, &state);
+				let Some(held) = held else {
+					findings.push(Finding {
+						level: Level::Error,
+						part: format!("props.{}", prop.name()),
+						message: "draws nothing in the hand".into(),
+					});
+					continue;
+				};
+
+				for (feature, marks) in [("eyes", face.eyes), ("mouth", face.mouth)] {
+					if marks.is_some_and(|marks| overlaps(marks, held)) {
+						findings.push(Finding {
+							level: Level::Error,
+							part: format!("props.{}", prop.name()),
+							message: format!(
+								"carried by the {} template turned {facing:+.2}, it covers the \
+								 {feature}",
+								crate::art::pack::body_name(build)
+							),
+						});
+					}
+				}
+			}
+		}
+	}
+
+	findings
+}
+
+/// Whether two boxes share any area.
+fn overlaps(a: Bounds, b: Bounds) -> bool {
+	a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
+}
+
 /// Measures whether a figure's drawn parts join up on `build`'s body, in each of
 /// [`JOIN_POSES`]: the head (or its neck) must touch the top and the top the legwear; each arm
 /// must start inside the top (its sleeve, or a bare or rubber-hose arm at the shoulder); each leg
@@ -2998,6 +3590,41 @@ mod tests {
 	fn the_face_slides_as_far_as_the_warp_moves_it() {
 		let warped = warp(pt(0.0, 0.0), 1.0).x;
 		assert!((cartoon().face.slide * STAGED_FACING - warped).abs() < 1.0);
+	}
+
+	#[test]
+	fn no_carried_prop_covers_the_eyes_or_mouth_in_any_style() {
+		let mut problems = Vec::new();
+
+		for name in StylePack::names() {
+			let style = StylePack::named(name).unwrap();
+			problems.extend(
+				props_clear_of_the_face(&style)
+					.into_iter()
+					.map(|finding| format!("{name}: {finding}")),
+			);
+		}
+
+		assert!(problems.is_empty(), "{problems:#?}");
+	}
+
+	#[test]
+	fn the_face_check_catches_a_prop_held_over_the_face() {
+		// Held in the fist up at the mouth (brushing teeth), a prop covers it: the check
+		// must see that, or its silence above means nothing.
+		let style = cartoon();
+		let look = crate::cast::template_look(&style, Build::Kid).unwrap();
+		let puppet = look.puppet.clone().unwrap();
+		let mut state = FigureState::new(&look.frame());
+		state.hands = look.frame().hands(Pose::Brush, 0.0);
+		state.hand_shapes = Pose::Brush.hand_shapes();
+		state.prop = Some(props::Library::built_in().find("apple").unwrap());
+		let (face, held) = face_and_held(&look, &puppet, &state);
+		let (eyes, mouth, held) = (face.eyes.unwrap(), face.mouth.unwrap(), held.unwrap());
+		assert!(
+			overlaps(eyes, held) || overlaps(mouth, held),
+			"eyes {eyes:?} mouth {mouth:?} apple {held:?}"
+		);
 	}
 
 	#[test]

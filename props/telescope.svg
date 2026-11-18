@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -118 40 164" data-grip="0 -18" data-hands="one" data-angle="30" data-about="A navy and brass telescope with three sections, pulled out.">
+  <title>A telescope</title>
+  <path id="eyepiece" d="M-5 0 L5 0 C6.7 0 8 1.3 8 3 L8 39 C8 40.7 6.7 42 5 42 L-5 42 C-6.7 42 -8 40.7 -8 39 L-8 3 C-8 1.3 -6.7 0 -5 0 Z" fill="night" data-shade="1"/>
+  <path id="middle" d="M-9 -52 L9 -52 C10.7 -52 12 -50.7 12 -49 L12 -1 C12 0.7 10.7 2 9 2 L-9 2 C-10.7 2 -12 0.7 -12 -1 L-12 -49 C-12 -50.7 -10.7 -52 -9 -52 Z" fill="cornflower" data-shade="1"/>
+  <path id="barrel" d="M-15 -110 L15 -110 L13 -50 L-13 -50 Z" fill="night" data-shade="1"/>
+  <path id="band-1" d="M-14 -116 L14 -116 C15.7 -116 17 -114.7 17 -113 L17 -107 C17 -105.3 15.7 -104 14 -104 L-14 -104 C-15.7 -104 -17 -105.3 -17 -107 L-17 -113 C-17 -114.7 -15.7 -116 -14 -116 Z" fill="mustard" data-shade="1"/>
+  <path id="band-2" d="M-13 -56 L13 -56 C14.1 -56 15 -55.1 15 -54 L15 -50 C15 -48.9 14.1 -48 13 -48 L-13 -48 C-14.1 -48 -15 -48.9 -15 -50 L-15 -54 C-15 -55.1 -14.1 -56 -13 -56 Z" fill="mustard" data-line="detail"/>
+  <path id="band-3" d="M-9 -4 L9 -4 C10.1 -4 11 -3.1 11 -2 L11 2 C11 3.1 10.1 4 9 4 L-9 4 C-10.1 4 -11 3.1 -11 2 L-11 -2 C-11 -3.1 -10.1 -4 -9 -4 Z" fill="mustard" data-line="detail"/>
+  <path id="lens" d="M-14 -116 C-14 -118.2 -7.7 -120 0 -120 C7.7 -120 14 -118.2 14 -116 C14 -113.8 7.7 -112 0 -112 C-7.7 -112 -14 -113.8 -14 -116 Z" fill="sky" data-line="detail"/>
+  <path id="shine" d="M-8 -98 L-7 -60" fill="none" stroke="#ffffff" stroke-width="4" data-opacity="0.5"/>
+</svg>

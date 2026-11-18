@@ -1,4 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -120 120 130" data-grip="0 0" data-hands="one" data-about="A five-pointed star.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-48 -60 96 100" data-grip="0 26" data-hands="one" data-about="A chunky gold star with rounded points and a twinkle.">
   <title>A star</title>
-  <path id="star" d="M0 -104 L12.9 -69.8 L49.4 -68 L20.9 -45.2 L30.6 -10 L0 -30 L-30.6 -10 L-20.9 -45.2 L-49.4 -68 L-12.9 -69.8 Z" fill="sunflower" data-shade="1"/>
+  <path id="star" d="M-2.3 -40.9 C-0.9 -44 0.9 -44 2.3 -40.9 L10.6 -22.9 C12 -19.8 15.2 -17.5 18.5 -17.2 L38.2 -14.9 C41.5 -14.5 42.1 -12.7 39.6 -10.4 L25 3 C22.6 5.3 21.4 9 22 12.3 L25.9 31.7 C26.6 35 25.1 36.1 22.2 34.5 L4.9 24.7 C1.9 23.1 -1.9 23.1 -4.9 24.7 L-22.2 34.5 C-25.1 36.1 -26.6 35 -25.9 31.7 L-22 12.3 C-21.4 9 -22.6 5.3 -25 3 L-39.6 -10.4 C-42.1 -12.7 -41.5 -14.5 -38.2 -14.9 L-18.5 -17.2 C-15.2 -17.5 -12 -19.8 -10.6 -22.9 Z" fill="sunflower" data-shade="1"/>
+  <path id="inner" d="M-1.8 -20 C-0.7 -22.4 0.7 -22.4 1.8 -20 L5.5 -12.1 C6.6 -9.7 9.1 -7.9 11.7 -7.6 L20.4 -6.6 C23 -6.2 23.4 -4.8 21.5 -3.1 L15.1 2.9 C13.2 4.7 12.2 7.6 12.7 10.2 L14.4 18.7 C14.9 21.3 13.8 22.2 11.5 20.9 L3.8 16.6 C1.5 15.4 -1.5 15.4 -3.8 16.6 L-11.5 20.9 C-13.8 22.2 -14.9 21.3 -14.4 18.7 L-12.7 10.2 C-12.2 7.6 -13.2 4.7 -15.1 2.9 L-21.5 -3.1 C-23.4 -4.8 -23 -6.2 -20.4 -6.6 L-11.7 -7.6 C-9.1 -7.9 -6.6 -9.7 -5.5 -12.1 Z" fill="#ffe08a" data-line="none"/>
+  <path id="twinkle-1" d="M36 -46 L36 -58 L36 -52 L30 -52 L42 -52" fill="none" stroke="#ffc93c" stroke-width="3"/>
+  <path id="twinkle-2" d="M-40 -36 L-40 -44 L-40 -40 L-44 -40 L-36 -40" fill="none" stroke="#ffc93c" stroke-width="3"/>
+  <path id="shine" d="M-6 -30 C-8 -22 -14 -14 -24 -12" fill="none" stroke="#ffffff" stroke-width="4" data-opacity="0.6"/>
 </svg>

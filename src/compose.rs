@@ -300,6 +300,7 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 			state.lie = actor.knocked;
 			state.teeth = actor.teeth;
 			state.prop.clone_from(&actor.prop);
+			figure::carry(look, actor.pose, &mut state);
 			state.time = time;
 			state.mouth_open =
 				actor
@@ -332,11 +333,17 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 		None => pt(x * STAGE, ground - lift * actor.size),
 	};
 
+	// A stage prop's size is relative to the size a kid holds it at.
+	let scale = match actor.kind {
+		Kind::Prop(_) => actor.size * props::STAGE_SIZE,
+		_ => actor.size,
+	};
+
 	Puppet {
 		id: actor.id.clone(),
 		kind: actor.kind.clone(),
 		at,
-		scale: actor.size,
+		scale,
 		z: actor.z,
 		opacity: 1.0,
 		body,

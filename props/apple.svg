@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-28 -42 56 72" data-grip="0 6" data-hands="one" data-held-scale="0.85" data-about="A shiny red apple with a stalk and a leaf.">
+  <title>An apple</title>
+  <path id="apple" d="M0 -18 C10 -26 28 -24 28 -2 C28 18 14 28 4 26 C2 25 -2 25 -4 26 C-14 28 -28 18 -28 -2 C-28 -24 -10 -26 0 -18 Z" fill="tomato" data-shade="1"/>
+  <path id="stalk" d="M0 -18 C0 -26 2 -32 5 -36" fill="none" stroke="#8a5a44" stroke-width="4"/>
+  <path id="leaf" d="M4 -30 C10 -40 22 -42 26 -38 C20 -30 12 -28 4 -30 Z" fill="leaf" data-line="detail"/>
+  <path id="shine" d="M-18 -10 C-18 -16 -14 -20 -10 -21" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.65"/>
+</svg>

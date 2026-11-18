@@ -1,9 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -90 120 100" data-grip="0 0" data-hands="one" data-about="A gift box tied with a ribbon and a bow.">
-  <title>A box</title>
-  <path id="base" d="M-44 -52 L44 -52 L40 0 L-40 0 Z" fill="teal" data-shade="1"/>
-  <path id="lid" d="M-48 -60 L48 -60 L46 -46 L-46 -46 Z" fill="mint"/>
-  <path id="ribbon-v" d="M-8 -60 L8 -60 L8 0 L-8 0 Z" fill="tomato" data-line="none"/>
-  <path id="ribbon-h" d="M-48 -38 L48 -38 L47 -30 L-47 -30 Z" fill="tomato" data-line="none"/>
-  <path id="bow-left" d="M-10 -72 C-22 -70 -24 -58 -12 -60 C-2 -62 -4 -70 -10 -72 Z" fill="tomato"/>
-  <path id="bow-right" d="M10 -72 C22 -70 24 -58 12 -60 C2 -62 4 -70 10 -72 Z" fill="tomato"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-58 -76 116 124" data-grip="54 6" data-hands="two" data-carry="front" data-about="A teal gift box tied with a red ribbon and a big bow, carried in both hands.">
+  <title>A gift box</title>
+  <path id="box" d="M-46 -30 L46 -30 C48.2 -30 50 -28.2 50 -26 L50 41 C50 43.2 48.2 45 46 45 L-46 45 C-48.2 45 -50 43.2 -50 41 L-50 -26 C-50 -28.2 -48.2 -30 -46 -30 Z" fill="teal" data-shade="1"/>
+  <path id="lid" d="M-52 -46 L52 -46 C54.2 -46 56 -44.2 56 -42 L56 -30 C56 -27.8 54.2 -26 52 -26 L-52 -26 C-54.2 -26 -56 -27.8 -56 -30 L-56 -42 C-56 -44.2 -54.2 -46 -52 -46 Z" fill="#17958e" data-shade="1"/>
+  <path id="ribbon" d="M-9 -46 L9 -46 L9 45 L-9 45 Z" fill="tomato" data-line="detail"/>
+  <path id="bow-left" d="M-2 -48 C-12 -72 -40 -74 -38 -58 C-36 -46 -16 -44 -2 -48 Z" fill="tomato" data-shade="1"/>
+  <path id="bow-right" d="M2 -48 C12 -72 40 -74 38 -58 C36 -46 16 -44 2 -48 Z" fill="tomato" data-shade="1"/>
+  <path id="knot" d="M-8 -50 C-8 -53.9 -4.4 -57 0 -57 C4.4 -57 8 -53.9 8 -50 C8 -46.1 4.4 -43 0 -43 C-4.4 -43 -8 -46.1 -8 -50 Z" fill="tomato" data-line="detail"/>
+  <path id="tag" d="M22 -6 L42 -6 L46 2 L42 10 L22 10 Z" fill="cream" data-line="detail"/>
+  <path id="shine" d="M-40 -18 L-40 32" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.45"/>
 </svg>

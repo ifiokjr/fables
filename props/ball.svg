@@ -1,5 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -90 120 120" data-grip="0 0" data-hands="one" data-about="A striped ball, sitting in one hand.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-48 -48 96 96" data-grip="0 20" data-hands="one" data-about="A red playground ball with a cream band.">
   <title>A ball</title>
-  <path id="ball" d="M34 -34 C34 -15.2 18.8 0 0 0 C-18.8 0 -34 -15.2 -34 -34 C-34 -52.8 -18.8 -68 0 -68 C18.8 -68 34 -52.8 34 -34 Z" fill="tomato" data-shade="1"/>
-  <path id="band" d="M-31 -44 C-20 -38 20 -38 31 -44 L30 -30 C20 -24 -20 -24 -30 -30 Z" fill="cream" data-line="detail"/>
+  <path id="ball" d="M-40 0 C-40 -22.1 -22.1 -40 0 -40 C22.1 -40 40 -22.1 40 0 C40 22.1 22.1 40 0 40 C-22.1 40 -40 22.1 -40 0 Z" fill="tomato" data-shade="1"/>
+  <path id="band" d="M-38.2 -12 C-20 -21 20 -21 38.2 -12 C39.7 -5 39.8 2 39.2 8 C20 -1 -20 -1 -39.2 8 C-39.8 2 -39.7 -5 -38.2 -12 Z" fill="cream" data-line="detail"/>
+  <path id="seam" d="M-30 26 C-14 34 14 34 30 26" fill="none" stroke="#b8323a" stroke-width="3"/>
+  <path id="shine" d="M-26 -22 C-20 -30 -12 -34 -2 -35" fill="none" stroke="#ffffff" stroke-width="6" data-opacity="0.65"/>
 </svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -304 100 306" data-grip="0 -144" data-hands="two" data-angle="90" data-about="A wooden ladder with five rungs, for standing on the stage, carried level by its middle rung.">
+  <title>A ladder</title>
+  <path id="rung-1" d="M-37 -262 L37 -262 C38.7 -262 40 -260.7 40 -259 L40 -253 C40 -251.3 38.7 -250 37 -250 L-37 -250 C-38.7 -250 -40 -251.3 -40 -253 L-40 -259 C-40 -260.7 -38.7 -262 -37 -262 Z" fill="toffee" data-shade="1"/>
+  <path id="rung-2" d="M-37 -206 L37 -206 C38.7 -206 40 -204.7 40 -203 L40 -197 C40 -195.3 38.7 -194 37 -194 L-37 -194 C-38.7 -194 -40 -195.3 -40 -197 L-40 -203 C-40 -204.7 -38.7 -206 -37 -206 Z" fill="toffee" data-shade="1"/>
+  <path id="rung-3" d="M-37 -150 L37 -150 C38.7 -150 40 -148.7 40 -147 L40 -141 C40 -139.3 38.7 -138 37 -138 L-37 -138 C-38.7 -138 -40 -139.3 -40 -141 L-40 -147 C-40 -148.7 -38.7 -150 -37 -150 Z" fill="toffee" data-shade="1"/>
+  <path id="rung-4" d="M-37 -94 L37 -94 C38.7 -94 40 -92.7 40 -91 L40 -85 C40 -83.3 38.7 -82 37 -82 L-37 -82 C-38.7 -82 -40 -83.3 -40 -85 L-40 -91 C-40 -92.7 -38.7 -94 -37 -94 Z" fill="toffee" data-shade="1"/>
+  <path id="rung-5" d="M-37 -38 L37 -38 C38.7 -38 40 -36.7 40 -35 L40 -29 C40 -27.3 38.7 -26 37 -26 L-37 -26 C-38.7 -26 -40 -27.3 -40 -29 L-40 -35 C-40 -36.7 -38.7 -38 -37 -38 Z" fill="toffee" data-shade="1"/>
+  <path id="rail-left" d="M-44 -300 C-42 -302 -36 -302 -34 -300 L-30 0 L-46 0 Z" fill="#a8673e" data-shade="1"/>
+  <path id="rail-right" d="M34 -300 C36 -302 42 -302 44 -300 L46 0 L30 0 Z" fill="#a8673e" data-shade="1"/>
+  <path id="shine-left" d="M-40 -290 L-38 -12" fill="none" stroke="#ffffff" stroke-width="3" data-opacity="0.4"/>
+  <path id="shine-right" d="M38 -290 L39 -12" fill="none" stroke="#ffffff" stroke-width="3" data-opacity="0.4"/>
+</svg>

@@ -24,6 +24,7 @@ use super::noise;
 use super::pack::StylePack;
 use super::palette;
 use super::props;
+use super::props::Carry;
 use super::pt;
 use super::puppet;
 use super::rig;
@@ -478,6 +479,10 @@ pub struct FigureState {
 	pub teeth: Teeth,
 	/// The thing this figure holds; several hands can meet at its grip (see [`props`]).
 	pub prop: Option<Arc<Prop>>,
+	/// How it is carried: the prop's own way while standing at ease, in the hand otherwise.
+	pub carry: Carry,
+	/// Standing at ease (the idle pose): a prop carried in the hand then leans out of the face.
+	pub at_ease: bool,
 	/// Seconds since the scene started, for little idle motions.
 	pub time: f32,
 }
@@ -746,6 +751,8 @@ impl FigureState {
 			squash: 1.0,
 			teeth: Teeth::Clean,
 			prop: None,
+			carry: Carry::Hand,
+			at_ease: false,
 			time: 0.0,
 		}
 	}
@@ -2402,9 +2409,50 @@ fn draw_prop(
 			mouth: frame.head + pt(state.facing * frame.head_r * 0.2, frame.head_r * 0.45),
 			time: state.time,
 			fist_size: 1.0,
+			angle: None,
 			ink: props::Ink::Skin,
 		},
 	);
+}
+
+/// Sets how a figure carries the prop it holds in `pose`: the prop's own way (`data-carry`)
+/// while it stands at ease, held up or in front with its hands placed for its own body. A pose
+/// that does something with the hands (`hold` shows a prop off, `reach-out` offers it) keeps
+/// them, with the prop in the fist, except a prop on a string, which floats from any hand, and
+/// a hat, which stays on the head. The parametric puppet carries everything in the hand.
+pub fn carry(look: &Look, pose: Pose, state: &mut FigureState) {
+	state.at_ease = pose == Pose::Idle;
+
+	let Some(prop) = state.prop.clone() else {
+		state.carry = Carry::Hand;
+		return;
+	};
+	let carry = match prop.carry {
+		Carry::Up | Carry::Front if pose != Pose::Idle => Carry::Hand,
+		carry => carry,
+	};
+	let Some(authored) = &look.puppet else {
+		state.carry = Carry::Hand;
+		return;
+	};
+
+	state.carry = carry;
+
+	if pose != Pose::Idle {
+		return;
+	}
+
+	if let Some((hands, shapes)) = puppet::carry_hands(
+		look,
+		authored,
+		&prop,
+		carry,
+		state.facing,
+		(state.hands, state.hand_shapes),
+	) {
+		state.hands = hands;
+		state.hand_shapes = shapes;
+	}
 }
 
 /// Draws only what a figure holds, placed exactly as [`draw`] would place it, for measuring.

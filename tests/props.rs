@@ -287,24 +287,19 @@ fn a_grown_up_holds_the_same_prop_bigger_than_a_kid() {
 	let rehearsals = stage::rehearse(&fixture.story, &fixture.cast).unwrap();
 
 	// The kid holds it before the give on the beach page; the grown-up holds it after.
-	let kid = compose::held_prop_bounds(puppet(
-		&compose::puppets(&rehearsals[3].after[0], 0.0, true),
-		"hana",
-	));
-	let grown = compose::held_prop_bounds(puppet(
-		&compose::puppets(rehearsals[3].finale(), 0.0, true),
-		"mo",
-	));
+	let before = compose::puppets(&rehearsals[3].after[0], 0.0, true);
+	let after = compose::puppets(rehearsals[3].finale(), 0.0, true);
+	let (hana, mo) = (puppet(&before, "hana"), puppet(&after, "mo"));
+	let kid = compose::held_prop_bounds(hana);
+	let grown = compose::held_prop_bounds(mo);
 
 	let (Some(kid), Some(grown)) = (kid, grown) else {
 		panic!("both hold the ball");
 	};
 	// The page draws a grown-up smaller than a kid, so compare each prop with its holder's
-	// drawing scale: the bigger hand holds a bigger ball.
-	let (kid_scale, grown_scale) = (2.25, 1.85);
-
+	// own drawing scale: the bigger hand holds a bigger ball.
 	assert!(
-		(grown.3 - grown.1) / grown_scale > (kid.3 - kid.1) / kid_scale * 1.05,
+		(grown.3 - grown.1) / mo.scale > (kid.3 - kid.1) / hana.scale * 1.05,
 		"the grown-up's hand holds it bigger: {kid:?} against {grown:?}"
 	);
 }
@@ -357,6 +352,7 @@ fn the_props_sheet_draws_every_prop() {
 	let sheet = fables::press::sheets::props_sheet(
 		&world.props().unwrap(),
 		&fixture.cast,
+		&world.style().unwrap(),
 		&world.name,
 		fables::art::style::Style::default(),
 	)

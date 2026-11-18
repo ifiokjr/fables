@@ -1,7 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -100 120 120" data-grip="0 0" data-hands="one" data-about="A closed book with a spine and a title band.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -52 88 122" data-grip="-6 12" data-hands="one" data-about="A blue hardback storybook with a gold title label and a ribbon marker.">
   <title>A book</title>
-  <path id="pages" d="M-40 -70 L32 -76 L34 -6 L-38 0 Z" fill="cream"/>
-  <path id="cover" d="M-46 -78 L24 -84 L26 -10 L-42 -4 Z" fill="cornflower" data-shade="1"/>
-  <path id="spine" d="M-46 -78 L-36 -79 L-34 -4 L-42 -3 Z" fill="night" data-line="detail"/>
-  <path id="title" d="M-22 -60 L14 -64 L15 -50 L-21 -46 Z" fill="sunflower" data-line="none"/>
+  <path id="pages" d="M30 -44 L44 -40 L44 52 L30 50 Z" fill="cream" data-line="detail"/>
+  <path id="page-lines" d="M36 -36 L36 46 L39 46 L39 -35" fill="none" stroke="#d9c7a4" stroke-width="2"/>
+  <path id="ribbon" d="M8 44 L16 44 L18 66 L12 60 L6 66 Z" fill="tomato" data-line="detail"/>
+  <path id="cover" d="M-30 -48 L30 -48 C33.3 -48 36 -45.3 36 -42 L36 42 C36 45.3 33.3 48 30 48 L-30 48 C-33.3 48 -36 45.3 -36 42 L-36 -42 C-36 -45.3 -33.3 -48 -30 -48 Z" fill="cornflower" data-shade="1"/>
+  <path id="spine" d="M-36 -42 C-36 -46 -34 -48 -30 -48 L-22 -48 L-22 48 L-30 48 C-34 48 -36 46 -36 42 Z" fill="night" data-line="detail"/>
+  <path id="label" d="M-8 -30 L22 -30 C24.2 -30 26 -28.2 26 -26 L26 -16 C26 -13.8 24.2 -12 22 -12 L-8 -12 C-10.2 -12 -12 -13.8 -12 -16 L-12 -26 C-12 -28.2 -10.2 -30 -8 -30 Z" fill="sunflower" data-line="detail"/>
+  <path id="title" d="M-6 -21 L20 -21" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="star" d="M6.5 5.1 C6.8 4.5 7.2 4.5 7.5 5.1 L9.2 9.2 C9.5 9.9 10.1 10.4 10.9 10.5 L15.3 10.8 C16 10.9 16.1 11.2 15.6 11.7 L12.2 14.6 C11.7 15.1 11.4 15.9 11.6 16.6 L12.6 20.9 C12.8 21.6 12.5 21.8 11.8 21.4 L8.1 19.1 C7.4 18.8 6.6 18.8 5.9 19.1 L2.2 21.4 C1.5 21.8 1.2 21.6 1.4 20.9 L2.4 16.6 C2.6 15.9 2.3 15.1 1.8 14.6 L-1.6 11.7 C-2.1 11.2 -2 10.9 -1.3 10.8 L3.1 10.5 C3.9 10.4 4.5 9.9 4.8 9.2 Z" fill="sunflower" data-line="detail"/>
+  <path id="shine" d="M-14 -40 L-14 38" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.4"/>
 </svg>

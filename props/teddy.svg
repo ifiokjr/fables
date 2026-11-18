@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-48 -84 96 148" data-grip="40 12" data-hands="two" data-carry="front" data-about="A well-loved brown teddy bear with a red bow, hugged in both arms.">
+  <title>A teddy bear</title>
+  <path id="ear-left" d="M-39 -66 C-39 -73.2 -33.2 -79 -26 -79 C-18.8 -79 -13 -73.2 -13 -66 C-13 -58.8 -18.8 -53 -26 -53 C-33.2 -53 -39 -58.8 -39 -66 Z" fill="toffee" data-shade="1"/>
+  <path id="ear-right" d="M13 -66 C13 -73.2 18.8 -79 26 -79 C33.2 -79 39 -73.2 39 -66 C39 -58.8 33.2 -53 26 -53 C18.8 -53 13 -58.8 13 -66 Z" fill="toffee" data-shade="1"/>
+  <path id="leg-left" d="M-41 46 C-41 37.7 -33.4 31 -24 31 C-14.6 31 -7 37.7 -7 46 C-7 54.3 -14.6 61 -24 61 C-33.4 61 -41 54.3 -41 46 Z" fill="toffee" data-shade="1"/>
+  <path id="leg-right" d="M7 46 C7 37.7 14.6 31 24 31 C33.4 31 41 37.7 41 46 C41 54.3 33.4 61 24 61 C14.6 61 7 54.3 7 46 Z" fill="toffee" data-shade="1"/>
+  <path id="body" d="M-36 18 C-36 -0.8 -19.9 -16 0 -16 C19.9 -16 36 -0.8 36 18 C36 36.8 19.9 52 0 52 C-19.9 52 -36 36.8 -36 18 Z" fill="toffee" data-shade="1"/>
+  <path id="tummy" d="M-20 24 C-20 13 -11 4 0 4 C11 4 20 13 20 24 C20 35 11 44 0 44 C-11 44 -20 35 -20 24 Z" fill="sand" data-line="none"/>
+  <path id="head" d="M-34 -42 C-34 -58.6 -18.8 -72 0 -72 C18.8 -72 34 -58.6 34 -42 C34 -25.4 18.8 -12 0 -12 C-18.8 -12 -34 -25.4 -34 -42 Z" fill="toffee" data-shade="1"/>
+  <path id="muzzle" d="M-14 -32 C-14 -38.1 -7.7 -43 0 -43 C7.7 -43 14 -38.1 14 -32 C14 -25.9 7.7 -21 0 -21 C-7.7 -21 -14 -25.9 -14 -32 Z" fill="sand" data-line="detail"/>
+  <path id="nose" d="M-6 -38 C-6 -42 6 -42 6 -38 C6 -34 0 -32 0 -32 C0 -32 -6 -34 -6 -38 Z" fill="cocoa" data-line="none"/>
+  <path id="eye-left" d="M-16.5 -50 C-16.5 -51.9 -14.9 -53.5 -13 -53.5 C-11.1 -53.5 -9.5 -51.9 -9.5 -50 C-9.5 -48.1 -11.1 -46.5 -13 -46.5 C-14.9 -46.5 -16.5 -48.1 -16.5 -50 Z" fill="#2b1d2e" data-line="none"/>
+  <path id="eye-right" d="M9.5 -50 C9.5 -51.9 11.1 -53.5 13 -53.5 C14.9 -53.5 16.5 -51.9 16.5 -50 C16.5 -48.1 14.9 -46.5 13 -46.5 C11.1 -46.5 9.5 -48.1 9.5 -50 Z" fill="#2b1d2e" data-line="none"/>
+  <path id="bow" d="M0 -12 L-16 -20 L-16 -4 L0 -12 L16 -20 L16 -4 Z" fill="tomato" data-line="detail"/>
+</svg>

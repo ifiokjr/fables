@@ -1206,6 +1206,7 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 		raster::png(&press::sheets::props_sheet(
 			&*world.props()?,
 			&cast,
+			&world.style()?,
 			&world.name,
 			style,
 		)?)?,
@@ -1333,13 +1334,19 @@ fn prop_new(world: &World, name: &str, from: Option<&str>, about: &str) -> Resul
 	say!(
 		"✓ created `{}` in {} ({} hand{}, grip {:.0},{:.0})",
 		prop.name,
-		world.dir.join("props").join(format!("{name}.svg")).display(),
+		world
+			.dir
+			.join("props")
+			.join(format!("{name}.svg"))
+			.display(),
 		prop.hands,
 		if prop.hands == "one" { "" } else { "s" },
 		prop.grip[0],
 		prop.grip[1]
 	)?;
-	say!("  next: redraw its parts with the prop tools over MCP, then `holds={name}` or `@{name}`")?;
+	say!(
+		"  next: redraw its parts with the prop tools over MCP, then `holds={name}` or `@{name}`"
+	)?;
 	Ok(())
 }
 
@@ -1541,7 +1548,8 @@ fn audition(world: &World, who: &str, line: &str, mood: Option<&str>, out: &Path
 
 fn style_check(name: &str) -> Result<()> {
 	let pack = StylePack::named(name)?;
-	let findings = pack.check();
+	let mut findings = pack.check();
+	findings.extend(fables::art::puppet::props_clear_of_the_face(&pack));
 	let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
 	say!(
 		"{name}: {} kit parts, {} kid and {} grown-up template parts, bodies: {}",
