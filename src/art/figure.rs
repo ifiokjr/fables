@@ -140,7 +140,7 @@ impl Look {
 	/// puppets will) without touching the stage, video or sheets.
 	pub fn frame(&self) -> Frame {
 		if let Some(authored) = &self.puppet {
-			Frame::authored(&authored.style, self.build)
+			Frame::of_body(&authored.style, &authored.body(self.build))
 		} else {
 			Frame::of(self.build)
 		}
@@ -577,9 +577,15 @@ impl Frame {
 		}
 	}
 
-	/// The measurements an authored puppet is drawn to (see [`puppet`](super::puppet)).
+	/// The measurements an authored puppet is drawn to (see [`puppet`](super::puppet)) on its
+	/// style's plain body for a build.
 	pub fn authored(style: &StylePack, build: Build) -> Frame {
-		let body = style.body(build);
+		Self::of_body(style, style.body(build))
+	}
+
+	/// The measurements an authored puppet in a style is drawn to on `body`, which may be built
+	/// slimmer or stouter than the style's plain one.
+	pub fn of_body(style: &StylePack, body: &puppet::Proportions) -> Frame {
 		let limbs = body.limbs;
 
 		Frame {

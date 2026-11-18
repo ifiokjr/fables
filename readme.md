@@ -162,8 +162,8 @@ Every style has two bodies, `kid` and `grown-up`, and a template for each, so a 
 | --- | --- |
 | `fables style list` | The drawing styles, with a sentence on each look, the bodies it draws (kid, grown-up) and the page skin it prints in. |
 | `fables style check <name>` | Checks each body's template over the kit draws a whole figure whose parts join, and every body stands up. Joins are measured standing, cheering and sitting, front-on and three-quarters: the head or its neck must touch the torso, each arm must start inside the torso or its sleeve, each leg inside the torso or the legwear, and a sleeve or trouser leg drawn in two pieces must meet at the elbow or knee. |
-| `fables style describe <name>` | The bodies the style draws and the template each starts from, every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
-| `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet) and `<name>-parts.png` (every kit and template part). |
+| `fables style describe <name>` | The bodies the style draws and the template each starts from, the hair, brows, noses and builds each body offers, every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
+| `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet), `<name>-parts.png` (every kit and template part) and `<name>-variants.png` (every hair, brows, nose and build the style draws, on the kid and the grown-up). |
 
 | Drawing style | Look |
 | --- | --- |
@@ -239,7 +239,7 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, sound, workflow. |
 | `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences, a drawing style and an author, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
 | `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space, the drawing rules and the page skin the style prints in; the kit as an image. |
-| `character_create` | A new cast member from who they are and their colours, drawn from the style's template. `draw` also writes their part file. |
+| `character_create` | A new cast member from who they are and their colours, drawn from the style's template with the `hair`, `build`, `brows` and `nose` they name (or ones picked to differ from the rest of the cast). `draw` also writes their part file. |
 | `character_parts` | A character's parts as path data: their own, their style's template's, or the kit's. |
 | `character_set_parts` | Writes or replaces parts and checks the figure. A character still drawn from the template is given a file of their own first. Changes that would break it are refused with the findings, so the world always loads. |
 | `character_sheet` | The model sheet (five beats, front and three-quarters), the parts sheet, or all fifteen moods, as images. |
@@ -263,7 +263,7 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | Command | What it makes |
 | --- | --- |
 | `fables world new "<Name>" --style <drawing style> [--about "…"] [--author "…"]` | `worlds/<slug>/` with `world.toml`, a commented cast example, a `puppets/` folder and a `stories/` folder. |
-| `fables character new <id> --name "…" [--kind kid\|grown-up] [--about "…"] [--skin … --hair-colour … --top … --trim … --bottom … --shoes … --eyes … --pattern …] [--draw]` | A new cast member, drawn from the world's drawing style's template; `--draw` also writes their part file. |
+| `fables character new <id> --name "…" [--kind kid\|grown-up] [--about "…"] [--hair … --build … --brows … --nose …] [--skin … --hair-colour … --top … --trim … --bottom … --shoes … --eyes … --pattern …] [--draw]` | A new cast member, drawn from the world's drawing style's template with the variants named (see [Variants](#variants)); any left out are picked to differ from the rest of the cast and written into the table. `--draw` also writes their part file. |
 | `fables setting new <name> [--from <setting>] [--about "…"]` | A world's own setting, blank or repainted from one it already uses. |
 | `fables new "<Title>" --star <id> [--friend <id>] [--flow <name>]` | A new book in the world's `stories/<title>/story.md`, laid out from the named flow, else the world's `recipe.md`, else `three-tries`, with the star already staged. |
 | `fables flow list` | The story flows: each one's about, what it is good for, how many characters it needs and its length. |
@@ -483,9 +483,36 @@ A person with **no `puppet` line** is drawn from their world's drawing style's t
 
 - `fables puppet template <id>` writes `puppets/<id>.svg` from the template and adds the `puppet = "puppets/<id>.svg"` line itself, so a part can be redrawn with `fables puppet set <id> <part> --d "M…"`.
 - `fables character new <id> --name "…" --draw` writes both the table and the part file in one step.
-- `puppet = "parametric"` draws the older parametric puppet instead, the one that reads `hair`, `head`, `body`, `nose` and `mouth` (`mouth_size` in code). Those five fields do nothing on a character drawn from parts, and `fables check` says so once per member.
+- `puppet = "parametric"` draws the older parametric puppet instead, the one that reads `hair`, `head`, `body`, `nose` and `mouth` (`mouth_size` in code) as its own shapes. `head`, `body` and `mouth` do nothing on a character drawn from parts, and `fables check` says so once per member; on a template-drawn character `hair` and `nose` are [variants](#variants).
 
 A person is `kind = "kid"` (the default) or `kind = "grown-up"`, and the kind picks the body they stand on and the template they are drawn from. Every drawing style has a kid template and a grown-up one cut for adult proportions, so a grown-up with no `puppet` line, or one started with `puppet template` or `character new --draw`, is a grown-up of that style rather than a kid stretched tall. `fables puppet check <id>` fails a figure whose parts come apart on its body, naming the part, the gap and the pose, and `fables puppet set` refuses a change that opens a join.
+
+### Variants
+
+A person drawn from the template can be drawn more than one way, so a cast of template-drawn people reads as different people from the same show. Four words in their cast table pick how:
+
+| Field | Words |
+| --- | --- |
+| `hair` | `short`, `bob`, `bun`, `curls`, `spikes`, `pigtails`, `long` and `bald` in every drawing style, plus a style's own: `tuft` (cartoon and rubber-hose kids), `bowl` (chibi), `flat-top` (mid-century) |
+| `build` | `slim`, `plain` (the body as the style draws it) or `stout` |
+| `brows` | `bold`, `arched` or `thin` |
+| `nose` | `button`, `round`, `long` or `none` where the style draws them: chibi draws only `button`, anime and manga have no `round`, and rubber-hose faces always have a nose |
+
+```toml
+[nell]
+name = "Nell Nibbles"
+kind = "grown-up"
+hair = "bun"
+build = "stout"
+brows = "arched"
+nose = "round"
+```
+
+- A word the style doesn't draw is an error naming the ones it does; `fables style describe <style>` lists every body's, and `fables style sheet <style>` draws them all.
+- `fables character new` (and the `character_create` tool) takes `--hair`, `--build`, `--brows` and `--nose`. Any left out are picked from the ones the rest of the cast uses least (by the character's id among equals) and written into the table, so they never change afterwards. A kid is only bald, and a face only goes without a nose, when asked.
+- A table without them is drawn with the template's own hair, brows and nose on a plain build, as before variants existed.
+- A character with their own part file draws their own hair, brows and nose, so those three words do nothing there (`fables check` says so); `build` still fits their parts to a slim or stout body. `--draw` writes the picked hair, brows and nose into the new part file.
+- Every variant on every body passes `fables style check`'s joins, built slim, plain and stout.
 
 Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book. The full command-line vocabulary for a character is `fables puppet parts <id>` (their parts as path data) and `fables style describe <drawing style>` (every part, its space and the drawing rules).
 

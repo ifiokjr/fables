@@ -41,11 +41,14 @@ use super::dials::Line;
 use super::dials::Motion;
 use super::dials::Shade;
 use super::figure::Build;
+use super::parts::Feature;
 use super::parts::Finding;
 use super::parts::Level;
 use super::parts::Parts;
+use super::parts::is_variant_name;
 use super::puppet;
 use super::puppet::Authored;
+use super::puppet::Physique;
 use super::puppet::Proportions;
 
 /// The style a world draws in unless its `world.toml` names another.
@@ -154,6 +157,8 @@ pub struct StylePack {
 	pub motion: Motion,
 	pub inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
+	/// The names a cast asks for the templates' own hair and the kit's own brows and nose by.
+	own: Own,
 	/// Parts every character in the style starts with.
 	pub kit: Parts,
 	/// A plain kid's own parts, drawn over the kit.
@@ -282,6 +287,48 @@ pub struct KitInks {
 	pub mud: Color,
 }
 
+/// What the templates and kit draw of their own, by the names a cast asks for them with. Their
+/// other ways of drawing the hair, brows and nose are variants beside them (see [`Feature`]).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct Own {
+	kid_hair: String,
+	grown_up_hair: String,
+	brows: String,
+	nose: String,
+	/// Whether a cast can leave the nose out with `nose = "none"`. A style whose faces are
+	/// built round the nose says no.
+	#[serde(default = "yes")]
+	noseless: bool,
+}
+
+fn yes() -> bool {
+	true
+}
+
+/// The ways of drawing a figure's features a character asks for, by name. `None` keeps their
+/// template's own (or their part file's).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Picks {
+	pub hair: Option<String>,
+	pub brows: Option<String>,
+	pub nose: Option<String>,
+}
+
+impl Picks {
+	/// The name picked for a feature, if any.
+	pub fn get(&self, feature: Feature) -> Option<&str> {
+		match feature {
+			Feature::Hair => self.hair.as_deref(),
+			Feature::Brows => self.brows.as_deref(),
+			Feature::Nose => self.nose.as_deref(),
+		}
+	}
+}
+
+/// The nose a character can ask for in any style, which leaves the nose out.
+pub const NO_NOSE: &str = "none";
+
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct Entry {
@@ -301,6 +348,7 @@ struct Entry {
 	motion: Motion,
 	inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
+	own: Own,
 }
 
 /// The name of the body a build is drawn on, as `style.toml` and the cast file spell it.
@@ -377,7 +425,7 @@ impl StylePack {
 			skins.join(", ")
 		);
 
-		Ok(StylePack {
+		let pack = StylePack {
 			name: entry.name,
 			description: entry.description,
 			skin: entry.skin,
@@ -390,10 +438,31 @@ impl StylePack {
 			motion: entry.motion,
 			inks: entry.inks,
 			bodies: entry.bodies,
+			own: entry.own,
 			kit: Parts::parse(kit).context("in kit.svg")?,
 			template: Parts::parse(template).context("in template.svg")?,
 			grown_up: Parts::parse(grown_up).context("in template-grown-up.svg")?,
-		})
+		};
+
+		for build in [Build::Kid, Build::Grownup] {
+			for feature in Feature::ALL {
+				let own = pack.own(build, feature);
+				ensure!(
+					is_variant_name(own) && own != NO_NOSE,
+					"style.toml's [own] {} `{own}` must be lowercase words joined by hyphens, and \
+					 not `{NO_NOSE}`",
+					feature.name()
+				);
+				ensure!(
+					!pack.variants(build, feature).contains(&own),
+					"style.toml's [own] {} `{own}` is also drawn as a variant; name one of them \
+					 differently",
+					feature.name()
+				);
+			}
+		}
+
+		Ok(pack)
 	}
 
 	/// The body a build is drawn on (parsing made sure every build has one).
@@ -409,15 +478,130 @@ impl StylePack {
 	/// A plain character's own parts, drawn for a build's body: what `fables puppet template`
 	/// starts a character from.
 	pub fn template_for(&self, build: Build) -> Parts {
+		self.drawn_for(build).clone()
+	}
+
+	fn drawn_for(&self, build: Build) -> &Parts {
 		match build {
-			Build::Kid => self.template.clone(),
-			Build::Grownup => self.grown_up.clone(),
+			Build::Kid => &self.template,
+			Build::Grownup => &self.grown_up,
 		}
 	}
 
 	/// The template character on a build's body, over the kit: a whole figure, ready to redraw.
 	pub fn template_figure(&self, build: Build) -> Parts {
 		self.template_for(build).over(self.kit.clone())
+	}
+
+	/// A template-drawn character's own parts, as a part file started from them should draw
+	/// them: the template for a build's body, with the hair, brows and nose they `picks` drawn
+	/// in where they pick other than the style's own. A part file always has a nose (the kit's
+	/// stands in for one it leaves out), so it can't be started from a face with none.
+	pub fn template_with(&self, build: Build, picks: &Picks) -> Result<Parts> {
+		let figure = self.figure(build, picks)?;
+		let mut parts = self.template_for(build);
+
+		for feature in Feature::ALL {
+			let Some(pick) = picks
+				.get(feature)
+				.filter(|&pick| pick != self.own(build, feature))
+			else {
+				continue;
+			};
+			ensure!(
+				pick != NO_NOSE,
+				"a part file always draws a nose: a face with nose `{NO_NOSE}` is drawn from the \
+				 template, without a part file of its own"
+			);
+			parts.leave_out(feature);
+
+			for (name, shape) in figure.iter().filter(|(name, _)| feature.owns(name)) {
+				parts.insert(name, shape.clone());
+			}
+		}
+
+		Ok(parts)
+	}
+
+	/// The template character on a build's body over the kit, drawn with the hair, brows and
+	/// nose a character `picks` (see [`StylePack::pick`]).
+	pub fn figure(&self, build: Build, picks: &Picks) -> Result<Parts> {
+		let mut figure = self.template_figure(build);
+		self.pick(&mut figure, build, picks)?;
+		Ok(figure)
+	}
+
+	/// The name a cast asks for a feature as the template on a build's body (for the hair) or
+	/// the kit (for the brows and nose) draws it of its own.
+	pub fn own(&self, build: Build, feature: Feature) -> &str {
+		match (feature, build) {
+			(Feature::Hair, Build::Kid) => &self.own.kid_hair,
+			(Feature::Hair, Build::Grownup) => &self.own.grown_up_hair,
+			(Feature::Brows, _) => &self.own.brows,
+			(Feature::Nose, _) => &self.own.nose,
+		}
+	}
+
+	/// The variants of a feature the template on a build's body and the kit draw.
+	fn variants(&self, build: Build, feature: Feature) -> Vec<&str> {
+		let mut variants = self.drawn_for(build).variants(feature);
+		variants.extend(self.kit.variants(feature));
+		variants.sort_unstable();
+		variants.dedup();
+		variants
+	}
+
+	/// Every way the style draws a feature on a build's body, by the name a cast picks it with,
+	/// in alphabetical order: its own, its variants, and `none` for a nose it lets a face go
+	/// without.
+	pub fn offers(&self, build: Build, feature: Feature) -> Vec<&str> {
+		let mut offers = self.variants(build, feature);
+		offers.push(self.own(build, feature));
+
+		if feature == Feature::Nose && self.own.noseless {
+			offers.push(NO_NOSE);
+		}
+
+		offers.sort_unstable();
+		offers
+	}
+
+	/// Draws the features a character `picks` on a build's body into `parts`, a figure over
+	/// this style's kit: a pick of the style's own (or no pick) leaves the feature as it is, a
+	/// nose of `none` leaves the nose out, and any other pick swaps in that variant. A pick the
+	/// style doesn't draw is an error naming the ones it does.
+	pub fn pick(&self, parts: &mut Parts, build: Build, picks: &Picks) -> Result<()> {
+		for feature in Feature::ALL {
+			let Some(pick) = picks.get(feature) else {
+				continue;
+			};
+
+			if pick == self.own(build, feature) {
+				continue;
+			}
+
+			if feature == Feature::Nose && pick == NO_NOSE && self.own.noseless {
+				parts.leave_out(feature);
+				continue;
+			}
+
+			if !parts.variants(feature).contains(&pick) {
+				let on = match feature {
+					Feature::Hair => format!(" on a {}", body_name(build)),
+					Feature::Brows | Feature::Nose => String::new(),
+				};
+				bail!(
+					"the {} style draws no `{pick}` {}{on}; use one of: {}",
+					self.name,
+					feature.name(),
+					self.offers(build, feature).join(", ")
+				);
+			}
+
+			parts.pick(feature, pick)?;
+		}
+
+		Ok(())
 	}
 
 	/// Where a build's template is drawn in the style's folder: `template.svg` for a kid,
@@ -439,29 +623,95 @@ impl StylePack {
 		}
 	}
 
+	/// Every way the template on a build's body can be drawn that the check poses: as it is,
+	/// with each other way of drawing each feature, and built slim and stout. Each comes with
+	/// how a finding names it.
+	fn variety(&self, build: Build) -> Vec<(String, Picks, Physique)> {
+		let mut variety = vec![(String::new(), Picks::default(), Physique::Plain)];
+
+		for feature in Feature::ALL {
+			for offer in self.offers(build, feature) {
+				if offer == self.own(build, feature) {
+					continue;
+				}
+
+				let pick = Some(offer.to_owned());
+				let picks = match feature {
+					Feature::Hair => {
+						Picks {
+							hair: pick,
+							..Picks::default()
+						}
+					}
+					Feature::Brows => {
+						Picks {
+							brows: pick,
+							..Picks::default()
+						}
+					}
+					Feature::Nose => {
+						Picks {
+							nose: pick,
+							..Picks::default()
+						}
+					}
+				};
+				variety.push((
+					format!(" ({} {offer})", feature.name()),
+					picks,
+					Physique::Plain,
+				));
+			}
+		}
+
+		for physique in [Physique::Slim, Physique::Stout] {
+			variety.push((
+				format!(" (build {})", physique.name()),
+				Picks::default(),
+				physique,
+			));
+		}
+
+		variety
+	}
+
 	/// Checks the pack: the template over the kit must draw a whole figure on every body, every
 	/// body must stand up (feet below the hips, the neck above the shoulders, positive bones),
-	/// and the template's parts must join up on every body (see [`puppet::joins`]).
+	/// and the template's parts must join up on every body (see [`puppet::joins`]). So must
+	/// every hair, brows and nose the style offers, and every build.
 	pub fn check(self: &Arc<Self>) -> Vec<Finding> {
 		let mut findings = Vec::new();
 
 		for build in [Build::Kid, Build::Grownup] {
 			let name = body_name(build);
-			let figure = self.template_figure(build);
-			let mut found = figure.check();
 			let file = PathBuf::from(format!("styles/{}/{name} template", self.name));
 
-			// A template that can't draw a whole figure (reported above) can't be posed either.
-			if let Ok(template) = Authored::from_parts(&file, figure, self) {
-				found.extend(puppet::joins(&template, build));
-			}
+			for (drawn, picks, physique) in self.variety(build) {
+				let figure = match self.figure(build, &picks) {
+					Ok(figure) => figure,
+					Err(error) => {
+						findings.push(Finding {
+							level: Level::Error,
+							part: format!("{name} template{drawn}"),
+							message: format!("{error:#}"),
+						});
+						continue;
+					}
+				};
+				let mut found = figure.check();
 
-			findings.extend(found.into_iter().map(|finding| {
-				Finding {
-					part: format!("{name} template: {}", finding.part),
-					..finding
+				// A template that can't draw a whole figure (reported above) can't be posed.
+				if let Ok(template) = Authored::from_parts(&file, figure, self) {
+					found.extend(puppet::joins(&template.built(build, physique), build));
 				}
-			}));
+
+				findings.extend(found.into_iter().map(|finding| {
+					Finding {
+						part: format!("{name} template{drawn}: {}", finding.part),
+						..finding
+					}
+				}));
+			}
 		}
 
 		for (name, body) in self.bodies() {

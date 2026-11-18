@@ -90,6 +90,14 @@ follow-through = 1.0
 limbs = "jointed"
 blink-every = 3.0
 
+# What the templates and kit draw of their own, by the names a cast picks them with. The
+# templates and kit draw their other hair, brows and noses beside them as variants.
+[own]
+kid-hair = "tuft"
+grown-up-hair = "short"
+brows = "bold"
+nose = "button"
+
 # Bodies, by build. Kids and grown-ups share the head (head units are the same size), so a
 # grown-up is a kid-sized head on a taller body with longer limbs. A character's own torso,
 # sleeves, legwear and shoes are drawn to their body; the kit's hands are scaled to it.

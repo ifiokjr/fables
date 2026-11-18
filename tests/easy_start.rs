@@ -7,6 +7,7 @@ use std::process::Command;
 
 use fables::art::figure::Build;
 use fables::art::pack::StylePack;
+use fables::art::parts::Feature;
 use fables::art::parts::Parts;
 use fables::art::puppet::joins;
 use fables::art::shape::Shape;
@@ -20,6 +21,15 @@ fn names(parts: &Parts) -> Vec<String> {
 	let mut names: Vec<String> = parts.iter().map(|(name, _)| name.to_owned()).collect();
 	names.sort();
 	names
+}
+
+/// The names of the parts a figure is built from, leaving out the hair, brows and nose: those
+/// are the variants a new character is given, which differ from one person to the next.
+fn body_names(parts: &Parts) -> Vec<String> {
+	names(parts)
+		.into_iter()
+		.filter(|name| !Feature::ALL.iter().any(|feature| feature.owns(name)))
+		.collect()
 }
 
 /// Whether two outlines are the same drawing, allowing for the rounding a written file does.
@@ -147,8 +157,8 @@ fn a_scratch_world_in_each_drawing_style_draws_both_characters_in_it() {
 		let pack = StylePack::named(style).unwrap();
 		let mum = Parts::load(&root.join("worlds/puddle-lane/puppets/mum.svg")).unwrap();
 		assert_eq!(
-			names(&mum),
-			names(&pack.template_for(Build::Grownup)),
+			body_names(&mum),
+			body_names(&pack.template_for(Build::Grownup)),
 			"mum's parts in {style}"
 		);
 
@@ -257,8 +267,8 @@ fn a_grown_up_is_drawn_from_the_grown_up_template_on_every_path() {
 	assert!(puppet.template, "gran has no part file of her own");
 	assert_eq!(look.build, Build::Grownup);
 	assert_eq!(
-		names(&puppet.parts),
-		names(&pack.template_figure(Build::Grownup)),
+		body_names(&puppet.parts),
+		body_names(&pack.template_figure(Build::Grownup)),
 		"gran is the grown-up template over the kit"
 	);
 	assert_eq!(joins(puppet, look.build), Vec::new());
@@ -276,7 +286,7 @@ fn a_grown_up_is_drawn_from_the_grown_up_template_on_every_path() {
 	for id in ["pop", "nan", "ada"] {
 		let file = root.join(format!("worlds/hoop-lane/puppets/{id}.svg"));
 		let parts = Parts::load(&file).unwrap();
-		assert_eq!(names(&parts), names(&grown_up), "{id}'s parts");
+		assert_eq!(body_names(&parts), body_names(&grown_up), "{id}'s parts");
 		assert!(
 			same_drawing(parts.get("torso.front").unwrap(), torso),
 			"{id} has the grown-up's torso"
