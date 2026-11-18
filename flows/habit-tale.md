@@ -128,6 +128,7 @@ note = "The ask returns, and the answer answers it; then the end card, and out."
 // Beat 4: It shows. One page, 15–25 words.
 # plain tint=moss shot=close on={{star}}
 @{{star}} x=0.5 shocked
+// `stink` is one of the built-in habit effects (see the readme's effects table). Swap it for yours, or delete the line.
 @scene stink=1
 // 15–25 words: the habit becomes visible, and the star sees it first.
 [It shows.]
@@ -135,6 +136,7 @@ note = "The ask returns, and the answer answers it; then the end card, and out."
 // Beat 5: Rule of three, three consequences. Three pages, 25–35 words.
 # garden day shot=full on={{star}}
 @{{star}} x=0.3 wave happy talk
+// `wilt` is a built-in effect too: the garden droops. Swap it or delete it.
 @scene wilt=1
 // 25–35 words: the first consequence, the smallest.
 [The first consequence.]
