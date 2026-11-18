@@ -698,6 +698,12 @@ pub fn pin(
 					.map_or_else(|| source.lines().count() + 1, |next| next.line)
 			});
 
+		// The camera each direction builds on, as the script reads it: a direction that lands
+		// where it is written changes it at once, but one that waits for its `after=` builds
+		// on the camera as it stood when read, and changes it only once it lands.
+		let mut camera = Carried::opening(shot);
+		let mut waiting: Vec<(f32, Carried)> = Vec::new();
+
 		for (index, setup) in shot.setups.iter().enumerate() {
 			let anchor = if index == 0 {
 				heading + 1
@@ -712,10 +718,31 @@ pub fn pin(
 				continue;
 			};
 
-			insertions.push((
-				anchor,
-				format!("{}{newline}", camera_direction(shot, setup, index)?),
-			));
+			let read = if index == 0 {
+				shot.start
+			} else {
+				beat_time(shot, anchor).unwrap_or(setup.time)
+			};
+
+			while let Some(next) = waiting
+				.iter()
+				.enumerate()
+				.filter(|(_, (at, _))| *at <= read + 1e-3)
+				.min_by(|(_, a), (_, b)| a.0.total_cmp(&b.0))
+				.map(|(next, _)| next)
+			{
+				camera = waiting.remove(next).1;
+			}
+
+			let (direction, landed, waits) = camera_direction(shot, setup, index, &camera)?;
+
+			if waits && setup.time > read + 1e-3 {
+				waiting.push((setup.time, landed));
+			} else {
+				camera = landed;
+			}
+
+			insertions.push((anchor, format!("{direction}{newline}")));
 		}
 	}
 
@@ -792,12 +819,64 @@ pub fn unpin(source: &str) -> (String, usize) {
 	(out, removed)
 }
 
-/// The `@camera` direction that reproduces one setup exactly.
-fn camera_direction(shot: &Shot, setup: &Setup, index: usize) -> Result<String> {
+/// How far a pinned setup may land from the director's plan: half a hundredth of a second,
+/// the most rounding `after=` to two decimals moves it, and well inside one frame at 30 fps.
+const LANDING_TOLERANCE: f32 = 0.005;
+
+/// The camera state a pinned direction builds on. The script carries a move, its length and a
+/// shake from one camera direction to the next (and from the page's heading to its first), so
+/// a direction only needs the words that change what it would otherwise inherit.
+#[derive(Clone)]
+struct Carried {
+	/// Whether a shot size is already named, which makes a cut the default travel.
+	shot: bool,
+	travel: Option<Travel>,
+	over: f32,
+	shake: f32,
+}
+
+impl Carried {
+	/// The camera a page opens with: whatever its heading names.
+	fn opening(shot: &Shot) -> Self {
+		let camera = shot.keys.first().map(|key| &key.scene.camera);
+
+		Self {
+			shot: camera.is_some_and(|camera| camera.shot.is_some()),
+			travel: camera.and_then(|camera| camera.travel),
+			over: camera.map_or(0.0, |camera| camera.over),
+			shake: camera.map_or(0.0, |camera| camera.shake),
+		}
+	}
+
+	/// How long a setup with `travel` takes when the direction leaves `over=` unsaid, as the
+	/// director reads a written page.
+	fn over_for(&self, travel: Travel) -> f32 {
+		match travel {
+			Travel::Cut => 0.0,
+			Travel::Glide if self.over <= 0.0 => director::CAMERA_EASE,
+			_ => self.over,
+		}
+	}
+}
+
+/// The `@camera` direction that reproduces one setup exactly, naming only what differs from
+/// the camera it inherits: `cut` is left out where a shot size already cuts, `over=` where the
+/// move's length is already the one carried (zero is the rest of the shot), `shake=` where the
+/// carried shake is already the setup's, and `after=` where the line it is written before
+/// already lands it. Returns the direction, the camera once it has landed, and whether it
+/// waits for an `after=`.
+fn camera_direction(
+	shot: &Shot,
+	setup: &Setup,
+	index: usize,
+	carried: &Carried,
+) -> Result<(String, Carried, bool)> {
+	let mut carried = carried.clone();
 	let mut tokens = Vec::new();
 
 	match &setup.framing {
 		Framing::Shot { size, on } => {
+			carried.shot = true;
 			tokens.push(format!("shot={}", size.name()));
 
 			if !on.is_empty() {
@@ -814,33 +893,43 @@ fn camera_direction(shot: &Shot, setup: &Setup, index: usize) -> Result<String> 
 		}
 	}
 
-	match setup.travel {
-		Travel::Cut => tokens.push("cut".to_owned()),
-		Travel::Glide => tokens.push("ease".to_owned()),
-		travel => {
-			tokens.push(format!("move={}", travel.name()));
-			tokens.push(format!("over={}", number(setup.over)));
-		}
+	let inherited = carried.travel.unwrap_or(if carried.shot {
+		Travel::Cut
+	} else {
+		Travel::Glide
+	});
+
+	if setup.travel != inherited {
+		tokens.push(match setup.travel {
+			Travel::Cut => "cut".to_owned(),
+			Travel::Glide => "ease".to_owned(),
+			travel => format!("move={}", travel.name()),
+		});
+		carried.travel = Some(setup.travel);
 	}
 
-	if setup.shake > 0.0 {
+	if (carried.over_for(setup.travel) - setup.over).abs() > 5e-4 {
+		tokens.push(format!("over={}", number(setup.over)));
+		carried.over = setup.over;
+	}
+
+	if (carried.shake - setup.shake).abs() > 5e-4 {
 		tokens.push(format!("shake={}", number(setup.shake)));
-	}
-
-	if index == 0 {
-		// The heading may carry a shake the director's opening shot does not use.
-		if setup.shake <= 0.0 {
-			tokens.push("shake=0".to_owned());
-		}
+		carried.shake = setup.shake;
 	}
 
 	let natural = natural_time(shot, setup, index);
+	let waits = (natural - setup.time).abs() > LANDING_TOLERANCE;
 
-	if (natural - setup.time).abs() > 5e-4 {
-		tokens.push(format!("after={}", number(setup.time - shot.start)));
+	if waits {
+		tokens.push(format!("after={}", hundredths(setup.time - shot.start)));
 	}
 
-	Ok(format!("@camera {} // pinned", tokens.join(" ")))
+	Ok((
+		format!("@camera {} // pinned", tokens.join(" ")),
+		carried,
+		waits,
+	))
 }
 
 /// When the setup would land if the direction were written at its own line, without `after=`.
@@ -881,7 +970,17 @@ fn plans_differ(landscape: &[Setup], portrait: &[Setup]) -> bool {
 
 /// A number as the script writes it: no exponent, no trailing zeros.
 fn number(value: f32) -> String {
-	let text = format!("{value:.3}");
+	decimals(value, 3)
+}
+
+/// A time as the script writes it, to at most two decimals: within [`LANDING_TOLERANCE`].
+fn hundredths(value: f32) -> String {
+	decimals(value, 2)
+}
+
+/// `value` to at most `places` decimals, without trailing zeros.
+fn decimals(value: f32, places: usize) -> String {
+	let text = format!("{value:.places$}");
 	let text = text.trim_end_matches('0').trim_end_matches('.');
 
 	if text.is_empty() || text == "-0" {

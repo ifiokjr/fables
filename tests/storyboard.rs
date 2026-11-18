@@ -125,6 +125,93 @@ fn pinning_reproduces_the_plan_and_unpins_byte_for_byte() {
 	}
 }
 
+/// Whether two timelines shoot the same setups. Both come from one script with or without a
+/// single word, so a word that matters moves a setup by more than a millisecond.
+fn same_plan(a: &Timeline, b: &Timeline) -> bool {
+	a.shots.len() == b.shots.len()
+		&& a.shots.iter().zip(&b.shots).all(|(x, y)| {
+			x.setups.len() == y.setups.len()
+				&& x.setups.iter().zip(&y.setups).all(|(p, q)| {
+					p.framing == q.framing
+						&& p.travel == q.travel
+						&& (p.time - q.time).abs() < 1e-3
+						&& (p.over - q.over).abs() < 1e-3
+						&& (p.shake - q.shake).abs() < 1e-3
+				})
+		})
+}
+
+/// A pinned line is meant to be edited, so it writes only what differs from what the camera
+/// would do without it: leaving out any one of its options changes the plan.
+#[test]
+fn a_pinned_line_writes_no_option_at_its_default() {
+	// The framing words name the shot; every other option is one a writer could leave out.
+	const OPTIONAL: [&str; 6] = ["cut", "ease", "move=", "over=", "shake=", "after="];
+
+	for name in [
+		"worlds/mumbleton/stories/the-visitor/story.md",
+		"worlds/mumbleton/stories/camera-test/story.md",
+		"worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md",
+	] {
+		let path = script(name);
+		let (world, story, cast) = load(&path);
+		let out = tempfile::tempdir().unwrap();
+		let source = std::fs::read_to_string(&path).unwrap();
+		let pinned = storyboard::pin(&source, &story, &timed(&story, &cast, out.path()), None)
+			.unwrap()
+			.script;
+		let replan = |script: &str| {
+			let mut story = fables::story::parse(script).unwrap();
+			world.furnish(&mut story).unwrap();
+			let cast = world.cast_for(&story).unwrap();
+			timed(&story, &cast, out.path())
+		};
+		let plan = replan(&pinned);
+		let lines: Vec<&str> = pinned.lines().collect();
+
+		for (index, line) in lines.iter().enumerate() {
+			let Some(body) = line
+				.strip_prefix("@camera ")
+				.and_then(|line| line.strip_suffix(" // pinned"))
+			else {
+				continue;
+			};
+			let words: Vec<&str> = body.split_whitespace().collect();
+
+			for (at, word) in words.iter().enumerate() {
+				if let Some(after) = word.strip_prefix("after=") {
+					assert!(
+						after
+							.split_once('.')
+							.is_none_or(|(_, decimals)| decimals.len() <= 2),
+						"{name}:{}: `{word}` has more than two decimals",
+						index + 1
+					);
+				}
+
+				if !OPTIONAL.iter().any(|option| {
+					word == option || (option.ends_with('=') && word.starts_with(option))
+				}) {
+					continue;
+				}
+
+				let mut fewer = words.clone();
+				fewer.remove(at);
+				let mut edited = lines.clone();
+				let shorter = format!("@camera {} // pinned", fewer.join(" "));
+				edited[index] = &shorter;
+
+				assert!(
+					!same_plan(&plan, &replan(&edited.join("\n"))),
+					"{name}:{}: `{word}` in `{line}` is the default; leaving it out changes \
+					 nothing",
+					index + 1
+				);
+			}
+		}
+	}
+}
+
 #[test]
 fn pinning_named_pages_touches_only_them() {
 	let path = script("worlds/mumbleton/stories/the-visitor/story.md");
