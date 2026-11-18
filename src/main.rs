@@ -1256,6 +1256,10 @@ fn check(story: &Story, cast: &Cast, notes: bool) -> Result<()> {
 		}
 	}
 
+	if let Some(padding) = &report.padding {
+		say!("  note: {padding}")?;
+	}
+
 	if story.age.is_none() {
 		println!(
 			"· no `age` in the front matter, so the narrator keeps the older pace; add `age = \
