@@ -1526,4 +1526,36 @@ Hello.
 		assert!(message.contains("unknown music `loud`"), "{message}");
 		assert!(message.contains("auto"), "{message}");
 	}
+
+	#[test]
+	fn an_unknown_sound_names_the_line_and_the_effects() {
+		let error = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@sfx kazoo\nHi.\n")
+			.unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 6"), "{message}");
+		assert!(message.contains("unknown sound `kazoo`"), "{message}");
+		assert!(message.contains("heartbeat"), "{message}");
+	}
+
+	#[test]
+	fn a_hold_takes_a_finite_number_of_at_most_sixty_seconds() {
+		for value in ["nan", "inf", "-1", "61"] {
+			let error = parse(&format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@hold {value}\nHi.\n"
+			))
+			.unwrap_err();
+			let message = format!("{error:#}");
+			assert!(
+				message.contains("line 6") && message.contains("0 to 60"),
+				"{value}: {message}"
+			);
+		}
+
+		let page = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park hold=61\nHi.\n").unwrap();
+		let message = format!("{:#}", page.pages[0].hold().unwrap_err());
+		assert!(
+			message.contains("line 5") && message.contains("0 to 60"),
+			"{message}"
+		);
+	}
 }
