@@ -45,6 +45,26 @@ fn folder_of(dir: &Path) -> &str {
 	dir.file_name().and_then(|name| name.to_str()).unwrap_or("")
 }
 
+/// The path with `.` and `..` folded in, without asking the file system: a world a script names
+/// reads and prints as the folder a person would write.
+fn fold(path: &Path) -> PathBuf {
+	let mut out = PathBuf::new();
+
+	for part in path.components() {
+		match part {
+			Component::CurDir => {}
+			Component::ParentDir => {
+				if !out.pop() {
+					out.push(part.as_os_str());
+				}
+			}
+			_ => out.push(part.as_os_str()),
+		}
+	}
+
+	out
+}
+
 /// A path under `root` named by a tool argument or by a value read from a file under the root.
 ///
 /// The name must be a relative path of plain components: an empty name, an absolute path, or a
@@ -242,11 +262,12 @@ impl World {
 		match (explicit, story.meta.world.as_deref()) {
 			(Some(dir), _) => Self::load(dir),
 			(None, Some(dir)) => {
+				let path = Path::new(dir);
 				ensure!(
-					!Path::new(dir).is_absolute(),
+					!path.is_absolute(),
 					"a script's `world` must be a path relative to the script, not `{dir}`"
 				);
-				Self::load(&story.dir.join(dir))
+				Self::load(&fold(&story.dir.join(path)))
 			}
 			(None, None) => Self::find(&story.dir),
 		}
@@ -469,7 +490,12 @@ mod tests {
 		)
 		.unwrap();
 		let story = Story::load(&script).unwrap();
-		assert_eq!(World::for_story(&story, None).unwrap().name, "home");
+		let found = World::for_story(&story, None).unwrap();
+		assert_eq!(found.name, "home");
+		assert_eq!(
+			found.dir, home,
+			"the named world reads and prints as its folder"
+		);
 
 		std::fs::write(
 			&script,
