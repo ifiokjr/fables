@@ -663,8 +663,39 @@ impl Frame {
 	}
 
 	fn resolve(&self, reach: Reach, side: f32, facing: f32) -> Pt {
-		self.anchor(reach.anchor, side, facing)
-			+ pt(side * reach.x * self.reach.x, reach.y * self.reach.y)
+		let target = self.anchor(reach.anchor, side, facing)
+			+ pt(side * reach.x * self.reach.x, reach.y * self.reach.y);
+
+		if reach.anchor == Anchor::Hip {
+			self.on_hip(target, side)
+		} else {
+			target
+		}
+	}
+
+	/// Where a hand reaching for the hip at `target` goes. An arm too short for its hand to get
+	/// there (a chibi's) would hang straight with the hand in the air beside the hip, so the hand
+	/// comes to the side of the waist instead, as low as the arm reaches with its elbow out.
+	fn on_hip(&self, target: Pt, side: f32) -> Pt {
+		/// How far the arm stretches to the waist, as a share of its length: short of straight,
+		/// so the elbow bends out.
+		const AKIMBO: f32 = 0.9;
+		let shoulder = self.shoulder(side);
+
+		if (target - shoulder).len() <= self.arm_len + self.hand_r {
+			return target;
+		}
+
+		// The wrist sits a hand's width out from the hip: the hand carries on in from it, along
+		// the forearm, to rest on the side of the waist.
+		let x = side * (self.anchor(Anchor::Hip, side, 0.0).x.abs() + self.hand_r * 2.0);
+		let across = x - shoulder.x;
+		let length = self.arm_len * AKIMBO;
+
+		pt(
+			x,
+			shoulder.y + (length * length - across * across).max(0.0).sqrt(),
+		)
 	}
 
 	/// Hand positions for a named pose.
@@ -2522,6 +2553,55 @@ mod tests {
 				(right - nose).len() < frame.head_r * 0.3,
 				"{build:?}: hand at {right:?}, nose at {nose:?}"
 			);
+		}
+	}
+
+	#[test]
+	fn hands_on_hips_reach_the_waist_on_every_body() {
+		use crate::art::pack::StylePack;
+		let mut brought_in = Vec::new();
+
+		for name in StylePack::names() {
+			let style = StylePack::named(name).unwrap();
+
+			for build in [Build::Kid, Build::Grownup] {
+				let frame = Frame::authored(&style, build);
+				let asked = frame.anchor(Anchor::Hip, 1.0, 0.0)
+					+ pt(0.5 * frame.reach.x, -0.15 * frame.reach.y);
+				let (_, hand) = frame.hands(Pose::Hips, 0.0);
+				let shoulder = frame.shoulder(1.0);
+
+				// An arm that reaches keeps its pose exactly; a short one is brought in to the
+				// waist, near enough for its elbow to bend out, and below the chest.
+				if (asked - shoulder).len() <= frame.arm_len + frame.hand_r {
+					assert_eq!(hand, asked, "{name} {build:?} reaches its hip");
+				} else {
+					brought_in.push(format!("{name} {build:?}"));
+					assert!(
+						(hand - shoulder).len() < frame.arm_len * 0.95,
+						"{name} {build:?}: hand at {hand:?} is out of reach"
+					);
+					assert!(
+						hand.y > frame.shoulder_y + (frame.body_bottom - frame.shoulder_y) * 0.5,
+						"{name} {build:?}: hand at {hand:?} is above the waist"
+					);
+					assert!(
+						hand.x > frame.anchor(Anchor::Hip, 1.0, 0.0).x,
+						"{name} {build:?}: hand at {hand:?} is inside the body"
+					);
+				}
+			}
+		}
+
+		// Only chibi's short arms need it, so no other style's pose moves.
+		assert_eq!(brought_in, ["chibi Kid", "chibi Grownup"]);
+
+		// The parametric puppet's arms reach.
+		for build in [Build::Kid, Build::Grownup] {
+			let frame = Frame::of(build);
+			let asked = frame.anchor(Anchor::Hip, -1.0, 0.0)
+				+ pt(-0.5 * frame.reach.x, -0.15 * frame.reach.y);
+			assert_eq!(frame.hands(Pose::Hips, 0.0).0, asked, "{build:?}");
 		}
 	}
 
