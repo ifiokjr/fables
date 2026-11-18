@@ -40,6 +40,9 @@ pub struct Meta {
 	pub title: String,
 	#[serde(default)]
 	pub subtitle: Option<String>,
+	/// The author credited on the title page. A world can name the author of all its books,
+	/// and this fills in when a script leaves it out (see [`world`](crate::world)).
+	#[serde(default)]
 	pub author: String,
 	#[serde(default)]
 	pub illustrator: Option<String>,
@@ -85,7 +88,9 @@ pub struct Meta {
 	pub light: Option<String>,
 	#[serde(default)]
 	pub cover: Option<CoverSpec>,
-	/// The art style: riso, tv, bold, cut-paper, crayon, storybook or clear (default riso).
+	/// The page skin: riso, tv, bold, cut-paper, crayon, storybook or clear. This is the
+	/// printing look, not the drawing style; without it, the world's drawing style names the
+	/// skin that suits it (default riso).
 	#[serde(default)]
 	pub style: Option<String>,
 	/// The narrator; without one, the world's narrator reads (see [`Story::narrator`]).
@@ -340,6 +345,22 @@ impl Page {
 			.any(|beat| matches!(beat, Beat::Direct(directive) if directive.actor == "camera"))
 	}
 
+	/// Whether the heading names the page's light: `light=…`, or a bare light preset such as
+	/// `# street golden`. Bare `night` and `day` are weather, not a light, so a page that says
+	/// only `night` still takes its book's default light.
+	pub fn names_light(&self) -> bool {
+		self.options.iter().any(|token| {
+			token.key == "light"
+				|| (token.value.is_none()
+					&& crate::art::light::Preset::parse(&token.key).is_some_and(|preset| {
+						!matches!(
+							preset,
+							crate::art::light::Preset::Day | crate::art::light::Preset::Night
+						)
+					}))
+		})
+	}
+
 	/// Paragraphs printed in the book.
 	pub fn book_text(&self) -> Vec<&str> {
 		self.beats
@@ -376,8 +397,14 @@ pub struct Story {
 	pub slug: String,
 	/// The words its world writes into the front and back matter.
 	pub matter: crate::world::Matter,
+	/// The name of its world's drawing style (`chibi`, `clear-line`…), for reports. The
+	/// drawing style is the construction and finish every figure is drawn with.
+	pub drawing_style: String,
 	/// How its world's drawing style prints and moves.
 	pub drawing: Drawing,
+	/// The page skin its world's drawing style names (`style.toml`'s `skin`), used when neither
+	/// `--style` nor the script's own `style` names one.
+	pub skin: Option<String>,
 	/// The settings its pages can use: the built-in ones and its world's.
 	pub settings: Arc<Library>,
 	/// The light pages start in when their heading says nothing (`light = "dawn"` in front
@@ -402,13 +429,15 @@ impl Story {
 		self.meta.voice.as_ref().unwrap_or(&DEFAULT)
 	}
 
-	/// The book's art style.
-	/// The skin pages are drawn in, printed the way the world's drawing style prints.
+	/// The page skin pages are printed in, in order of precedence: `--style` (which the command
+	/// line writes into `meta.style`), the script's own `style` front matter, the world's
+	/// drawing style's `skin`, then `riso`.
 	pub fn style(&self) -> Style {
 		let mut style = self
 			.meta
 			.style
 			.as_deref()
+			.or(self.skin.as_deref())
 			.and_then(Style::parse)
 			.unwrap_or_default();
 		style.finish.tone = (self.drawing.fill == Fill::Screentone).then_some(self.drawing.tone);
@@ -440,7 +469,11 @@ pub fn parse(source: &str) -> Result<Story> {
 		let names: Vec<&str> = StyleName::ALL.iter().map(|(name, _)| *name).collect();
 
 		if StyleName::parse(name).is_none() {
-			bail!("unknown style `{name}`; use one of: {}", names.join(", "));
+			bail!(
+				"unknown page skin `{name}`; use one of: {} (for drawing styles such as chibi, \
+				 run `fables style list`)",
+				names.join(", ")
+			);
 		}
 	}
 
@@ -466,7 +499,9 @@ pub fn parse(source: &str) -> Result<Story> {
 		dir: std::path::PathBuf::new(),
 		slug,
 		matter: crate::world::Matter::default(),
+		drawing_style: crate::art::pack::DEFAULT.to_owned(),
 		drawing: Drawing::default(),
+		skin: None,
 		settings: Library::built_in(),
 		light,
 	})
@@ -830,6 +865,35 @@ Hello.
 	fn slugs_are_file_safe() {
 		assert_eq!(slugify("Stinky McStinkbreath!"), "stinky-mcstinkbreath");
 		assert_eq!(slugify("  The  End  "), "the-end");
+	}
+
+	#[test]
+	fn the_page_skin_resolves_cli_then_script_then_drawing_style() {
+		let mut story = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n").unwrap();
+		assert_eq!(
+			story.style().name.name(),
+			"riso",
+			"nothing named anywhere is riso"
+		);
+
+		story.skin = Some("clear".into());
+		assert_eq!(
+			story.style().name.name(),
+			"clear",
+			"the drawing style's skin"
+		);
+
+		story.meta.style = Some("crayon".into());
+		assert_eq!(
+			story.style().name.name(),
+			"crayon",
+			"the script's own style wins over the drawing style's skin"
+		);
+
+		// `--style` is written into the script's front matter before it is loaded, so it wins
+		// over both.
+		story.meta.style = Some("bold".into());
+		assert_eq!(story.style().name.name(), "bold");
 	}
 
 	#[test]

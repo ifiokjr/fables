@@ -53,6 +53,8 @@ pub struct World {
 	pub style: String,
 	/// A few sentences on the world: where it is, its rule, its tone.
 	pub about: Option<String>,
+	/// The author credited in the world's books, unless a script names its own.
+	pub author: Option<String>,
 	/// Who reads the books aloud, unless a script names its own `[voice]`.
 	pub narrator: Option<Voice>,
 	/// The light the world's books start in, unless a book names its own (`world.toml`:
@@ -91,6 +93,9 @@ struct Entry {
 	style: String,
 	#[serde(default)]
 	about: Option<String>,
+	/// The author credited in every book of the world, unless a script names its own.
+	#[serde(default)]
+	author: Option<String>,
 	#[serde(default)]
 	light: Option<String>,
 	#[serde(default)]
@@ -145,6 +150,7 @@ impl World {
 			name: entry.name,
 			style: entry.style,
 			about: entry.about,
+			author: entry.author,
 			light,
 			narrator: entry.narrator,
 			matter: entry.book,
@@ -333,12 +339,21 @@ impl World {
 		let style = self.style()?;
 		story.matter.clone_from(&self.matter);
 		story.settings = self.settings()?;
+		story.drawing_style.clone_from(&style.name);
+		story.skin = Some(style.skin.clone());
 		story.drawing = Drawing {
 			fill: style.shade.fill,
 			tone: style.shade.tone,
 			palette: style.shade.palette,
 			motion: style.motion,
 		};
+
+		// The world's author credits its books unless the script names one.
+		if story.meta.author.is_empty()
+			&& let Some(author) = &self.author
+		{
+			story.meta.author.clone_from(author);
+		}
 
 		// The world's default light applies unless the book named its own.
 		if let Some(light) = &self.light
@@ -454,6 +469,48 @@ mod tests {
 			error.contains("sunset") && error.contains("candle"),
 			"{error}"
 		);
+	}
+
+	#[test]
+	fn a_world_names_its_drawing_style_and_the_page_skin_that_suits_it() {
+		let dir = tempfile::tempdir().unwrap();
+		let clear = World::load(&world(dir.path(), "clear", "style = \"clear-line\"\n")).unwrap();
+		let story =
+			&mut crate::story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n")
+				.unwrap();
+		clear.furnish(story).unwrap();
+		assert_eq!(story.drawing_style, "clear-line");
+		assert_eq!(story.skin.as_deref(), Some("clear"));
+		assert_eq!(story.style().name.name(), "clear");
+
+		// A book's own page skin wins over the drawing style's suggestion.
+		let bold = &mut crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstyle = \"bold\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		clear.furnish(bold).unwrap();
+		assert_eq!(bold.style().name.name(), "bold");
+		assert_eq!(
+			bold.drawing_style, "clear-line",
+			"the drawing style is reported whatever skin prints it"
+		);
+	}
+
+	#[test]
+	fn a_world_credits_the_author_of_its_books_unless_a_book_names_one() {
+		let dir = tempfile::tempdir().unwrap();
+		let credited =
+			World::load(&world(dir.path(), "credited", "author = \"A. Writer\"\n")).unwrap();
+		let plain = &mut crate::story::parse("+++\ntitle = \"T\"\n+++\n# plain\nHi.\n").unwrap();
+		credited.furnish(plain).unwrap();
+		assert_eq!(plain.meta.author, "A. Writer");
+
+		let own = &mut crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"Someone Else\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		credited.furnish(own).unwrap();
+		assert_eq!(own.meta.author, "Someone Else");
 	}
 
 	/// Two worlds beside each other: `home` (cartoon) with a local `mo` and `tia`, and `away`

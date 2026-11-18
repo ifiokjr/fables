@@ -19,6 +19,7 @@ use crate::art::figure::Pose;
 use crate::art::figure::Prop;
 use crate::art::figure::Teeth;
 use crate::art::light::Light;
+use crate::art::light::Preset;
 use crate::art::pack::StylePack;
 use crate::art::rig::Gait;
 use crate::art::rig::Stance;
@@ -414,10 +415,7 @@ impl Scene {
 			("mint", Some(v)) => self.weather.mint = number(token, v, line)?,
 			("light", Some(v)) => {
 				self.weather.light = Light::parse(v).ok_or_else(|| {
-					anyhow::anyhow!(
-						"line {line}: unknown light `{v}`; try {}",
-						crate::art::light::Preset::names()
-					)
+					anyhow::anyhow!("line {line}: unknown light `{v}`; try {}", Preset::names())
 				})?;
 			}
 			("tint", Some(v)) => self.weather.tint = colour(v, line)?,
@@ -459,11 +457,26 @@ impl Scene {
 			("ease", None) => self.camera.travel = Some(Travel::Glide),
 			("over", Some(v)) => self.camera.over = number(token, v, line)?.max(0.0),
 			("shake", Some(v)) => self.camera.shake = number(token, v, line)?.clamp(0.0, 1.0),
+			(key, None) => {
+				// A bare light preset means `light=<preset>`. `night` and `day` keep their
+				// existing bare weather meaning, above.
+				if let Some(preset) = Preset::parse(key) {
+					self.weather.light = Light::of(preset);
+				} else {
+					bail!(
+						"line {line}: `{token}` is not a scene option; use night, day, light=, a \
+						 light preset ({}), wilt=, stink=, mint=, tint=, speed=, impact=, zoom=, \
+						 look=x,y, shot=, on=, move=, over=, shake=, cut or ease",
+						Preset::names()
+					)
+				}
+			}
 			_ => {
 				bail!(
-					"line {line}: `{token}` is not a scene option; use night, day, light=, wilt=, \
-					 stink=, mint=, tint=, speed=, impact=, zoom=, look=x,y, shot=, on=, move=, \
-					 over=, shake=, cut or ease"
+					"line {line}: `{token}` is not a scene option; use night, day, light=, a \
+					 light preset ({}), wilt=, stink=, mint=, tint=, speed=, impact=, zoom=, \
+					 look=x,y, shot=, on=, move=, over=, shake=, cut or ease",
+					Preset::names()
 				)
 			}
 		}
@@ -767,8 +780,9 @@ pub fn rehearse(story: &Story, cast: &Cast) -> Result<Vec<Rehearsal>> {
 	for (index, page) in story.pages.iter().enumerate() {
 		let mut scene = Scene::for_page(page, &story.settings)?;
 
-		// A page takes the book's (or world's) default light unless its heading names one.
-		if page.option("light").is_none() {
+		// A page takes the book's (or world's) default light unless its heading names one,
+		// either `light=` or a bare preset (`# street golden`).
+		if !page.names_light() {
 			scene.weather.light = story.light;
 		}
 
@@ -985,10 +999,7 @@ mod tests {
 	#[test]
 	fn a_light_is_scene_state_that_can_change_mid_page() {
 		let scene = run("# park light=golden\n@stinky\n").unwrap();
-		assert_eq!(
-			scene.weather.light.preset,
-			crate::art::light::Preset::Golden
-		);
+		assert_eq!(scene.weather.light.preset, Preset::Golden);
 
 		// A bare `night` keeps today's behaviour: no light preset comes with it.
 		let night = run("# park night\n@stinky\n").unwrap();
@@ -996,10 +1007,7 @@ mod tests {
 		assert!(night.weather.light.is_day());
 
 		let eased = run("# park light=golden\n@stinky\n@scene light=moonlit\n").unwrap();
-		assert_eq!(
-			eased.weather.light.preset,
-			crate::art::light::Preset::Moonlit
-		);
+		assert_eq!(eased.weather.light.preset, Preset::Moonlit);
 	}
 
 	#[test]
@@ -1008,6 +1016,53 @@ mod tests {
 		assert!(
 			message.contains("line 5") && message.contains("candle") && message.contains("moonlit"),
 			"{message}"
+		);
+	}
+
+	#[test]
+	fn a_bare_light_preset_means_light_equals_it() {
+		for preset in Preset::ALL {
+			let word = preset.name();
+			let heading = run(&format!("# park {word}\n@stinky\n")).unwrap();
+			let scene = run(&format!("# park\n@stinky\n@scene {word}\n")).unwrap();
+
+			// `night` and `day` keep their existing bare meaning: weather, not a light.
+			if matches!(preset, Preset::Day | Preset::Night) {
+				let night = word == "night";
+
+				for scene in [&heading, &scene] {
+					assert_eq!(scene.weather.night, night, "a bare `{word}`");
+					assert_eq!(scene.weather.light.preset, Preset::Day);
+				}
+
+				continue;
+			}
+
+			assert_eq!(
+				heading.weather.light.preset, preset,
+				"a heading's bare `{word}`"
+			);
+			assert_eq!(scene.weather.light.preset, preset, "@scene's bare `{word}`");
+		}
+
+		let day = run("# park night\n@scene day\n@stinky\n").unwrap();
+		assert!(!day.weather.night);
+		assert_eq!(day.weather.light.preset, Preset::Day);
+	}
+
+	#[test]
+	fn a_bare_light_in_a_heading_beats_the_books_default_light() {
+		let story = story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nlight = \"dawn\"\n+++\n# park golden\n@stinky\n# \
+			 plain\n@stinky\n",
+		)
+		.unwrap();
+		let rehearsals = rehearse(&story, &cast()).unwrap();
+		assert_eq!(rehearsals[0].opening.weather.light.preset, Preset::Golden);
+		assert_eq!(
+			rehearsals[1].opening.weather.light.preset,
+			Preset::Dawn,
+			"a page that names no light takes the book's"
 		);
 	}
 

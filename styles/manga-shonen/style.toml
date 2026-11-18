@@ -3,6 +3,7 @@
 # fast move. It shares the anime kit and template.
 name = "manga-shonen"
 description = "Shonen manga: a heavy ink line, hard two-tone shadows, sharp narrow eyes, and punchy motion with big wind-ups and speed lines."
+skin = "riso"
 
 [finish]
 line = 5.0
