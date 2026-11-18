@@ -32,15 +32,18 @@ use crate::art::figure::Mood;
 use crate::art::light::Preset;
 use crate::art::pack::Face;
 use crate::art::pack::Finish;
+use crate::art::pack::Picks;
 use crate::art::pack::StylePack;
 use crate::art::pack::body_name;
 use crate::art::parts;
 use crate::art::parts::FIGURE_PARTS;
+use crate::art::parts::Feature;
 use crate::art::parts::Home;
 use crate::art::parts::Level;
 use crate::art::parts::Need;
 use crate::art::parts::Parts;
 use crate::art::parts::Views;
+use crate::art::puppet::Physique;
 use crate::art::settings;
 use crate::art::settings::Setting;
 use crate::cast::Kind;
@@ -146,7 +149,7 @@ pub enum BuildName {
 }
 
 impl BuildName {
-	fn kind(self) -> &'static str {
+	fn name(self) -> &'static str {
 		match self {
 			BuildName::Kid => "kid",
 			BuildName::GrownUp => "grown-up",
@@ -158,6 +161,26 @@ impl BuildName {
 		match self {
 			BuildName::Kid => Build::Kid,
 			BuildName::GrownUp => Build::Grownup,
+		}
+	}
+}
+
+/// How heavily built a character is on their body.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhysiqueName {
+	Slim,
+	Plain,
+	Stout,
+}
+
+impl PhysiqueName {
+	/// The build this names.
+	pub fn physique(self) -> Physique {
+		match self {
+			PhysiqueName::Slim => Physique::Slim,
+			PhysiqueName::Plain => Physique::Plain,
+			PhysiqueName::Stout => Physique::Stout,
 		}
 	}
 }
@@ -201,8 +224,19 @@ pub struct CharacterBrief {
 	pub id: String,
 	/// Their full name, e.g. "Nell Nibbles".
 	pub name: String,
+	/// `kid` or `grown-up`: the body they are drawn on.
 	#[serde(default)]
-	pub build: BuildName,
+	pub kind: BuildName,
+	/// How heavily built they are. Left out, one is picked from their id.
+	pub build: Option<PhysiqueName>,
+	/// A hairdo their style draws on their body (see `style_describe`). Left out, one is picked
+	/// from their id.
+	pub hair: Option<String>,
+	/// Brows their style draws (see `style_describe`); left out, the style's own.
+	pub brows: Option<String>,
+	/// A nose their style draws, or `none` where it lets a face go without (see
+	/// `style_describe`); left out, the style's own.
+	pub nose: Option<String>,
 	/// The name they were born with, before their habit gave them a new one.
 	pub born: Option<String>,
 	/// Who they are, in a sentence.
@@ -269,6 +303,14 @@ pub struct BodyReport {
 	pub neck_y: f32,
 	pub shoulder_y: f32,
 	pub pelvis_y: f32,
+	/// The hairdos a character on this body can pick with `hair`, the template's own first.
+	pub hair: Vec<String>,
+	/// The brows they can pick with `brows`, the kit's own first.
+	pub brows: Vec<String>,
+	/// The noses they can pick with `nose`, the kit's own first.
+	pub noses: Vec<String>,
+	/// The builds they can pick with `build`, plain (the body as drawn) first.
+	pub builds: Vec<&'static str>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1527,6 +1569,7 @@ impl Studio {
 				.into_iter()
 				.map(|build| {
 					let body = pack.body(build);
+					let offers = |feature| own_first(&pack, build, feature);
 					BodyReport {
 						name: body_name(build).to_owned(),
 						template: pack.template_file(build).display().to_string(),
@@ -1534,6 +1577,12 @@ impl Studio {
 						neck_y: body.neck.y,
 						shoulder_y: body.shoulder_y,
 						pelvis_y: body.limbs.pelvis_y,
+						hair: offers(Feature::Hair),
+						brows: offers(Feature::Brows),
+						noses: offers(Feature::Nose),
+						builds: [Physique::Plain, Physique::Slim, Physique::Stout]
+							.map(Physique::name)
+							.to_vec(),
 					}
 				})
 				.collect(),
@@ -1563,20 +1612,29 @@ impl Studio {
 		})
 	}
 
-	/// A style's template kid on a model sheet, and its kit and template parts.
+	/// A style's template kid on a model sheet, its kit and template parts, and its variants:
+	/// every hair, brows, nose and build it offers, body by body.
 	pub fn style_sheets(name: &str, px: u32) -> Result<Vec<Image>> {
 		let pack = StylePack::named(name)?;
 		let look = crate::cast::template_look(&pack, Build::Kid)?;
 		let mut model = sheets::model_sheet(&format!("The {name} style"), &look, px)?;
-
-		if pack.shade.fill == Fill::Screentone {
-			raster::screentone(&mut model, pack.shade.tone);
-		}
+		let screentone = |sheet: &mut Pixmap| {
+			if pack.shade.fill == Fill::Screentone {
+				raster::screentone(sheet, pack.shade.tone);
+			}
+		};
+		screentone(&mut model);
 
 		let parts = sheets::parts_sheet(
 			&format!("The {name} style: kit and template"),
 			&pack.template_figure(Build::Kid),
 		)?;
+		let mut variants = sheets::variants_sheet(
+			&format!("The {name} style: variants"),
+			&variant_lineups(&pack)?,
+			px,
+		)?;
+		screentone(&mut variants);
 
 		Ok(vec![
 			Image {
@@ -1586,6 +1644,10 @@ impl Studio {
 			Image {
 				label: format!("{name}: kit and template parts"),
 				png: raster::png(&fit_width(&parts, px))?,
+			},
+			Image {
+				label: format!("{name}: every hair, brows, nose and build"),
+				png: raster::png(&variants)?,
 			},
 		])
 	}
@@ -1614,20 +1676,43 @@ pub fn create_character(world: &World, brief: &CharacterBrief) -> Result<MemberR
 		ensure!(!puppet.exists(), "{} already exists", puppet.display());
 	}
 
+	// The variants they're given are written out, so they keep them even if their style later
+	// draws more to pick from. Those the brief leaves out are the ones the cast uses least.
+	let build = brief.kind.build();
+	let (fresh, fresh_physique) =
+		crate::cast::fresh_picks(&brief.id, &style, build, &cast_words(&before));
+	let picks = Picks {
+		hair: brief.hair.clone().or(fresh.hair),
+		brows: brief.brows.clone().or(fresh.brows),
+		nose: brief.nose.clone().or(fresh.nose),
+	};
+	let physique = brief.build.map_or(fresh_physique, PhysiqueName::physique);
+	// The template drawn for their body with their variants: a grown-up's parts are cut for a
+	// grown-up. A variant the style doesn't draw stops here, before anything is written.
+	style.figure(build, &picks)?;
+	let template = if brief.draw {
+		Some(style.template_with(build, &picks)?)
+	} else {
+		None
+	};
 	let mut cast = before.clone();
 
 	if !cast.is_empty() && !cast.ends_with("\n\n") {
 		cast.push('\n');
 	}
 
-	cast.push_str(&cast_entry(brief));
+	// A part file draws their hair, brows and nose, so only a template-drawn character's cast
+	// names them.
+	let named = if template.is_none() {
+		picks
+	} else {
+		Picks::default()
+	};
+	cast.push_str(&cast_entry(brief, &named, physique));
 	std::fs::write(&cast_file, &cast)
 		.with_context(|| format!("could not write {}", cast_file.display()))?;
 
-	if brief.draw {
-		// The template drawn for their body: a grown-up's parts are cut for a grown-up.
-		let build = brief.build.build();
-		let template = style.template_for(build);
+	if let Some(template) = &template {
 		let drawings: Vec<(&str, &crate::art::shape::Shape)> = template.iter().collect();
 		let title = format!(
 			"{}: own parts (started from {}; redraw each one)",
@@ -1792,7 +1877,7 @@ fn own_parts(world: &World, id: &str) -> Result<OwnParts> {
 	};
 	// A character still drawn from the template has the template for their body as their own.
 	let parts = if puppet.template {
-		puppet.style.template_for(look.build)
+		puppet.style.template_with(look.build, &puppet.picks)?
 	} else {
 		Parts::load(&puppet.file)?
 	};
@@ -1964,18 +2049,21 @@ pub fn template_puppet(world: &World, id: &str, from: Option<&str>) -> Result<Me
 		target.display()
 	);
 
-	let (parts, origin) = match from {
-		Some(from) => {
-			let source = own_parts(world, from)?;
-			(source.parts, format!("{from}'s drawings"))
-		}
-		// The template drawn for their body: a grown-up's parts are cut for a grown-up.
-		None => {
-			(
-				style.template_for(look.build),
-				style.template_origin(look.build),
-			)
-		}
+	let (parts, origin) = if let Some(from) = from {
+		let source = own_parts(world, from)?;
+		(source.parts, format!("{from}'s drawings"))
+	} else {
+		// The template drawn for their body, with the hair, brows and nose they have: a
+		// grown-up's parts are cut for a grown-up.
+		let picks = look
+			.puppet
+			.as_ref()
+			.map(|puppet| puppet.picks.clone())
+			.unwrap_or_default();
+		(
+			style.template_with(look.build, &picks)?,
+			style.template_origin(look.build),
+		)
 	};
 	let title = format!(
 		"{}: own parts (started from {origin}; redraw each one)",
@@ -2227,8 +2315,36 @@ fn member_report(world: &World, member: &Member) -> MemberReport {
 	}
 }
 
-/// A cast table for a new character, with a `puppet` line only when one was written.
-fn cast_entry(brief: &CharacterBrief) -> String {
+/// The variants a cast file's members use, as `(kind, field, word)`: what a new character's
+/// variants are picked to differ from. A cast that doesn't read gives none.
+fn cast_words(cast: &str) -> Vec<(String, String, String)> {
+	let Ok(table) = cast.parse::<toml::Table>() else {
+		return Vec::new();
+	};
+
+	table
+		.values()
+		.filter_map(toml::Value::as_table)
+		.flat_map(|entry| {
+			let kind = entry
+				.get("kind")
+				.and_then(toml::Value::as_str)
+				.unwrap_or("kid")
+				.to_owned();
+
+			["hair", "build", "brows", "nose"]
+				.into_iter()
+				.filter_map(move |field| {
+					let word = entry.get(field)?.as_str()?;
+					Some((kind.clone(), field.to_owned(), word.to_owned()))
+				})
+		})
+		.collect()
+}
+
+/// A cast table for a new character, with a `puppet` line only when one was written, the
+/// variants they are drawn from the template with (`picks`), and how heavily built they are.
+fn cast_entry(brief: &CharacterBrief, picks: &Picks, physique: Physique) -> String {
 	let mut lines = vec![
 		format!("[{}]", brief.id),
 		format!("name = {}", quoted(&brief.name)),
@@ -2242,12 +2358,23 @@ fn cast_entry(brief: &CharacterBrief) -> String {
 	text("about", brief.about.as_ref());
 	text("habit", brief.habit.as_ref());
 	let colours = &brief.colours;
-	let kind = brief.build.kind().to_owned();
 	let puppet = format!("puppets/{}.svg", brief.id);
-	let mut keys: Vec<(&str, &str)> = vec![("kind", &kind)];
+	let mut keys: Vec<(&str, &str)> = vec![("kind", brief.kind.name())];
 
 	if brief.draw {
 		keys.push(("puppet", &puppet));
+	}
+
+	if let Some(hair) = &picks.hair {
+		keys.push(("hair", hair));
+	}
+
+	keys.push(("build", physique.name()));
+
+	for (key, value) in [("brows", &picks.brows), ("nose", &picks.nose)] {
+		if let Some(value) = value {
+			keys.push((key, value));
+		}
 	}
 
 	for (key, value) in [
@@ -2361,6 +2488,97 @@ fn check_slug(what: &str, slug: &str) -> Result<()> {
 }
 
 /// A pixmap no wider than `px`, scaled down smoothly if it is.
+/// The ways a style draws a feature on a build's body, its own first and then the rest in
+/// alphabetical order.
+fn own_first(pack: &StylePack, build: Build, feature: Feature) -> Vec<String> {
+	let own = pack.own(build, feature);
+
+	std::iter::once(own)
+		.chain(
+			pack.offers(build, feature)
+				.into_iter()
+				.filter(|offer| *offer != own),
+		)
+		.map(str::to_owned)
+		.collect()
+}
+
+/// A variants sheet's lineups for a style, body by body: every hair on one head, every brows
+/// and nose on one face, and every build on one body, each otherwise the plain template.
+fn variant_lineups(pack: &std::sync::Arc<StylePack>) -> Result<Vec<sheets::Lineup>> {
+	let mut lineups = Vec::new();
+
+	for build in [Build::Kid, Build::Grownup] {
+		let body = body_name(build);
+		let look =
+			|picks: Picks, physique| crate::cast::template_look_with(pack, build, &picks, physique);
+		let heads = |feature: Feature| -> Result<Vec<(String, crate::art::figure::Look)>> {
+			own_first(pack, build, feature)
+				.into_iter()
+				.map(|offer| {
+					let pick = Some(offer.clone());
+					let picks = match feature {
+						Feature::Hair => {
+							Picks {
+								hair: pick,
+								..Picks::default()
+							}
+						}
+						Feature::Brows => {
+							Picks {
+								brows: pick,
+								..Picks::default()
+							}
+						}
+						Feature::Nose => {
+							Picks {
+								nose: pick,
+								..Picks::default()
+							}
+						}
+					};
+					Ok((offer, look(picks, Physique::Plain)?))
+				})
+				.collect()
+		};
+		let mut faces = heads(Feature::Brows)?
+			.into_iter()
+			.map(|(name, look)| (format!("brows: {name}"), look))
+			.collect::<Vec<_>>();
+		faces.extend(
+			heads(Feature::Nose)?
+				.into_iter()
+				.map(|(name, look)| (format!("nose: {name}"), look)),
+		);
+
+		lineups.push(sheets::Lineup {
+			title: format!("{body}: hair"),
+			crop: sheets::Crop::Head,
+			looks: heads(Feature::Hair)?,
+		});
+		lineups.push(sheets::Lineup {
+			title: format!("{body}: brows and noses"),
+			crop: sheets::Crop::Head,
+			looks: faces,
+		});
+		lineups.push(sheets::Lineup {
+			title: format!("{body}: builds"),
+			crop: sheets::Crop::Body,
+			looks: Physique::ALL
+				.into_iter()
+				.map(|physique| {
+					Ok((
+						physique.name().to_owned(),
+						look(Picks::default(), physique)?,
+					))
+				})
+				.collect::<Result<_>>()?,
+		});
+	}
+
+	Ok(lineups)
+}
+
 fn fit_width(pixmap: &Pixmap, px: u32) -> Pixmap {
 	if pixmap.width() <= px {
 		return pixmap.clone();
@@ -2455,7 +2673,11 @@ mod tests {
 		CharacterBrief {
 			id: id.into(),
 			name: "Nell Nibbles".into(),
-			build: BuildName::Kid,
+			kind: BuildName::Kid,
+			build: None,
+			hair: None,
+			brows: None,
+			nose: None,
 			born: None,
 			about: Some("Bites her nails.".into()),
 			habit: Some("Nibbles her nails, so her fingers are tiny stubs.".into()),
@@ -2464,6 +2686,130 @@ mod tests {
 			extras: vec!["freckles".into()],
 			draw: false,
 		}
+	}
+
+	#[test]
+	fn a_new_character_gets_variants_of_their_own_written_into_the_cast() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					hair: Some("bun".into()),
+					build: Some(PhysiqueName::Stout),
+					..brief("ned")
+				},
+			)
+			.unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let cast = std::fs::read_to_string(world.cast_file()).unwrap();
+		let table: toml::Table = cast.parse().unwrap();
+		let word = |id: &str, field: &str| -> String {
+			table[id][field]
+				.as_str()
+				.unwrap_or_else(|| panic!("{id} has no {field}: {cast}"))
+				.to_owned()
+		};
+
+		assert_eq!(word("ned", "hair"), "bun");
+		assert_ne!(
+			word("nell", "hair"),
+			"bun",
+			"Nell came first, but Ned asked"
+		);
+		assert_eq!(word("ned", "build"), "stout");
+		assert_ne!(
+			word("nell", "brows"),
+			word("ned", "brows"),
+			"Ned gets the brows the cast uses least"
+		);
+		assert_ne!(word("nell", "nose"), word("ned", "nose"));
+		assert_eq!(cast_words(&cast).len(), 8, "four words each");
+
+		// The cast reads back as written, so the picks never change afterwards.
+		let ned = world.cast().unwrap();
+		let Kind::Figure(look) = &ned.member("ned").unwrap().kind else {
+			panic!("ned is a person");
+		};
+		let puppet = look.puppet.as_ref().unwrap();
+		assert_eq!(puppet.physique, Physique::Stout);
+		assert_eq!(puppet.picks.hair.as_deref(), Some("bun"));
+	}
+
+	#[test]
+	fn a_variant_the_style_does_not_draw_adds_nobody() {
+		let (_dir, studio) = studio();
+		let error = studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					hair: Some("mohawk".into()),
+					..brief("nell")
+				},
+			)
+			.unwrap_err();
+		assert!(format!("{error:#}").contains("pigtails"), "{error:#}");
+
+		let error = studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					nose: Some("none".into()),
+					draw: true,
+					..brief("nell")
+				},
+			)
+			.unwrap_err();
+		assert!(format!("{error:#}").contains("part file"), "{error:#}");
+
+		let world = studio.world("nibbleton").unwrap();
+		assert!(world.cast().unwrap().member("nell").is_none());
+		assert!(!world.dir.join("puppets/nell.svg").exists());
+	}
+
+	#[test]
+	fn a_drawn_character_s_file_draws_their_variants() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					hair: Some("bob".into()),
+					brows: Some("thin".into()),
+					draw: true,
+					..brief("nell")
+				},
+			)
+			.unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let file = Parts::load(&world.dir.join("puppets/nell.svg")).unwrap();
+		let style = world.style().unwrap();
+		let bob = style
+			.figure(
+				Build::Kid,
+				&Picks {
+					hair: Some("bob".into()),
+					brows: Some("thin".into()),
+					..Picks::default()
+				},
+			)
+			.unwrap();
+
+		assert_eq!(file.get("hair.front"), bob.get("hair.front"));
+		assert_eq!(file.get("brow"), bob.get("brow"));
+		assert!(
+			file.get("tuft.front").is_none(),
+			"the bob replaces the tuft"
+		);
+		let cast = std::fs::read_to_string(world.cast_file()).unwrap();
+		assert!(!cast.contains("hair = "), "the file draws the hair: {cast}");
+		assert!(
+			cast.contains("build = "),
+			"the build is still the cast's: {cast}"
+		);
 	}
 
 	fn studio() -> (tempfile::TempDir, Studio) {
@@ -2671,9 +3017,13 @@ mod tests {
 			.unwrap();
 		let grown_up = |id: &str, draw| {
 			CharacterBrief {
-				build: BuildName::GrownUp,
+				kind: BuildName::GrownUp,
 				extras: Vec::new(),
 				draw,
+				// The style's own, so Pop's file is the template's parts and no more.
+				hair: Some("short".into()),
+				brows: Some("arched".into()),
+				nose: Some("round".into()),
 				..brief(id)
 			}
 		};

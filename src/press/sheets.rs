@@ -56,10 +56,59 @@ use crate::text::Ink;
 const CARD_W: f32 = 900.0;
 const CARD_H: f32 = 1300.0;
 const COLUMNS: usize = 4;
+/// Where every card's character stands, down the card.
+const CARD_GROUND: f32 = 1190.0;
+/// The margin kept clear inside a card's edges, and below its words.
+const CARD_MARGIN: f32 = 60.0;
+/// Where a card's name, birth name and habit are set. Words too long for it at their smallest
+/// run on over the character rather than shrink the character away.
+const CARD_WORDS: Area = Area {
+	x: 70.0,
+	y: 70.0,
+	w: CARD_W - 140.0,
+	h: 430.0,
+};
 
 /// Every cast member of the world called `world` on a card with their name, birth name and habit.
+///
+/// The characters fill the room the longest card's words leave, standing on one line, every
+/// person drawn the same height. Each is measured as drawn, waving hand and hair and all, so the
+/// tallest reaches the words and the widest the card's edges.
 pub fn cast_sheet(cast: &Cast, world: &str, style: Style) -> Result<Pixmap> {
 	let members: Vec<&Member> = cast.members.values().collect();
+	let words: Vec<text::Block> = members.iter().map(|member| card_words(member)).collect();
+	let top = words
+		.iter()
+		.map(|block| block.bounds.y + block.bounds.h)
+		.fold(0.0, f32::max)
+		.min(CARD_WORDS.y + CARD_WORDS.h)
+		+ CARD_MARGIN;
+	let mut puppets: Vec<Puppet> = members
+		.iter()
+		.map(|member| {
+			let mut puppet = sheet_puppet(member, pt(CARD_W / 2.0, CARD_GROUND));
+
+			if let Body::Figure(state) = &mut puppet.body {
+				state.mood = Mood::Grin;
+			}
+
+			puppet
+		})
+		.collect();
+	// Everyone comes 600 pixels tall, so they grow together: by as much as the one that
+	// reaches highest can.
+	let grow = puppets
+		.iter()
+		.filter(|puppet| matches!(puppet.body, Body::Figure(_)))
+		.map(|puppet| card_fit(puppet, top))
+		.fold(f32::INFINITY, f32::min);
+
+	for puppet in &mut puppets {
+		let by = card_fit(puppet, top).min(grow);
+		puppet.scale *= by;
+		puppet.at.y = CARD_GROUND - (CARD_GROUND - puppet.at.y) * by;
+	}
+
 	let rows = members.len().div_ceil(COLUMNS);
 	let width = CARD_W * COLUMNS as f32;
 	let height = CARD_H * rows as f32 + 260.0;
@@ -86,11 +135,11 @@ pub fn cast_sheet(cast: &Cast, world: &str, style: Style) -> Result<Pixmap> {
 		},
 	));
 
-	for (index, member) in members.iter().enumerate() {
+	for (index, ((member, words), puppet)) in members.iter().zip(&words).zip(&puppets).enumerate() {
 		let x = (index % COLUMNS) as f32 * CARD_W;
 		let y = 260.0 + (index / COLUMNS) as f32 * CARD_H;
 		svg.begin(&format!("translate({x} {y})"));
-		card(&mut svg, member, index);
+		card(&mut svg, member, words, puppet, index, top);
 		svg.end();
 	}
 
@@ -103,6 +152,17 @@ pub fn cast_sheet(cast: &Cast, world: &str, style: Style) -> Result<Pixmap> {
 	raster::finish(&mut pixmap, &style, 0.05, 0);
 
 	Ok(pixmap)
+}
+
+/// How many times bigger a card's puppet, standing on the card's ground, can be drawn and still
+/// keep below `top` and inside the card's margins.
+fn card_fit(puppet: &Puppet, top: f32) -> f32 {
+	let (x0, y0, x1, _) = puppet.extents().subject;
+	let middle = CARD_W / 2.0;
+	let up = (CARD_GROUND - y0).max(1.0);
+	let across = (middle - x0).max(x1 - middle).max(1.0);
+
+	((CARD_GROUND - top) / up).min((middle - CARD_MARGIN) / across)
 }
 
 /// The colour a character mostly reads as (skin for people).
@@ -134,7 +194,32 @@ fn contrasting(tints: &[Color], colour: Color) -> Color {
 		.unwrap_or(palette::MINT)
 }
 
-fn card(svg: &mut Svg, member: &Member, index: usize) {
+/// A member's name, birth name and habit, laid out at the top of their card.
+fn card_words(member: &Member) -> text::Block {
+	let mut lines = vec![format!("**{}**", member.name)];
+
+	if let Some(born) = &member.born {
+		lines.push(format!("*Born {born}*"));
+	}
+
+	if let Some(about) = &member.about {
+		lines.push(about.clone());
+	}
+
+	let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+	text::layout(&refs, CARD_WORDS, 40.0, Anchor::Top)
+}
+
+/// One member's card: their words at the top, and their puppet below, in the room from `top`
+/// down to the ground.
+fn card(
+	svg: &mut Svg,
+	member: &Member,
+	words: &text::Block,
+	puppet: &Puppet,
+	index: usize,
+	top: f32,
+) {
 	let tints = [
 		palette::MINT,
 		palette::SUNFLOWER,
@@ -155,52 +240,24 @@ fn card(svg: &mut Svg, member: &Member, index: usize) {
 		index as u64,
 	);
 	svg.inked(&inner, palette::PAPER);
+	// The backdrop sits behind the character, in the room below the words.
+	let room = CARD_GROUND - top;
 	let blob = Path::wobbly_ellipse(
-		pt(CARD_W / 2.0, 820.0),
-		330.0,
-		300.0,
+		pt(CARD_W / 2.0, top + room * 0.56),
+		(room * 0.42).min(CARD_W / 2.0 - 90.0),
+		room * 0.42,
 		0.06,
 		index as u64 + 50,
 	);
 	svg.fill(&blob, contrasting(&tints, main_colour(member)));
 
-	let ground = 1150.0;
-	let mut puppet = sheet_puppet(member, pt(CARD_W / 2.0, ground));
-
-	if let Body::Figure(state) = &mut puppet.body {
-		state.mood = Mood::Grin;
-	}
-
 	svg.begin_layer();
-	compose::draw_puppet(svg, &puppet);
+	compose::draw_puppet(svg, puppet);
 	svg.end();
-
-	let mut lines = vec![format!("**{}**", member.name)];
-
-	if let Some(born) = &member.born {
-		lines.push(format!("*Born {born}*"));
-	}
-
-	if let Some(about) = &member.about {
-		lines.push(about.clone());
-	}
-
-	let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-	let block = text::layout(
-		&refs,
-		Area {
-			x: 70.0,
-			y: 70.0,
-			w: CARD_W - 140.0,
-			h: 430.0,
-		},
-		40.0,
-		Anchor::Top,
-	);
-	svg.raw(&text::svg(&block, Ink::default()));
+	svg.raw(&text::svg(words, Ink::default()));
 }
 
-/// A puppet sized to fit a sheet card, standing at `at`.
+/// A puppet sized to fit a sheet card, standing at `at`: a person 600 pixels tall.
 fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 	let (body, scale, lift) = match &member.kind {
 		Kind::Figure(look) => {
@@ -378,6 +435,175 @@ pub fn model_sheet(title: &str, look: &Look, px: u32) -> Result<Pixmap> {
 				&format!("{name} · {view}"),
 			);
 		}
+	}
+
+	let px_height = (px as f32 * height / width).round() as u32;
+	raster::render(&svg.finish((0.0, 0.0, width, height), px, px_height))
+}
+
+/// How a lineup on a variants sheet shows each look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Crop {
+	/// Head and shoulders, front-on above three-quarters: for hair, brows and noses.
+	Head,
+	/// The whole figure, front-on beside three-quarters: for builds.
+	Body,
+}
+
+/// One row of a variants sheet: looks that differ in one way, each labelled with the name a
+/// cast picks it by.
+pub struct Lineup {
+	pub title: String,
+	pub crop: Crop,
+	pub looks: Vec<(String, Look)>,
+}
+
+/// A head cell's size, in figure units at scale 1.
+const HEAD_CELL: (f32, f32) = (380.0, 420.0);
+/// A body cell's size: one view of one figure.
+const BODY_CELL: (f32, f32) = (440.0, 620.0);
+/// Room above a lineup for its title, and below each cell for its label.
+const LINEUP_TITLE: f32 = 90.0;
+const CELL_LABEL: f32 = 50.0;
+
+/// A style's variants, lineup by lineup: every hair on one head, every build on one body and so
+/// on, so a designer can see at a glance that they are different people from the same show.
+/// `px` is the sheet's width.
+pub fn variants_sheet(title: &str, lineups: &[Lineup], px: u32) -> Result<Pixmap> {
+	let row_width = |lineup: &Lineup| {
+		lineup.looks.len() as f32
+			* match lineup.crop {
+				Crop::Head => HEAD_CELL.0,
+				Crop::Body => BODY_CELL.0 * 2.0,
+			}
+	};
+	let row_height = |lineup: &Lineup| {
+		LINEUP_TITLE
+			+ match lineup.crop {
+				Crop::Head => (HEAD_CELL.1 + CELL_LABEL) * 2.0,
+				Crop::Body => BODY_CELL.1 + CELL_LABEL,
+			}
+	};
+	let width = lineups.iter().map(row_width).fold(1600.0, f32::max) + 80.0;
+	let height = 140.0 + lineups.iter().map(row_height).sum::<f32>() + 40.0;
+	let mut svg = Svg::new();
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::PAPER);
+	let label = |svg: &mut Svg, x: f32, y: f32, w: f32, size: f32, words: &str| {
+		let block = text::layout(
+			&[words],
+			Area {
+				x: x - w / 2.0,
+				y,
+				w,
+				h: size * 1.6,
+			},
+			size,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(&block, Ink::default()));
+	};
+	label(
+		&mut svg,
+		width / 2.0,
+		40.0,
+		width,
+		46.0,
+		&format!("**{title}**"),
+	);
+	let mut top = 140.0;
+
+	for lineup in lineups {
+		label(
+			&mut svg,
+			width / 2.0,
+			top + 20.0,
+			width,
+			34.0,
+			&lineup.title,
+		);
+		let left = (width - row_width(lineup)) / 2.0;
+		top += LINEUP_TITLE;
+
+		for (index, (name, look)) in lineup.looks.iter().enumerate() {
+			let frame = look.frame();
+
+			match lineup.crop {
+				Crop::Head => {
+					// The head's own drawing sets the crop, so a style that draws big heads
+					// still fills its cells.
+					let (lo, hi) = look
+						.puppet
+						.as_ref()
+						.and_then(|puppet| puppet.parts.get("head.front"))
+						.map_or((pt(-100.0, -100.0), pt(100.0, 100.0)), Shape::bounds);
+					let size = (hi - lo).x.max((hi - lo).y);
+					let scale = HEAD_CELL.0 / (size * 1.6);
+					let x = left + HEAD_CELL.0 * (index as f32 + 0.5);
+
+					for (row, facing) in [0.0, THREE_QUARTER].into_iter().enumerate() {
+						let cell_top = top + (HEAD_CELL.1 + CELL_LABEL) * row as f32;
+						// The head's middle sits a little above the cell's, leaving room for
+						// the shoulders and long hair below.
+						let head = pt(x, cell_top + HEAD_CELL.1 * 0.42);
+						let at = head - (frame.head + pt(0.0, f32::midpoint(lo.y, hi.y))) * scale;
+						let mut state = FigureState::new(&frame);
+						state.facing = facing;
+						state.hands = frame.hands(Pose::Idle, facing);
+						state.legs = frame.limbs().stance(Stance::Stand, facing);
+
+						svg.begin_clip(&Path::rect(
+							x - HEAD_CELL.0 / 2.0 + 6.0,
+							cell_top,
+							HEAD_CELL.0 - 12.0,
+							HEAD_CELL.1,
+						));
+						svg.begin(&format!(
+							"translate({:.1} {:.1}) scale({scale:.3})",
+							at.x, at.y
+						));
+						figure::draw(&mut svg, look, &state);
+						svg.end();
+						svg.end();
+						label(
+							&mut svg,
+							x,
+							cell_top + HEAD_CELL.1 + 6.0,
+							HEAD_CELL.0,
+							26.0,
+							name,
+						);
+					}
+				}
+				Crop::Body => {
+					let fit = (BODY_CELL.1 * 0.86 / frame.height()).min(0.9);
+
+					for (view, facing) in [0.0, THREE_QUARTER].into_iter().enumerate() {
+						let x = left + BODY_CELL.0 * ((index * 2 + view) as f32 + 0.5);
+						let ground = top + BODY_CELL.1 - 30.0;
+						let mut state = FigureState::new(&frame);
+						state.facing = facing;
+						state.hands = frame.hands(Pose::Idle, facing);
+						state.legs = frame.limbs().stance(Stance::Stand, facing);
+
+						svg.begin(&format!("translate({x:.1} {ground:.1}) scale({fit:.3})"));
+						figure::shadow(&mut svg, look, &state, 0.0);
+						figure::draw(&mut svg, look, &state);
+						svg.end();
+					}
+
+					label(
+						&mut svg,
+						left + BODY_CELL.0 * (index as f32 * 2.0 + 1.0),
+						top + BODY_CELL.1 + 6.0,
+						BODY_CELL.0 * 2.0,
+						26.0,
+						name,
+					);
+				}
+			}
+		}
+
+		top += row_height(lineup) - LINEUP_TITLE;
 	}
 
 	let px_height = (px as f32 * height / width).round() as u32;
