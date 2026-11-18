@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 -50 48 124" data-grip="0 8" data-hands="one" data-about="An old brass key with a round bow and two teeth.">
+  <title>A key</title>
+  <path id="shaft" d="M-5 -6 L5 -6 L5 38 L19 38 L19 46 L12 46 L12 52 L19 52 L19 62 L5 62 L5 70 L-5 70 Z" fill="sunflower" data-shade="1"/>
+  <path id="bow" d="M-13 -33.5 C-21.3 -35 -21 -41.3 0 -48 C21 -41.3 21.3 -35 13 -33.5 C18.4 -40 23.7 -36.6 19.1 -15 C2.7 -0.2 -2.9 -3.1 0 -11 C2.9 -3.1 -2.7 -0.2 -19.1 -15 C-23.7 -36.6 -18.4 -40 -13 -33.5 Z" fill="sunflower" data-shade="1"/>
+  <path id="hole" d="M-7 -26 C-7 -29.9 -3.9 -33 0 -33 C3.9 -33 7 -29.9 7 -26 C7 -22.1 3.9 -19 0 -19 C-3.9 -19 -7 -22.1 -7 -26 Z" fill="plum" data-line="none"/>
+  <path id="collar" d="M-6 -6 L6 -6 C7.7 -6 9 -4.7 9 -3 L9 1 C9 2.7 7.7 4 6 4 L-6 4 C-7.7 4 -9 2.7 -9 1 L-9 -3 C-9 -4.7 -7.7 -6 -6 -6 Z" fill="mustard" data-line="detail"/>
+  <path id="shine" d="M-1 14 L-1 58" fill="none" stroke="#ffffff" stroke-width="3" data-opacity="0.6"/>
+</svg>

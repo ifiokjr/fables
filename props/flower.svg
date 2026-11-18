@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -162 84 190" data-grip="0 6" data-hands="one" data-carry="up" data-about="A picked pink daisy with a yellow middle and one leaf on its stem.">
+  <title>A flower</title>
+  <path id="stem" d="M0 24 C-5 -20 5 -70 0 -108" fill="none" stroke="#3f8f4a" stroke-width="6"/>
+  <path id="leaf" d="M1 -42 C12 -60 32 -64 42 -58 C32 -42 16 -36 1 -42 Z" fill="leaf" data-shade="1"/>
+  <path id="vein" d="M4 -44 C16 -52 26 -56 36 -57" fill="none" stroke="#3f8f4a" stroke-width="2"/>
+  <path id="petals" d="M-6.5 -133.3 C-22.5 -149.7 -18.2 -157.7 0 -156 C18.2 -157.7 22.5 -149.7 6.5 -133.3 C12.8 -155.3 21.9 -155.6 29.4 -139 C40.1 -124.1 35.3 -116.4 13 -122 C35.3 -127.6 40.1 -119.9 29.4 -105 C21.9 -88.4 12.8 -88.7 6.5 -110.7 C22.5 -94.3 18.2 -86.3 0 -88 C-18.2 -86.3 -22.5 -94.3 -6.5 -110.7 C-12.8 -88.7 -21.9 -88.4 -29.4 -105 C-40.1 -119.9 -35.3 -127.6 -13 -122 C-35.3 -116.4 -40.1 -124.1 -29.4 -139 C-21.9 -155.6 -12.8 -155.3 -6.5 -133.3 Z" fill="bubblegum" data-shade="1"/>
+  <path id="middle" d="M-12 -122 C-12 -128.6 -6.6 -134 0 -134 C6.6 -134 12 -128.6 12 -122 C12 -115.4 6.6 -110 0 -110 C-6.6 -110 -12 -115.4 -12 -122 Z" fill="sunflower" data-line="detail"/>
+  <path id="seed" d="M-6.5 -125 C-6.5 -126.9 -4.9 -128.5 -3 -128.5 C-1.1 -128.5 0.5 -126.9 0.5 -125 C0.5 -123.1 -1.1 -121.5 -3 -121.5 C-4.9 -121.5 -6.5 -123.1 -6.5 -125 Z" fill="mustard" data-line="none"/>
+  <path id="shine" d="M-20 -142 C-16 -148 -10 -151 -4 -152" fill="none" stroke="#ffffff" stroke-width="4" data-opacity="0.6"/>
+</svg>

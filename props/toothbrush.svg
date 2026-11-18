@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -70 130 100" data-grip="0 0" data-hands="one" data-use="brush" data-foam="#fffcf5" data-about="A toothbrush: a brush that points at the mouth when it comes near.">
+  <title>A toothbrush</title>
+  <path id="handle" d="M-16 -4 C-16 -8 -12 -9 -8 -9 C10 -8 30 -6 56 -6 C62 -6 66 -4 66 0 C66 4 62 6 56 6 C30 6 10 8 -8 9 C-12 9 -16 8 -16 4 C-17 2 -17 -2 -16 -4 Z" fill="#4fb3a9" data-shade="1"/>
+  <path id="bristles" d="M44 -6 C44 -14 44 -20 45 -24 C52 -26 60 -26 66 -24 C67 -20 67 -14 66 -6 C58 -6 52 -6 44 -6 Z" fill="#fffcf5" data-line="detail"/>
+  <path id="bristle-line-1" d="M50 -23 C50 -17 50 -12 50 -8" fill="none" stroke="#dfdbd9" stroke-width="1.6"/>
+  <path id="bristle-line-2" d="M55 -24 C55 -18 55 -12 55 -8" fill="none" stroke="#dfdbd9" stroke-width="1.6"/>
+  <path id="bristle-line-3" d="M60 -23 C60 -17 60 -12 60 -8" fill="none" stroke="#dfdbd9" stroke-width="1.6"/>
+  <path id="paste" d="M43 -26 C42 -32 48 -36 54 -34 C58 -38 66 -36 68 -30 C70 -26 66 -24 60 -25 C54 -24 48 -24 43 -26 Z" fill="#9be3cf" data-line="detail"/>
+</svg>

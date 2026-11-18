@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -90 60 138" data-grip="0 14" data-hands="one" data-carry="up" data-about="A red electric torch, switched on, its beam shining from the lens.">
+  <title>A torch</title>
+  <path id="ray-1" d="M0 -64 L0 -86" fill="none" stroke="#ffc93c" stroke-width="5"/>
+  <path id="ray-2" d="M-13 -62 L-24 -80" fill="none" stroke="#ffc93c" stroke-width="5"/>
+  <path id="ray-3" d="M13 -62 L24 -80" fill="none" stroke="#ffc93c" stroke-width="5"/>
+  <path id="body" d="M-11 -30 L11 -30 L11 40 C11 46 -11 46 -11 40 Z" fill="tomato" data-shade="1"/>
+  <path id="head" d="M-11 -30 L-18 -52 L18 -52 L11 -30 Z" fill="slate" data-shade="1"/>
+  <path id="lens" d="M-18 -52 C-18 -54.8 -9.9 -57 0 -57 C9.9 -57 18 -54.8 18 -52 C18 -49.2 9.9 -47 0 -47 C-9.9 -47 -18 -49.2 -18 -52 Z" fill="#fff2b0" data-line="detail"/>
+  <path id="switch" d="M-2 -18 L2 -18 C3.1 -18 4 -17.1 4 -16 L4 -6 C4 -4.9 3.1 -4 2 -4 L-2 -4 C-3.1 -4 -4 -4.9 -4 -6 L-4 -16 C-4 -17.1 -3.1 -18 -2 -18 Z" fill="cream" data-line="detail"/>
+  <path id="grip-1" d="M-11 18 L11 18" fill="none" stroke="#b8323a" stroke-width="2.5"/>
+  <path id="grip-2" d="M-11 26 L11 26" fill="none" stroke="#b8323a" stroke-width="2.5"/>
+  <path id="shine" d="M-6 -24 L-6 36" fill="none" stroke="#ffffff" stroke-width="4" data-opacity="0.5"/>
+</svg>

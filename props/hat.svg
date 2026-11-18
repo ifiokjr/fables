@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-68 -56 136 74" data-grip="0 8" data-hands="one" data-carry="head" data-about="A straw sun hat with a red ribbon and a daisy, worn on the head.">
+  <title>A sun hat</title>
+  <path id="brim" d="M-66 6 C-66 -0.1 -36.5 -5 0 -5 C36.5 -5 66 -0.1 66 6 C66 12.1 36.5 17 0 17 C-36.5 17 -66 12.1 -66 6 Z" fill="sand" data-shade="1"/>
+  <path id="crown" d="M-36 6 C-38 -18 -34 -42 -30 -48 C-10 -54 10 -54 30 -48 C34 -42 38 -18 36 6 C12 10 -12 10 -36 6 Z" fill="sand" data-shade="1"/>
+  <path id="ribbon" d="M-37 -8 C-12 -4 12 -4 37 -8 C37 -4 37 0 36.5 4 C12 8 -12 8 -36.5 4 C-37 0 -37 -4 -37 -8 Z" fill="tomato" data-line="detail"/>
+  <path id="daisy" d="M19.6 -5.2 C14.3 -9.2 15.7 -12 22 -12 C28.3 -12 29.7 -9.2 24.4 -5.2 C26.5 -11.5 29.5 -11.1 31.5 -5.1 C33.4 0.9 31.2 3.1 25.8 -0.8 C32.4 -0.7 33 2.3 27.9 6.1 C22.7 9.8 20 8.3 22 2 C24 8.3 21.3 9.8 16.1 6.1 C11 2.3 11.6 -0.7 18.2 -0.8 C12.8 3.1 10.6 0.9 12.5 -5.1 C14.5 -11.1 17.5 -11.5 19.6 -5.2 Z" fill="white" data-line="detail"/>
+  <path id="daisy-middle" d="M18 -2 C18 -4.2 19.8 -6 22 -6 C24.2 -6 26 -4.2 26 -2 C26 0.2 24.2 2 22 2 C19.8 2 18 0.2 18 -2 Z" fill="sunflower" data-line="none"/>
+  <path id="weave" d="M-30 -30 C-10 -34 10 -34 30 -30" fill="none" stroke="#c9a66b" stroke-width="2"/>
+</svg>

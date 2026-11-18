@@ -13,12 +13,15 @@ use crate::art::Svg;
 use crate::art::critters;
 use crate::art::critters::CritterState;
 use crate::art::figure;
+use crate::art::figure::CATCH_TURN;
 use crate::art::figure::FigureState;
+use crate::art::figure::HandShape;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::fx;
 use crate::art::lerp;
 use crate::art::palette;
+use crate::art::props;
 use crate::art::pt;
 use crate::art::seed_of;
 use crate::art::settings;
@@ -26,6 +29,8 @@ use crate::art::settings::Weather;
 use crate::cast::Kind;
 use crate::stage::Actor;
 use crate::stage::Scene;
+use crate::stage::See;
+use crate::video::acting;
 
 /// A drawable actor with every parameter resolved to a number.
 #[derive(Clone, Debug)]
@@ -58,6 +63,8 @@ pub struct Puppet {
 pub enum Body {
 	Figure(FigureState),
 	Critter(CritterState),
+	/// A prop standing on the stage: no limbs, just its drawing.
+	Prop,
 }
 
 /// What a puppet's own drawing covers, in stage units, measured from the drawing itself.
@@ -102,6 +109,39 @@ impl Puppet {
 		}
 	}
 
+	/// The point a `see=` target is found by: the middle of a figure's face, a prop's centre, or
+	/// a critter's body.
+	pub fn focus(&self) -> Pt {
+		match (&self.kind, &self.body) {
+			(Kind::Figure(look), Body::Figure(_)) => {
+				let frame = look.frame();
+				self.at + frame.head * self.scale
+			}
+			// The eye goes a little above a prop's middle, where the thing itself is: a kite's
+			// tail and a balloon's string hang below it.
+			(Kind::Prop(prop), Body::Prop) => {
+				let (lo, hi) = prop.bounds();
+				let base = pt(f32::midpoint(lo.x, hi.x), hi.y);
+				let centre = pt(f32::midpoint(lo.x, hi.x), lo.y + (hi.y - lo.y) * 0.3);
+				self.at + (centre - base) * self.scale
+			}
+			_ => self.at + pt(0.0, -80.0 * self.scale),
+		}
+	}
+
+	/// The hand nearest `near`, in stage units: where a tether is tied. A figure's hands are
+	/// kept the page's way round (left on the left) whichever way it faces.
+	pub fn hand_near(&self, near: Pt) -> Option<Pt> {
+		let Body::Figure(state) = &self.body else {
+			return None;
+		};
+		let hands = [state.hands.0, state.hands.1].map(|hand| self.at + hand * self.scale);
+
+		hands
+			.into_iter()
+			.min_by(|a, b| (*a - near).len().total_cmp(&(*b - near).len()))
+	}
+
 	/// Measures what this puppet draws, in stage units, by drawing it into a scratch
 	/// document exactly the way [`draw_puppet`] draws it into a frame — heading, scale,
 	/// lift, lie, pose, hair, head extras, held prop and a critter's own outline all in
@@ -133,18 +173,98 @@ fn missing(puppet: &Puppet) -> Bounds {
 	(puppet.at.x, puppet.at.y, puppet.at.x, puppet.at.y)
 }
 
+/// The bounds of the thing a figure holds, drawn where its hand draws it and measured from
+/// the drawing itself — the fist end of a tether, or a prop a scene is framed on.
+pub fn held_prop_bounds(puppet: &Puppet) -> Option<Bounds> {
+	let Body::Figure(state) = &puppet.body else {
+		return None;
+	};
+	state.prop.as_ref()?;
+	let Kind::Figure(look) = &puppet.kind else {
+		return None;
+	};
+	let mut svg = Svg::new();
+	svg.measuring(true);
+	svg.begin(&subject_transform(puppet));
+	svg.begin_measure();
+	figure::draw_held(&mut svg, look, state);
+	let bounds = svg.end_measure();
+	svg.end();
+
+	bounds
+}
+
 /// Resolves every visible actor in a scene to a puppet at `time` seconds.
 ///
 /// A `still` (book page) draws anyone who spoke on the page mid-sentence; in motion, mouths
 /// are driven by the narration instead.
 pub fn puppets(scene: &Scene, time: f32, still: bool) -> Vec<Puppet> {
 	let ground = scene.setting.ground();
+	let placed = scene.placed();
+	let mut puppets: Vec<Puppet> = placed
+		.iter()
+		.map(|(actor, x)| puppet(actor, *x, ground, time, still))
+		.collect();
+	let focus: Vec<(String, Pt)> = puppets
+		.iter()
+		.map(|puppet| (puppet.id.clone(), puppet.focus()))
+		.collect();
 
-	scene
-		.placed()
-		.into_iter()
-		.map(|(actor, x)| puppet(actor, x, ground, time, still))
-		.collect()
+	for (puppet, (actor, _)) in puppets.iter_mut().zip(&placed) {
+		aim(puppet, actor, &focus);
+	}
+
+	puppets
+}
+
+/// Aims a figure's eyes (and, through the eyes-lead-the-head rule, its head) at its `see=`
+/// target. The look holds until the script changes it; `see=front` releases it.
+fn aim(puppet: &mut Puppet, actor: &Actor, focus: &[(String, Pt)]) {
+	let Some(see) = &actor.eyes.see else {
+		return;
+	};
+	let (at, scale, heading) = (puppet.at, puppet.scale, puppet.heading);
+	let Kind::Figure(look) = &puppet.kind else {
+		return;
+	};
+	let frame = look.frame();
+	let head = at + frame.head * scale;
+	let Body::Figure(state) = &mut puppet.body else {
+		return;
+	};
+	// What a figure holds is in its page-right hand, whichever way it faces.
+	let mine = at + state.hands.1 * scale;
+	let found = match see {
+		See::Actor(id) => {
+			focus
+				.iter()
+				.find(|(key, _)| key == id)
+				.map(|(_, point)| acting::aim(head, *point))
+		}
+		See::Mine => Some(acting::aim(head, mine)),
+		other => Some(acting::word_aim(other, heading)),
+	};
+	let Some(aim) = found else {
+		return;
+	};
+
+	state.gaze = aim.gaze;
+	state.gaze_y = aim.gaze_y;
+	state.facing = aim.turn * 0.7;
+
+	// A catch turns partway to what it catches and reaches up for it on that side.
+	if actor.pose == Pose::Catch {
+		state.facing = state.facing.clamp(-CATCH_TURN, CATCH_TURN);
+		state.hands = frame.hands(Pose::Catch, state.facing);
+	}
+
+	match see {
+		See::Up => state.head_tilt -= 9.0,
+		See::Down => state.head_tilt += 7.0,
+		// Front lets the eyes go: a speaker nearby pulls them again, as they always have.
+		See::Front => {}
+		_ => state.gaze_locked = true,
+	}
 }
 
 fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet {
@@ -155,6 +275,12 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 		_ => toward_middle,
 	};
 	let facing = actor.facing.unwrap_or(heading * 0.5).clamp(-1.0, 1.0) * 0.7;
+	// A catch turns only partway, so the reaching hand stays clear of the face.
+	let facing = if actor.pose == Pose::Catch {
+		facing.clamp(-CATCH_TURN, CATCH_TURN)
+	} else {
+		facing
+	};
 	let (body, lift) = match &actor.kind {
 		Kind::Figure(look) => {
 			let frame = look.frame();
@@ -176,11 +302,20 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 				);
 			}
 
+			// A two-handed prop brings the other hand to the grip too.
+			if let Some(prop) = &actor.prop
+				&& prop.hands == props::Hands::Two
+			{
+				state.hands.0 = state.hands.1 + pt(-12.0, 8.0);
+				state.hand_shapes.0 = HandShape::Fist;
+			}
+
 			state.facing = facing;
 			state.gaze = heading * 0.6;
 			state.lie = actor.knocked;
 			state.teeth = actor.teeth;
-			state.prop = actor.prop;
+			state.prop.clone_from(&actor.prop);
+			figure::carry(look, actor.pose, &mut state);
 			state.time = time;
 			state.mouth_open =
 				actor
@@ -199,24 +334,31 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 			let lift = if actor.knocked > 0.5 { 46.0 } else { 58.0 };
 			(Body::Critter(critter_state(actor, heading, time)), lift)
 		}
+		Kind::Prop(_) => (Body::Prop, 0.0),
 		_ => (Body::Critter(critter_state(actor, heading, time)), 0.0),
 	};
 
 	// An open mouth (a yawn, a shout) lets breath out even before video drives it from speech.
 	let breath = match &body {
 		Body::Figure(state) => (state.mouth_open * 1.8).clamp(0.0, 1.0),
-		Body::Critter(_) => 0.0,
+		Body::Critter(_) | Body::Prop => 0.0,
 	};
 	let at = match actor.y {
 		Some(y) => pt(x * STAGE, y * STAGE),
 		None => pt(x * STAGE, ground - lift * actor.size),
 	};
 
+	// A stage prop's size is relative to the size a kid holds it at.
+	let scale = match actor.kind {
+		Kind::Prop(_) => actor.size * props::STAGE_SIZE,
+		_ => actor.size,
+	};
+
 	Puppet {
 		id: actor.id.clone(),
 		kind: actor.kind.clone(),
 		at,
-		scale: actor.size,
+		scale,
 		z: actor.z,
 		opacity: 1.0,
 		body,
@@ -315,6 +457,7 @@ pub fn draw_scene(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 
 	settings::backdrop(svg, &scene.setting, &weather);
 	draw_effects(svg, &weather, puppets);
+	draw_tethers(svg, scene, puppets, time);
 
 	for puppet in puppets {
 		draw_puppet(svg, puppet);
@@ -335,6 +478,7 @@ pub fn draw_near(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 
 	settings::backdrop_layer(svg, &scene.setting, &weather, settings::Layer::Near);
 	draw_effects(svg, &weather, puppets);
+	draw_tethers(svg, scene, puppets, time);
 
 	for puppet in puppets {
 		draw_puppet(svg, puppet);
@@ -345,6 +489,49 @@ pub fn draw_near(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
 	}
 
 	settings::foreground(svg, &scene.setting, &weather);
+}
+
+/// The two ends of a stage prop's tether: at the prop's grip, and in the hand it is tied to.
+/// `None` when `id` is not a tethered prop, or the holder is not on stage.
+pub fn tether_points(scene: &Scene, puppets: &[Puppet], id: &str) -> Option<(Pt, Pt)> {
+	let actor = scene.actors.iter().find(|actor| actor.id == id)?;
+	let target = actor.tether.as_deref()?;
+	let prop = puppets.iter().find(|puppet| puppet.id == id)?;
+	let Kind::Prop(kind) = &prop.kind else {
+		return None;
+	};
+	let holder = puppets.iter().find(|puppet| puppet.id == target)?;
+	let start = kind.base_grip(prop.at, prop.scale);
+	// A catch has the string in the hand it reached up with; otherwise the nearer hand holds it.
+	let catching = scene
+		.actors
+		.iter()
+		.any(|actor| actor.id == target && actor.pose == Pose::Catch);
+	let end = if catching {
+		holder.hand_near(holder.at - pt(0.0, STAGE))?
+	} else {
+		holder.hand_near(start)?
+	};
+
+	Some((start, end))
+}
+
+/// Strings from stage props to the hands that hold them, in each prop's own line: they sag
+/// under their own weight and sway gently in video, where `time` moves.
+fn draw_tethers(svg: &mut Svg, scene: &Scene, puppets: &[Puppet], time: f32) {
+	for actor in &scene.actors {
+		let Some(ends) = tether_points(scene, puppets, &actor.id) else {
+			continue;
+		};
+		let Some(puppet) = puppets.iter().find(|puppet| puppet.id == actor.id) else {
+			continue;
+		};
+		let Kind::Prop(prop) = &puppet.kind else {
+			continue;
+		};
+		let sway = (time * 1.4 + seed_of(&actor.id) as f32 % 6.3).sin();
+		prop.draw_tether(svg, ends, sway);
+	}
 }
 
 /// Focus lines and impact bursts, aimed at the first person on stage (or the middle of it).
@@ -421,6 +608,10 @@ fn draw_subject(svg: &mut Svg, puppet: &Puppet) -> Option<Bounds> {
 
 	match (&puppet.kind, &puppet.body) {
 		(Kind::Figure(look), Body::Figure(state)) => figure::draw(svg, look, state),
+		(Kind::Prop(prop), Body::Prop) => {
+			prop.draw_standing(svg, 1.0);
+			None
+		}
 		(Kind::Bird(color), Body::Critter(state)) => critters::bird(svg, *color, *state, seed),
 		(Kind::Dog(color), Body::Critter(state)) => critters::dog(svg, *color, *state, seed),
 		(Kind::Worm, Body::Critter(state)) => critters::worm(svg, *state, seed),
@@ -818,6 +1009,183 @@ mod tests {
 		draw_puppet(&mut svg, &kid());
 		let day = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
 		assert!(!day.contains(&lean), "no cast lean in daylight: {day}");
+	}
+
+	/// A scene rehearsed from a script and a small cast.
+	fn staged(script: &str) -> Scene {
+		let story = crate::story::parse(&format!(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n{script}"
+		))
+		.unwrap();
+		let cast = crate::cast::Cast::parse(
+			"[hana]\nname = \"Hana\"\n[mo]\nname = \"Mo\"\nkind = \"grown-up\"\n",
+		)
+		.unwrap();
+		let rehearsals = crate::stage::rehearse(&story, &cast).unwrap();
+
+		rehearsals[0].finale().clone()
+	}
+
+	fn body(puppets: &[Puppet], id: &str) -> FigureState {
+		let Body::Figure(state) = &puppets.iter().find(|p| p.id == id).unwrap().body else {
+			panic!("{id} is a figure");
+		};
+
+		state.clone()
+	}
+
+	#[test]
+	fn a_stage_prop_stands_at_its_place_and_tethers_to_the_hand() {
+		let scene = staged("# park\n@hana x=0.3\n@kite x=0.7 y=sky tether=hana\n");
+		let puppets = puppets(&scene, 0.0, true);
+		let kite = puppets.iter().find(|p| p.id == "kite").unwrap();
+
+		assert!(matches!(kite.kind, Kind::Prop(_)));
+		assert!(matches!(kite.body, Body::Prop));
+		assert!(
+			(kite.at.y - 0.58 * STAGE).abs() < 0.01,
+			"the kite's base floats where `y=sky` puts it: {:?}",
+			kite.at
+		);
+
+		let extents = kite.extents();
+		assert!(
+			(extents.subject.3 - kite.at.y).abs() < 8.0,
+			"its lowest drawing stands on its place (within the ink's bleed): {extents:?} at {:?}",
+			kite.at
+		);
+		assert!(
+			extents.subject.1 < kite.at.y - 200.0,
+			"the kite is drawn above it: {extents:?}"
+		);
+
+		// The tether runs from the prop to a hand of the actor it is tied to.
+		let (start, end) = tether_points(&scene, &puppets, "kite").unwrap();
+		let hana = puppets.iter().find(|p| p.id == "hana").unwrap();
+		let hand = hana.hand_near(start).unwrap();
+
+		assert!(
+			start.x >= extents.subject.0 - 1.0
+				&& start.y >= extents.subject.1 - 1.0
+				&& start.x <= extents.subject.2 + 1.0
+				&& start.y <= extents.subject.3 + 1.0,
+			"the string starts on the prop at {start:?}: {extents:?}"
+		);
+		assert!((end - hand).len() < 0.01, "and ends in the hand {hand:?}");
+
+		let subject = hana.extents().subject;
+		assert!(
+			end.x >= subject.0 - 1.0
+				&& end.y >= subject.1 - 1.0
+				&& end.x <= subject.2 + 1.0
+				&& end.y <= subject.3 + 1.0,
+			"the hand {end:?} is part of the holder {subject:?}"
+		);
+	}
+
+	#[test]
+	fn a_two_handed_prop_brings_both_hands_to_the_grip() {
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::create_dir(dir.path().join("props")).unwrap();
+		std::fs::write(
+			dir.path().join("props/two-hand.svg"),
+			r#"<svg xmlns="http://www.w3.org/2000/svg" data-grip="0 0" data-hands="two" data-about="Two hands"><path id="bar" d="M-60 -20 C-20 -24 20 -24 60 -20 C62 -6 62 6 60 20 C20 24 -20 24 -60 20 C-62 6 -62 -6 -60 -20 Z" fill="toffee" data-shade="1"/></svg>"#,
+		)
+		.unwrap();
+
+		let mut story = crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@hana x=0.5 hold holds=two-hand\n",
+		)
+		.unwrap();
+		story.props = props::Library::for_world(dir.path(), &StylePack::default_pack()).unwrap();
+		let cast = crate::cast::Cast::parse("[hana]\nname = \"Hana\"\n").unwrap();
+		let rehearsals = crate::stage::rehearse(&story, &cast).unwrap();
+		let drawn = puppets(rehearsals[0].finale(), 0.0, true);
+		let state = body(&drawn, "hana");
+
+		assert_eq!(
+			state.hand_shapes.0,
+			HandShape::Fist,
+			"the second hand fists"
+		);
+		assert!(
+			(state.hands.0 - state.hands.1).len() < 30.0,
+			"both hands meet at the grip: {:?} and {:?}",
+			state.hands.0,
+			state.hands.1
+		);
+	}
+
+	#[test]
+	fn a_see_follows_an_actor_and_tracks_a_prop_that_moves() {
+		let right = staged("# park\n@hana x=0.3 see=kite\n@kite x=0.85\n");
+		let drawn = puppets(&right, 0.0, true);
+		let state = body(&drawn, "hana");
+
+		assert!(state.gaze > 0.8, "looking right at the kite: {state:?}");
+		assert!(state.facing > 0.4, "the head follows: {state:?}");
+		assert!(state.gaze_locked);
+
+		let left = staged("# park\n@hana x=0.3 see=kite\n@kite x=0.1\n");
+		let drawn = puppets(&left, 0.0, true);
+		let moved = body(&drawn, "hana");
+
+		assert!(
+			moved.gaze < -0.8,
+			"the eyes swing to the kite's new place: {}",
+			moved.gaze
+		);
+		assert!(moved.facing < -0.4, "and the head with them: {moved:?}");
+	}
+
+	#[test]
+	fn see_words_and_the_held_prop_aim_the_eyes() {
+		let up = staged("# park\n@hana x=0.5 see=up\n");
+		let state = body(&puppets(&up, 0.0, true), "hana");
+		assert!(state.gaze_y < -0.9, "eyes up: {state:?}");
+		assert!(state.head_tilt < -5.0, "the chin lifts: {state:?}");
+
+		let front = staged("# park\n@hana x=0.5 see=front\n");
+		let state = body(&puppets(&front, 0.0, true), "hana");
+		assert_eq!(state.gaze, 0.0);
+		assert!(!state.gaze_locked, "front releases the look");
+
+		let mine = staged("# park\n@hana x=0.5 hold holds=jam see=mine\n");
+		let state = body(&puppets(&mine, 0.0, true), "hana");
+		assert!(
+			state.gaze.abs() > 0.2 || state.gaze_y.abs() > 0.2,
+			"the eyes find the thing in hand: {state:?}"
+		);
+	}
+
+	#[test]
+	fn a_held_prop_measures_in_the_hand() {
+		let scene = staged("# park\n@hana x=0.5 hold holds=jam\n");
+		let puppets = puppets(&scene, 0.0, true);
+		let hana = puppets.iter().find(|p| p.id == "hana").unwrap();
+		let bounds = held_prop_bounds(hana).expect("the jam is drawn");
+
+		let middle = pt(
+			f32::midpoint(bounds.0, bounds.2),
+			f32::midpoint(bounds.1, bounds.3),
+		);
+		let hand = hana.hand_near(middle).expect("a figure has hands");
+		assert!(
+			hand.x >= bounds.0 - 1.0
+				&& hand.y >= bounds.1 - 1.0
+				&& hand.x <= bounds.2 + 1.0
+				&& hand.y <= bounds.3 + 1.0,
+			"the hand {hand:?} holds the prop's measured bounds {bounds:?}"
+		);
+
+		let subject = hana.extents().subject;
+		assert!(
+			bounds.0 >= subject.0 - 1.0
+				&& bounds.1 >= subject.1 - 1.0
+				&& bounds.2 <= subject.2 + 1.0
+				&& bounds.3 <= subject.3 + 1.0,
+			"and the measured prop is part of the figure's subject {subject:?}"
+		);
 	}
 
 	/// An actor takes the light as a figure, the gentler grade that keeps it forward of the

@@ -17,7 +17,9 @@ use crate::art::Svg;
 use crate::art::critters::CritterState;
 use crate::art::escape;
 use crate::art::figure;
+use crate::art::figure::Build;
 use crate::art::figure::FigureState;
+use crate::art::figure::Frame;
 use crate::art::figure::Look;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
@@ -31,6 +33,8 @@ use crate::art::parts::Need;
 use crate::art::parts::Parts;
 use crate::art::parts::Turn;
 use crate::art::parts::Views;
+use crate::art::props;
+use crate::art::props::Prop;
 use crate::art::pt;
 use crate::art::rig::Stance;
 use crate::art::settings;
@@ -175,6 +179,7 @@ fn main_colour(member: &Member) -> Color {
 		| Kind::Toothbrush(color)
 		| Kind::Flower(_, color) => *color,
 		Kind::Worm => palette::FLAMINGO,
+		Kind::Prop(_) => palette::TOFFEE,
 	}
 }
 
@@ -280,6 +285,7 @@ fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 		}
 		Kind::Worm => (Body::Critter(CritterState::default()), 3.0, 0.0),
 		Kind::Toothbrush(_) => (Body::Critter(CritterState::default()), 0.9, 0.0),
+		Kind::Prop(_) => (Body::Prop, 1.0, 0.0),
 		Kind::Flower(..) | Kind::Tree(_) => (Body::Critter(CritterState::default()), 0.6, 0.0),
 	};
 
@@ -299,6 +305,150 @@ fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 		smear: 0.0,
 		exerted: 0.0,
 	}
+}
+
+/// Every prop in `props`, each alone and carried by a kid and a grown-up standing at ease —
+/// the world's first of each, or its style's template — with its name, how it is carried and
+/// its grip: the sheet a designer signs off.
+pub fn props_sheet(
+	props: &props::Library,
+	cast: &Cast,
+	pack: &Arc<StylePack>,
+	world: &str,
+	style: Style,
+) -> Result<Pixmap> {
+	let cell = 900.0;
+	let columns = 3;
+	let list: Vec<&Arc<Prop>> = props.props().collect();
+	let rows = list.len().div_ceil(columns);
+	let width = cell * columns as f32;
+	let height = 160.0 + (cell + 120.0) * rows as f32;
+	let mut svg = Svg::styled(style);
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::INK);
+
+	let heading = text::layout(
+		&[format!("**The props of {world}**").as_str()],
+		Area {
+			x: 0.0,
+			y: 40.0,
+			w: width,
+			h: 110.0,
+		},
+		74.0,
+		Anchor::Top,
+	);
+	svg.raw(&text::svg(
+		&heading,
+		Ink {
+			body: palette::PAPER,
+			shout: palette::SUNFLOWER,
+		},
+	));
+
+	let holder = |build: Build| -> Result<Look> {
+		let own = cast.members.values().find_map(|member| {
+			match &member.kind {
+				Kind::Figure(look) if look.build == build => Some(look.clone()),
+				_ => None,
+			}
+		});
+
+		match own {
+			Some(look) => Ok(look),
+			None => crate::cast::template_look(pack, build),
+		}
+	};
+	// A kid turned to the right and a grown-up to the left, as the stage stands them.
+	let holders = [
+		(holder(Build::Kid)?, 0.35, 0.47),
+		(holder(Build::Grownup)?, -0.35, 0.8),
+	];
+
+	for (index, prop) in list.iter().enumerate() {
+		let x = (index % columns) as f32 * cell;
+		let y = 160.0 + (index / columns) as f32 * (cell + 120.0);
+		svg.fill(
+			&Path::rect(x + 10.0, y + 10.0, cell - 20.0, cell - 20.0),
+			palette::PAPER,
+		);
+
+		// The prop alone, fitted to the left of its card.
+		let (lo, hi) = prop.bounds();
+		let (w, h) = ((hi.x - lo.x).max(1.0), (hi.y - lo.y).max(1.0));
+		let fit = (cell * 0.22 / w).min(cell * 0.4 / h);
+		let centre = pt(f32::midpoint(lo.x, hi.x), f32::midpoint(lo.y, hi.y));
+		let middle = pt(x + cell * 0.15, y + cell * 0.5);
+		prop.draw(&mut svg, middle - centre * fit, fit);
+
+		// Carried by a kid and a grown-up, at the size the stage gives them against each other.
+		let scale = cell * 0.62 / Frame::of(Build::Grownup).height() / 1.85;
+
+		for (look, facing, across) in &holders {
+			let frame = look.frame();
+			let mut state = FigureState::new(&frame);
+			state.hands = frame.hands(Pose::Idle, *facing);
+			state.hand_shapes = Pose::Idle.hand_shapes();
+			state.facing = *facing;
+			state.gaze = facing.signum() * 0.6;
+			state.prop = Some(Arc::clone(prop));
+			figure::carry(look, Pose::Idle, &mut state);
+			let puppet = Puppet {
+				id: "holder".to_owned(),
+				kind: Kind::Figure(look.clone()),
+				at: pt(x + cell * across, y + cell * 0.93),
+				scale: crate::stage::figure_size(look) * scale,
+				z: 0,
+				opacity: 1.0,
+				body: Body::Figure(state),
+				stink: 0.0,
+				mint: 0.0,
+				heading: facing.signum(),
+				breath: 0.0,
+				lift: 0.0,
+				smear: 0.0,
+				exerted: 0.0,
+			};
+			compose::draw_puppet(&mut svg, &puppet);
+		}
+
+		let hands = match prop.hands {
+			props::Hands::One => "one hand",
+			props::Hands::Two => "two hands",
+		};
+		let label = text::layout(
+			&[
+				format!("**{}**", prop.name).as_str(),
+				format!(
+					"{hands} · carried {} · grip {:.0}, {:.0}",
+					prop.carry.name(),
+					prop.grip.x,
+					prop.grip.y
+				)
+				.as_str(),
+			],
+			Area {
+				x: x + 10.0,
+				y: y + cell - 10.0,
+				w: cell - 20.0,
+				h: 110.0,
+			},
+			36.0,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(
+			&label,
+			Ink {
+				body: palette::PAPER,
+				shout: palette::TOMATO,
+			},
+		));
+	}
+
+	let doc = svg.finish((0.0, 0.0, width, height), width as u32, height as u32);
+	let mut pixmap = raster::render(&doc)?;
+	raster::finish(&mut pixmap, &style, 0.05, 0);
+
+	Ok(pixmap)
 }
 
 /// One character in every mood, for checking expressions stay on-model.

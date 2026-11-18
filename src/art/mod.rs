@@ -14,6 +14,7 @@ pub mod light;
 pub mod pack;
 pub mod palette;
 pub mod parts;
+pub mod props;
 pub mod puppet;
 pub mod rig;
 pub mod settings;
