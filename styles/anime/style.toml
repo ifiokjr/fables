@@ -90,6 +90,14 @@ follow-through = 1.0
 limbs = "jointed"
 blink-every = 3.0
 
+# What the templates and kit draw of their own, by the names a cast picks them with. The
+# templates and kit draw their other hair, brows and noses beside them as variants.
+[own]
+kid-hair = "short"
+grown-up-hair = "short"
+brows = "thin"
+nose = "button"
+
 # A kid (about eleven): five and a quarter heads tall, crown of the hair to the soles, with a
 # real neck, shoulders wider than the head, long legs and feet a head-width long.
 [bodies.kid]
@@ -111,6 +119,9 @@ leg-profile = [110.0, 100.0, 82.0, 68.0, 78.0, 60.0, 38.0]
 arm-profile = [64.0, 58.0, 48.0, 40.0, 46.0, 37.0, 29.0]
 knee-splay = 0.45
 floor = true
+
+# A stout build fills out the slender body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
 
 [bodies.kid.limbs]
 pelvis-y = -580.0
@@ -140,6 +151,9 @@ arm-profile = [84.0, 74.0, 62.0, 52.0, 60.0, 48.0, 38.0]
 foot-scale = 1.25
 knee-splay = 0.45
 floor = true
+
+# A stout build fills out the slender body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
 
 [bodies.grown-up.limbs]
 pelvis-y = -830.0

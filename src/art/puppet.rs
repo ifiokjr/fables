@@ -26,6 +26,7 @@ use std::path::Path as FilePath;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use anyhow::Result;
 use anyhow::ensure;
 
@@ -55,11 +56,15 @@ use super::pack::Face as FaceRules;
 use super::pack::Features;
 use super::pack::Finish;
 use super::pack::KitInks;
+use super::pack::Picks;
 use super::pack::StylePack;
 use super::palette;
+use super::parts::Feature;
 use super::parts::Finding;
 use super::parts::Level;
 use super::parts::Parts;
+use super::parts::Space;
+use super::parts::spec_of;
 use super::props;
 use super::props::Prop;
 use super::pt;
@@ -124,13 +129,148 @@ pub struct Proportions {
 	/// foot lifted off it while standing points its toe down to it.
 	#[serde(default)]
 	pub floor: bool,
+	/// How a slim and a stout character differ from this body, which is plain (see [`Girth`]).
+	/// A cast picks one with `build`.
+	#[serde(default = "Girth::slim")]
+	pub slim: Girth,
+	#[serde(default = "Girth::stout")]
+	pub stout: Girth,
 }
 
 fn one() -> f32 {
 	1.0
 }
 
+/// How heavily built a character is on their body. `plain` is the body as its style draws it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Physique {
+	Slim,
+	#[default]
+	Plain,
+	Stout,
+}
+
+impl Physique {
+	pub const ALL: [Physique; 3] = [Physique::Slim, Physique::Plain, Physique::Stout];
+
+	/// The name a cast file's `build` gives it.
+	pub fn name(self) -> &'static str {
+		match self {
+			Physique::Slim => "slim",
+			Physique::Plain => "plain",
+			Physique::Stout => "stout",
+		}
+	}
+
+	/// A physique by the name a cast file's `build` gives it.
+	pub fn named(name: &str) -> Result<Physique> {
+		Self::ALL
+			.into_iter()
+			.find(|physique| physique.name() == name)
+			.with_context(|| format!("unknown build `{name}`; use slim, plain or stout"))
+	}
+}
+
+/// How a slim or stout body differs from the plain one, as shares of its widths.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct Girth {
+	/// The torso's width down to the shoulders, and how far apart the shoulders sit.
+	pub chest: f32,
+	/// The torso's width from its hem down, the legwear's, and how far apart the hips sit.
+	pub waist: f32,
+	/// The arms' and legs' widths, and their sleeves' and trouser legs'.
+	pub limbs: f32,
+}
+
+impl Girth {
+	const PLAIN: Girth = Girth {
+		chest: 1.0,
+		waist: 1.0,
+		limbs: 1.0,
+	};
+
+	fn slim() -> Girth {
+		Girth {
+			chest: 0.86,
+			waist: 0.78,
+			limbs: 0.8,
+		}
+	}
+
+	fn stout() -> Girth {
+		Girth {
+			chest: 1.16,
+			waist: 1.42,
+			limbs: 1.26,
+		}
+	}
+
+	/// How much of its plain width a body part is drawn at `y` on `body`: the chest's down to
+	/// the shoulders, the waist's from the hem down, and an eased blend between the two.
+	fn across(&self, body: &Proportions, y: f32) -> f32 {
+		let along = ((y - body.shoulder_y) / (body.hem_y - body.shoulder_y)).clamp(0.0, 1.0);
+		lerp(self.chest, self.waist, along * along * (3.0 - 2.0 * along))
+	}
+}
+
 impl Proportions {
+	/// How a physique differs from this body.
+	pub fn girth(&self, physique: Physique) -> Girth {
+		match physique {
+			Physique::Slim => self.slim,
+			Physique::Plain => Girth::PLAIN,
+			Physique::Stout => self.stout,
+		}
+	}
+
+	/// This body built slim, plain or stout: the shoulders and hips spread with the chest and
+	/// waist, and every limb widened or narrowed.
+	#[must_use]
+	pub fn built(&self, physique: Physique) -> Proportions {
+		let Girth {
+			chest,
+			waist,
+			limbs,
+		} = self.girth(physique);
+		let pair = |(a, b): (f32, f32), by: f32| (a * by, b * by);
+		let profile = |widths: [f32; 7]| widths.map(|width| width * limbs);
+
+		Proportions {
+			limbs: Limbs {
+				hip_spread: self.limbs.hip_spread * waist,
+				..self.limbs
+			},
+			shoulder_half: self.shoulder_half * chest,
+			shoulders_turned: pair(self.shoulders_turned, chest),
+			hips_turned: pair(self.hips_turned, waist),
+			body_radius: self.body_radius * f32::midpoint(chest, waist),
+			leg_width: pair(self.leg_width, limbs),
+			forearm_width: pair(self.forearm_width, limbs),
+			leg_profile: self.leg_profile.map(profile),
+			arm_profile: self.arm_profile.map(profile),
+			..*self
+		}
+	}
+
+	/// A figure's parts fitted to a physique on this body: what is drawn on the body (the
+	/// torso, legwear and the kit's extras worn over them) widened row by row as
+	/// [`Girth::across`] says, and what is drawn along a bone (sleeves, trouser legs) by the
+	/// limbs' share. The neck, head, hands and feet keep their size.
+	pub fn fit(&self, parts: &Parts, physique: Physique) -> Parts {
+		let girth = self.girth(physique);
+
+		parts.redrawn(|name, shape| {
+			match spec_of(name).map(|spec| (spec.name, spec.space)) {
+				Some((_, Space::Body)) => shape.map(|p| pt(p.x * girth.across(self, p.y), p.y)),
+				Some((bone, Space::Bone)) if bone != "neck" => {
+					shape.map(|p| pt(p.x * girth.limbs, p.y))
+				}
+				_ => shape.clone(),
+			}
+		})
+	}
+
 	/// A hip joint's x, `side` -1 near and 1 far, turned by `t`.
 	fn hip_x(&self, side: f32, t: f32) -> f32 {
 		let (near, far) = self.hips_turned;
@@ -220,8 +360,7 @@ fn prop_scale(puppet: &Authored, build: Build, prop: &Prop) -> f32 {
 	// A held thing shows round the fist that holds it, however big the style draws its
 	// hands: a white glove must not swallow a pebble.
 	let (fist_lo, fist_hi) = puppet.required("hand-fist", 0.0).bounds();
-	let fist =
-		(fist_hi.x - fist_lo.x).max(fist_hi.y - fist_lo.y) * puppet.style.body(build).hand_scale;
+	let fist = (fist_hi.x - fist_lo.x).max(fist_hi.y - fist_lo.y) * puppet.body(build).hand_scale;
 	let (lo, hi) = prop.bounds();
 	let longest = (hi.x - lo.x).max(hi.y - lo.y).max(1.0) * prop.held_size() * scale;
 
@@ -313,7 +452,7 @@ fn fist_for(
 	target: Pt,
 ) -> Pt {
 	let (_, mirrored) = turned(facing);
-	let body = puppet.style.body(build);
+	let body = &puppet.body(build);
 	let mut state = FigureState::new(&Frame::authored(&puppet.style, build));
 	state.facing = facing;
 	state.carry = carry;
@@ -329,7 +468,7 @@ fn fist_for(
 		state.hands.1 = page;
 	}
 
-	let posed = Posed::of(&state, &puppet.style, build);
+	let posed = Posed::of(&state, puppet, build);
 	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
 	let (_, elbow, wrist) = solved.arm(&posed, side);
 
@@ -362,7 +501,7 @@ fn aim(
 /// prop leans out from the head, in degrees.
 fn up_place(puppet: &Authored, build: Build, prop: &Prop, facing: f32) -> (Pt, f32) {
 	let (t, _) = turned(facing);
-	let body = puppet.style.body(build);
+	let body = &puppet.body(build);
 	let zone = face_zone(puppet, build, t);
 	let scale = prop_scale(puppet, build, prop);
 	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
@@ -440,7 +579,7 @@ pub fn carry_hands(
 			// outwards (a drawn arm cannot point its forearm at the reader), its top kept
 			// under the mouth, held at its grip by the far hand and at the mirrored grip by
 			// the near one.
-			let body = puppet.style.body(build);
+			let body = &puppet.body(build);
 			let arm = body.limbs.upper_arm + body.limbs.forearm;
 			let zone = face_zone(puppet, build, t);
 			let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
@@ -492,7 +631,7 @@ fn float_place(
 	time: f32,
 ) -> (Pt, f32) {
 	let (t, _) = turned(facing);
-	let body = puppet.style.body(build);
+	let body = &puppet.body(build);
 	let zone = face_zone(puppet, build, t);
 	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
 	let (lo, hi) = prop.held_box(pt(0.0, 0.0), prop_scale(puppet, build, prop), 0.0);
@@ -524,6 +663,12 @@ pub struct Authored {
 	/// Whether the parts are still the style's template, drawn without a file of their own.
 	/// A character is drawn this way until they are given (or write) a part file.
 	pub template: bool,
+	/// How heavily built the figure is. Its parts are already fitted to it, and
+	/// [`Authored::body`] is its body built to match.
+	pub physique: Physique,
+	/// The ways of drawing its features a template-drawn figure was drawn with (none for a
+	/// figure drawn from its own part file).
+	pub picks: Picks,
 }
 
 impl Authored {
@@ -534,13 +679,42 @@ impl Authored {
 
 	/// A character drawn straight from their style's template for their body over its kit,
 	/// before they have a part file of their own: a grown-up gets the grown-up template, cut for
-	/// the taller body. Their cast colours still paint it, exactly as if the template had been
-	/// written to a file and left untouched.
-	pub fn from_template(style: &Arc<StylePack>, build: Build) -> Result<Authored> {
+	/// the taller body, with the hair, brows and nose they `picks`. Their cast colours still
+	/// paint it, exactly as if the template had been written to a file and left untouched.
+	pub fn from_template(style: &Arc<StylePack>, build: Build, picks: &Picks) -> Result<Authored> {
 		let file = style.template_file(build);
-		let mut puppet = Self::from_parts(&file, style.template_figure(build), style)?;
-		puppet.template = true;
-		Ok(puppet)
+		Ok(Authored {
+			template: true,
+			picks: Picks {
+				hair: Some(
+					picks
+						.hair
+						.clone()
+						.unwrap_or_else(|| style.own(build, Feature::Hair).to_owned()),
+				),
+				..picks.clone()
+			},
+			..Self::from_parts(&file, style.figure(build, picks)?, style)?
+		})
+	}
+
+	/// This figure built slim, plain or stout on `build`'s body, its parts fitted to the new
+	/// widths. A figure is built once, from plain.
+	#[must_use]
+	pub fn built(mut self, build: Build, physique: Physique) -> Authored {
+		debug_assert_eq!(self.physique, Physique::Plain, "a figure is built once");
+
+		if physique != Physique::Plain {
+			self.parts = Arc::new(self.style.body(build).fit(&self.parts, physique));
+			self.physique = physique;
+		}
+
+		self
+	}
+
+	/// The body this figure stands on: its style's body for `build`, built to its physique.
+	pub fn body(&self, build: Build) -> Proportions {
+		self.style.body(build).built(self.physique)
 	}
 
 	/// A puppet from parts already read (over the kit), refusing parts that can't draw a
@@ -565,6 +739,8 @@ impl Authored {
 			style: Arc::clone(style),
 			ink_style: None,
 			template: false,
+			physique: Physique::Plain,
+			picks: Picks::default(),
 		})
 	}
 
@@ -966,8 +1142,9 @@ struct Posed {
 }
 
 impl Posed {
-	fn of(state: &FigureState, style: &StylePack, build: Build) -> Posed {
-		let body = style.body(build);
+	fn of(state: &FigureState, puppet: &Authored, build: Build) -> Posed {
+		let style = &puppet.style;
+		let body = &puppet.body(build);
 		// Hands are drawn for a kid; a grown-up's bigger hands need more room.
 		let hand_size = body.hand_scale / style.body(Build::Kid).hand_scale;
 		let shoulder_y = body.shoulder_y;
@@ -1140,6 +1317,31 @@ fn hose(root: Pt, joint: Pt, end: Pt, length: f32) -> [Pt; 9] {
 	std::array::from_fn(|i| {
 		let s = i as f32 / 8.0;
 		root.lerp(end, s) + normal * (side * height * 4.0 * s * (1.0 - s))
+	})
+}
+
+/// The centre line of a rubber-hose leg. It bows like an arm while the foot is near its full
+/// reach, but a leg folded deep, in a crouch or a sit, bends round the `knee` the rig puts there
+/// instead: one smooth curve through it, so a squat reads as a squat, not as bowed legs.
+fn hose_leg(hip: Pt, knee: Pt, ankle: Pt, length: f32) -> [Pt; 9] {
+	/// How short of its length the hip-to-ankle line gets before the leg starts to fold, and
+	/// how much shorter again before it has folded all the way round its knee.
+	const FOLD_FROM: f32 = 0.15;
+	const FOLD_OVER: f32 = 0.25;
+	let bow = hose(hip, knee, ankle, length);
+	let fold = ((1.0 - (ankle - hip).len() / length - FOLD_FROM) / FOLD_OVER).clamp(0.0, 1.0);
+
+	if fold <= 0.0 {
+		return bow;
+	}
+
+	// A quadratic through the knee halfway along.
+	let control = knee * 2.0 - hip.lerp(ankle, 0.5);
+
+	std::array::from_fn(|i| {
+		let s = i as f32 / 8.0;
+		let round = hip.lerp(control, s).lerp(control.lerp(ankle, s), s);
+		bow[i].lerp(round, fold)
 	})
 }
 
@@ -1394,8 +1596,8 @@ fn draw_figure(
 	state: &FigureState,
 ) -> (Option<Bounds>, FaceMarks) {
 	let frame = look.frame();
-	let body = puppet.style.body(look.build);
-	let posed = Posed::of(state, &puppet.style, look.build);
+	let body = &puppet.body(look.build);
+	let posed = Posed::of(state, puppet, look.build);
 	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
 	// How this figure is inked: its own style, or its host's when it is a guest drawn in the
 	// host's finish. Only the line and shade dials and the fill's palette snapping follow the
@@ -1517,8 +1719,8 @@ fn draw_figure(
 /// Draws only what a puppet holds, exactly where its hand draws it, for measuring.
 pub fn draw_held(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
 	let frame = look.frame();
-	let body = puppet.style.body(look.build);
-	let posed = Posed::of(state, &puppet.style, look.build);
+	let body = &puppet.body(look.build);
+	let posed = Posed::of(state, puppet, look.build);
 	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
 	let inker = puppet.inker();
 	let inks = Inks::of(look, &puppet.style, state.teeth);
@@ -1601,8 +1803,8 @@ fn draw_hat(svg: &mut Svg, puppet: &Authored, inks: &Inks, prop: &Prop, t: f32) 
 /// A soft contact shadow under the feet, so the figure stands on the ground.
 pub fn shadow(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState, lift: f32) {
 	let fade = (1.0 - lift / 120.0).clamp(0.35, 1.0);
-	let size = puppet.style.body(look.build).limbs.hip_spread
-		/ puppet.style.body(Build::Kid).limbs.hip_spread;
+	let size =
+		puppet.body(look.build).limbs.hip_spread / puppet.style.body(Build::Kid).limbs.hip_spread;
 	let turn = (state.facing / STAGED_FACING).clamp(-1.0, 1.0);
 	let spread = 1.0 + state.lie * 1.8;
 	svg.fill_alpha(
@@ -1619,8 +1821,8 @@ pub fn shadow(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState
 /// Draws the rig's bones over an authored figure, for rig checks.
 pub fn draw_bones(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
 	let frame = look.frame();
-	let body = puppet.style.body(look.build);
-	let posed = Posed::of(state, &puppet.style, look.build);
+	let body = &puppet.body(look.build);
+	let posed = Posed::of(state, puppet, look.build);
 	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
 	let pelvis = solved.torso(solved.pivot);
 	let chest = solved.torso(pt(0.0, body.shoulder_y));
@@ -1707,7 +1909,8 @@ fn wrap(p: Pt, t: f32, radius: f32, turn: f32) -> Pt {
 }
 
 /// A leg's skin outline through its hip, knee and ankle. A rubber-hose leg has no knee: it's
-/// one tube that bows as the foot comes closer. Otherwise it is one shape bent through the knee,
+/// one tube that bows as the foot comes closer, and folds round where the knee would be when
+/// it bends deep. Otherwise it is one shape bent through the knee,
 /// so there's no seam at the joint: drawn with the body's anatomy if it has a leg profile, or
 /// tapering evenly from hip to ankle.
 fn leg_shape(puppet: &Authored, solved: &Solved, (hip, knee, ankle): (Pt, Pt, Pt)) -> Shape {
@@ -1715,7 +1918,7 @@ fn leg_shape(puppet: &Authored, solved: &Solved, (hip, knee, ankle): (Pt, Pt, Pt
 
 	if puppet.style.motion.limbs == Joints::Hose {
 		Shape::taper(
-			&hose(hip, knee, ankle, solved.limbs.thigh + solved.limbs.shin),
+			&hose_leg(hip, knee, ankle, solved.limbs.thigh + solved.limbs.shin),
 			start,
 			end,
 		)
@@ -1858,6 +2061,9 @@ fn draw_leg(
 		svg.end();
 	}
 
+	// Hems and cuffs are drawn in a darker shade of the legwear; creases are fine ink lines.
+	let hem_ink = far(inks.bottom, is_far, inks.finish.far).darken(0.25);
+
 	// Trousers ride on the shin, over the top of the shoe.
 	if let Some(trouser) = trouser {
 		let angle = begin_bone(svg, knee, ankle);
@@ -1871,12 +2077,17 @@ fn draw_leg(
 		);
 
 		if let Some(cuff) = puppet.part("legwear-shin-cuff", t) {
-			svg.brush_line(
-				&cuff.path(),
-				far(inks.bottom, is_far, inks.finish.far).darken(0.25),
-				inks.finish.detail,
-			);
+			svg.brush_line(&cuff.path(), hem_ink, inks.finish.detail);
 		}
+
+		draw_creases(
+			svg,
+			puppet,
+			"legwear-shin-crease",
+			side,
+			ink,
+			inks.finish.detail,
+		);
 
 		svg.end();
 	}
@@ -1894,21 +2105,42 @@ fn draw_leg(
 		);
 
 		if let Some(hem) = puppet.part("legwear-leg-hem", t) {
-			svg.brush_line(
-				&hem.path(),
-				far(inks.bottom, is_far, inks.finish.far).darken(0.25),
-				inks.finish.detail,
-			);
+			svg.brush_line(&hem.path(), hem_ink, inks.finish.detail);
 		}
 
+		draw_creases(
+			svg,
+			puppet,
+			"legwear-leg-crease",
+			side,
+			ink,
+			inks.finish.detail,
+		);
+
 		svg.end();
+	}
+}
+
+/// Draws a trouser leg's numbered creases (`name-1`, `name-2`, …) in its bone's frame: as they
+/// are drawn, on the page-right leg (`side` 1), and mirrored on the page-left one, so a seam on
+/// the inside of the leg stays there.
+fn draw_creases(
+	svg: &mut Svg,
+	puppet: &Authored,
+	name: &str,
+	side: f32,
+	colour: Color,
+	width: f32,
+) {
+	for crease in puppet.copies(name, 0.0) {
+		svg.brush_line(&crease.map(|p| pt(p.x * side, p.y)).path(), colour, width);
 	}
 }
 
 fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, solved: &Solved) {
 	let t = solved.t;
 	let ink = inks.line;
-	let proportions = puppet.style.body(look.build);
+	let proportions = &puppet.body(look.build);
 	let (neck_y, hem_y) = (proportions.neck.y, proportions.hem_y);
 	// Patterns are laid across a little more than the body, and clipped to it.
 	let half = proportions.body_radius * 1.25;
@@ -3008,12 +3240,12 @@ fn draw_nose(svg: &mut Svg, puppet: &Authored, inks: &Inks, t: f32, wrinkle: boo
 	// The nose stands proud of the face, so it travels a little further than the cylinder.
 	let poke = pt(9.0 * t, 0.0);
 	let (at, scale) = (inks.features.nose, inks.features.nose_scale);
-	let nose = puppet
-		.required("nose", t)
-		.map(|p| p * scale)
-		.shift(at)
-		.map(warp)
-		.shift(poke);
+
+	// A character drawn with no nose has none to wrinkle either.
+	let Some(nose) = puppet.part("nose", t) else {
+		return;
+	};
+	let nose = nose.map(|p| p * scale).shift(at).map(warp).shift(poke);
 	svg.brush_fill(&nose.path(), inks.nose, inks.line, inks.finish.detail * 1.1);
 	svg.cel_shade(&nose, pt(-4.0, -4.0), inks.finish.cel_shadow);
 	svg.brush_line(&nose.path(), inks.line, inks.finish.detail * 1.1);
@@ -3411,8 +3643,8 @@ fn overlaps(a: Bounds, b: Bounds) -> bool {
 /// the parts, the pose and the gap.
 pub fn joins(puppet: &Authored, build: Build) -> Vec<Finding> {
 	let style = &puppet.style;
-	let body = style.body(build);
-	let frame = Frame::authored(style, build);
+	let body = &puppet.body(build);
+	let frame = Frame::of_body(style, body);
 	let tolerance = JOIN_TOLERANCE * (body.head_above_neck - body.neck.y);
 	let hose = style.motion.limbs == Joints::Hose;
 	let mut gaps: Vec<Gap> = Vec::new();
@@ -3445,7 +3677,7 @@ pub fn joins(puppet: &Authored, build: Build) -> Vec<Finding> {
 			state.hand_shapes = pose.hand_shapes();
 			state.legs = frame.limbs().stance(stance, facing);
 			state.facing = facing;
-			let posed = Posed::of(&state, style, build);
+			let posed = Posed::of(&state, puppet, build);
 			let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
 			let t = posed.t;
 			let on_body = |shape: Shape| shape.map(|p| solved.torso(p));
@@ -3583,6 +3815,11 @@ mod tests {
 		*cartoon().body(Build::Kid)
 	}
 
+	/// The cartoon template kid, for posing.
+	fn template() -> Authored {
+		Authored::from_template(&cartoon(), Build::Kid, &Picks::default()).unwrap()
+	}
+
 	/// The cartoon face cylinder's warp.
 	fn warp(p: Pt, t: f32) -> Pt {
 		let face = cartoon().face;
@@ -3654,7 +3891,7 @@ mod tests {
 		] {
 			let mut state = FigureState::new(&frame);
 			state.hands = frame.hands(pose, 0.0);
-			let posed = Posed::of(&state, &cartoon(), Build::Kid);
+			let posed = Posed::of(&state, &template(), Build::Kid);
 			let solved = Solved::new(&posed, &kid(), 0.0);
 
 			for side in [-1.0, 1.0] {
@@ -3680,7 +3917,7 @@ mod tests {
 		state.hands = frame.hands(Pose::Point, -STAGED_FACING);
 		state.hand_shapes = Pose::Point.hand_shapes();
 		state.facing = -STAGED_FACING;
-		let posed = Posed::of(&state, &cartoon(), Build::Kid);
+		let posed = Posed::of(&state, &template(), Build::Kid);
 		assert!(posed.mirrored);
 		assert!((posed.t - 1.0).abs() < 1e-6);
 		// The pointing hand is the page-right one, which is the far hand when facing left.
@@ -3699,12 +3936,12 @@ mod tests {
 			let mut state = FigureState::new(&frame);
 			state.facing = facing;
 			state.hands = frame.hands(Pose::HoldNose, facing);
-			let nose = Posed::of(&state, &cartoon(), Build::Kid).hands.1;
+			let nose = Posed::of(&state, &template(), Build::Kid).hands.1;
 			let face_x = facing / STAGED_FACING * cartoon().face.slide * STAGED_FACING;
 			assert!((nose.x - face_x).abs() < 30.0, "facing {facing}: {nose:?}");
 
 			state.hands = frame.hands(Pose::Wave, facing);
-			let posed = Posed::of(&state, &cartoon(), Build::Kid);
+			let posed = Posed::of(&state, &template(), Build::Kid);
 			let waving = if posed.hands.0.y < posed.hands.1.y {
 				posed.hands.0
 			} else {
@@ -3751,7 +3988,7 @@ mod tests {
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Hold, STAGED_FACING);
 		state.prop = Some(props::Library::built_in().find("jam").unwrap());
-		let posed = Posed::of(&state, &cartoon(), Build::Kid);
+		let posed = Posed::of(&state, &template(), Build::Kid);
 		// The jam is in the page-right hand, which is the far hand when facing right.
 		assert_eq!(
 			posed.prop.as_ref().map(|(prop, _)| prop.name.as_str()),
@@ -3768,7 +4005,7 @@ mod tests {
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Brush, STAGED_FACING);
 		state.prop = Some(props::Library::built_in().find("toothbrush").unwrap());
-		let posed = Posed::of(&state, &cartoon(), Build::Kid);
+		let posed = Posed::of(&state, &template(), Build::Kid);
 		assert_eq!(
 			posed.prop.as_ref().map(|(prop, _)| prop.name.as_str()),
 			Some("toothbrush"),
@@ -3928,13 +4165,36 @@ mod tests {
 	}
 
 	#[test]
+	fn a_hose_leg_bows_near_its_reach_and_folds_round_its_knee_in_a_squat() {
+		let hip = pt(0.0, 0.0);
+
+		// A foot near full reach bows the leg exactly as an arm would.
+		let standing = (pt(10.0, 30.0), pt(0.0, 92.0));
+		assert_eq!(
+			hose_leg(hip, standing.0, standing.1, 100.0),
+			hose(hip, standing.0, standing.1, 100.0)
+		);
+
+		// Squatting, the foot is close under the hip and the knee juts out high: the leg goes
+		// round the knee rather than bowing evenly between hip and foot.
+		let (knee, ankle) = (pt(45.0, 20.0), pt(5.0, 50.0));
+		let folded = hose_leg(hip, knee, ankle, 100.0);
+		assert!((folded[4] - knee).len() < 1.0, "{folded:?}");
+		let bowed = hose(hip, knee, ankle, 100.0);
+		assert!(
+			(bowed[4] - knee).len() > 10.0,
+			"a plain bow misses the knee: {bowed:?}"
+		);
+	}
+
+	#[test]
 	fn turned_far_arms_cheer_behind_the_head_but_reach_the_face_in_front() {
 		let frame = Frame::authored(&cartoon(), Build::Kid);
 		let behind = |pose: Pose| {
 			let mut state = FigureState::new(&frame);
 			state.facing = STAGED_FACING;
 			state.hands = frame.hands(pose, STAGED_FACING);
-			Posed::of(&state, &cartoon(), Build::Kid).far_arm_behind
+			Posed::of(&state, &template(), Build::Kid).far_arm_behind
 		};
 		assert!(behind(Pose::Idle));
 		assert!(
@@ -4000,7 +4260,7 @@ mod tests {
 				let mut state = FigureState::new(&frame);
 				state.facing = STAGED_FACING;
 				state.legs = body.limbs.stance(stance, STAGED_FACING);
-				let posed = Posed::of(&state, &style, Build::Kid);
+				let posed = Posed::of(&state, &template(), Build::Kid);
 				(stance, Solved::new(&posed, body, 0.0), posed)
 			})
 			.collect()
@@ -4167,7 +4427,7 @@ mod tests {
 		let body = long_legged();
 		let mut state = FigureState::new(&Frame::authored(&cartoon(), Build::Kid));
 		state.legs = body.limbs.stance(Stance::Crouch, 0.0);
-		let posed = Posed::of(&state, &cartoon(), Build::Kid);
+		let posed = Posed::of(&state, &template(), Build::Kid);
 		let (hip, knee, ankle) = Solved::new(&posed, &body, 0.0).leg(-1.0);
 		let splayed = Solved::new(
 			&posed,
@@ -4190,7 +4450,7 @@ mod tests {
 		for (_, mood) in Mood::ALL {
 			let mut state = FigureState::new(&frame);
 			state.mood = mood;
-			let posed = Posed::of(&state, &cartoon(), Build::Kid);
+			let posed = Posed::of(&state, &template(), Build::Kid);
 			assert_eq!(
 				posed.hand_shapes,
 				(Hand::Relaxed, Hand::Relaxed),

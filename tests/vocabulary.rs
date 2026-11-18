@@ -275,3 +275,68 @@ fn every_documented_comment_form_parses() {
 			.unwrap_or_else(|error| panic!("{direction}: {error}"));
 	}
 }
+
+/// The variants table: every word it documents is drawn by some style's body, and every word a
+/// style's body offers is documented.
+#[test]
+fn every_documented_variant_is_drawn_and_every_drawn_one_documented() {
+	use fables::art::figure::Build;
+	use fables::art::pack::StylePack;
+	use fables::art::parts::Feature;
+
+	let rows = table("### Variants");
+	let words = |field: &str| -> Vec<String> {
+		let (_, meaning) = rows
+			.iter()
+			.find(|(name, _)| name == &format!("`{field}`"))
+			.unwrap_or_else(|| panic!("the variants table has no `{field}` row"));
+		spans(meaning)
+			.into_iter()
+			.map(|(_, span)| span)
+			.filter(|span| !span.contains(' '))
+			.collect()
+	};
+
+	for field in ["hair", "build", "brows", "nose"] {
+		let documented = words(field);
+		let mut drawn = Vec::new();
+
+		for name in StylePack::names() {
+			let style = StylePack::named(name).unwrap();
+
+			for (kind, build) in [("kid", Build::Kid), ("grown-up", Build::Grownup)] {
+				let offers: Vec<String> = match field {
+					"hair" => style.offers(build, Feature::Hair),
+					"brows" => style.offers(build, Feature::Brows),
+					"nose" => style.offers(build, Feature::Nose),
+					_ => vec!["slim", "plain", "stout"],
+				}
+				.into_iter()
+				.map(str::to_owned)
+				.collect();
+
+				for offer in &offers {
+					assert!(
+						documented.contains(offer),
+						"{name} {kind}: `{field} = \"{offer}\"` is drawn but not documented"
+					);
+					let cast = format!(
+						"[pip]\nname = \"Pip\"\nkind = \"{kind}\"\n{field} = \"{offer}\"\n"
+					);
+					Cast::parse_in(&cast, std::path::Path::new(""), &style).unwrap_or_else(
+						|error| panic!("{name} {kind}: {field} {offer}: {error:#}"),
+					);
+				}
+
+				drawn.extend(offers);
+			}
+		}
+
+		for word in &documented {
+			assert!(
+				drawn.contains(word),
+				"`{field} = \"{word}\"` is documented but no style draws it"
+			);
+		}
+	}
+}

@@ -18,6 +18,9 @@
 //! - A part's drawing is its own path data plus its own `transform`. Groups around it only lay
 //!   the sheet out: move a group to tidy the file, edit a path to change the drawing.
 //! - Each part is one outline. Any path commands work (relative, arcs, smooth curves).
+//! - A template or kit can draw a [`Feature`] (the hair, brows or nose) more than one way: its
+//!   own drawing, plus variants beside it whose parts are named `part@variant`, such as
+//!   `hair.front@bob` or `brow@arched`. A cast picks a variant by name.
 //! - Everything else (guides, labels, groups) is ignored.
 
 use std::collections::BTreeMap;
@@ -173,16 +176,22 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("sleeve-cuff", Space::Bone).optional(),
 	part("legwear-leg", Space::Bone).optional(),
 	part("legwear-leg-hem", Space::Bone).optional(),
+	// Creases on the trouser leg: an inseam, folds at the knee. Drawn for the page-right leg; the
+	// page-left one draws them mirrored, so an inseam stays on the inside of both.
+	part("legwear-leg-crease", Space::Bone).numbered(),
 	// Long trousers carry on down the shin, over the socks.
 	part("legwear-shin", Space::Bone).optional(),
 	part("legwear-shin-cuff", Space::Bone).optional(),
+	// The same down the shin: a pressed crease, the break where the trouser meets the shoe.
+	part("legwear-shin-crease", Space::Bone).numbered(),
 	// Long sleeves carry on down the forearm.
 	part("forearm-sleeve", Space::Bone).optional(),
 	part("forearm-sleeve-cuff", Space::Bone).optional(),
 	part("ear", Space::Head).kit(),
 	part("ear-curl", Space::Head).optional().kit(),
 	part("brow", Space::Feature).kit(),
-	part("nose", Space::Feature).kit(),
+	// A nose of `none` leaves it out.
+	part("nose", Space::Feature).optional().kit(),
 	part("nose-wrinkle", Space::Head).numbered().kit(),
 	part("hand-relaxed", Space::Hand).kit(),
 	part("hand-relaxed-line", Space::Hand).numbered().kit(),
@@ -235,6 +244,55 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("pattern-dot", Space::Feature).kit(),
 	part("pattern-star", Space::Feature).kit(),
 ];
+
+/// A feature a template or kit draws more than one way. The template draws its own hairdo (and
+/// the kit its own brows and nose); other ways sit beside them as variants, each part named
+/// `part@variant` (`hair.front@bob`, `hair-lock-1.3q@pigtails`, `brow@arched`). Picking a
+/// variant swaps every part of the feature at once, so a bob never keeps a bun's strands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Feature {
+	Hair,
+	Brows,
+	Nose,
+}
+
+impl Feature {
+	pub const ALL: [Feature; 3] = [Feature::Hair, Feature::Brows, Feature::Nose];
+
+	/// The cast field that picks it, which is also what sentences call it.
+	pub fn name(self) -> &'static str {
+		match self {
+			Feature::Hair => "hair",
+			Feature::Brows => "brows",
+			Feature::Nose => "nose",
+		}
+	}
+
+	/// The parts it is drawn with, from [`FIGURE_PARTS`].
+	fn parts(self) -> &'static [&'static str] {
+		match self {
+			Feature::Hair => {
+				&[
+					"hair",
+					"hair-strand",
+					"hair-shine",
+					"head-shine",
+					"hair-lock",
+					"hair-lock-tie",
+					"tuft",
+					"tuft-shine",
+				]
+			}
+			Feature::Brows => &["brow"],
+			Feature::Nose => &["nose"],
+		}
+	}
+
+	/// Whether a drawing, such as `hair-strand-2.3q`, is one of its parts.
+	pub fn owns(self, drawing: &str) -> bool {
+		spec_of(drawing).is_some_and(|spec| self.parts().contains(&spec.name))
+	}
+}
 
 /// A part as it is at some turn of the body: one drawing, a blend of two, or a swap.
 #[derive(Clone, Copy, Debug)]
@@ -297,6 +355,9 @@ impl fmt::Display for Finding {
 #[derive(Clone, Debug, Default)]
 pub struct Parts {
 	shapes: BTreeMap<String, Shape>,
+	/// Other ways of drawing a [`Feature`], by variant name: `hair.front@bob` is kept under
+	/// `bob` as `hair.front`.
+	variants: BTreeMap<String, BTreeMap<String, Shape>>,
 }
 
 impl Parts {
@@ -324,15 +385,41 @@ impl Parts {
 	pub fn parse(svg: &str) -> Result<Parts> {
 		let document = roxmltree::Document::parse(svg).context("not a valid SVG file")?;
 		let mut shapes = BTreeMap::new();
+		let mut variants: BTreeMap<String, BTreeMap<String, Shape>> = BTreeMap::new();
 		let mut problems = Vec::new();
 
 		for node in document
 			.descendants()
 			.filter(|node| node.has_tag_name("path"))
 		{
-			let Some(id) = node.attribute("id").filter(|id| is_part_name(id)) else {
+			let Some(id) = node.attribute("id") else {
 				continue;
 			};
+			let (name, variant) = match id.split_once('@') {
+				Some((name, variant)) => (name, Some(variant)),
+				None => (id, None),
+			};
+
+			if !is_part_name(name) {
+				continue;
+			}
+
+			if let Some(variant) = variant {
+				if !is_variant_name(variant) {
+					problems.push(format!(
+						"`{id}`: a variant's name is lowercase words joined by hyphens"
+					));
+					continue;
+				}
+
+				if !Feature::ALL.iter().any(|feature| feature.owns(name)) {
+					problems.push(format!(
+						"`{id}`: only the hair, brows and nose are drawn as variants"
+					));
+					continue;
+				}
+			}
+
 			let read = node
 				.attribute("d")
 				.context("it has no path data")
@@ -344,12 +431,17 @@ impl Parts {
 					}
 				});
 
+			let drawings = match variant {
+				Some(variant) => variants.entry(variant.to_owned()).or_default(),
+				None => &mut shapes,
+			};
+
 			match read {
-				Ok(_) if shapes.contains_key(id) => {
+				Ok(_) if drawings.contains_key(name) => {
 					problems.push(format!("`{id}` is used by more than one path"));
 				}
 				Ok(shape) => {
-					shapes.insert(id.to_owned(), shape);
+					drawings.insert(name.to_owned(), shape);
 				}
 				Err(error) => problems.push(format!("`{id}`: {error:#}")),
 			}
@@ -359,17 +451,87 @@ impl Parts {
 			bail!("unreadable parts:\n  {}", problems.join("\n  "));
 		}
 
-		Ok(Parts { shapes })
+		Ok(Parts { shapes, variants })
 	}
 
-	/// These parts, with any part they don't draw taken from `base`.
+	/// These parts, with any part (or variant of one) they don't draw taken from `base`.
 	#[must_use]
 	pub fn over(mut self, base: Parts) -> Parts {
 		for (name, shape) in base.shapes {
 			self.shapes.entry(name).or_insert(shape);
 		}
 
+		for (variant, drawings) in base.variants {
+			let own = self.variants.entry(variant).or_default();
+
+			for (name, shape) in drawings {
+				own.entry(name).or_insert(shape);
+			}
+		}
+
 		self
+	}
+
+	/// The variants drawn of a feature, by name in alphabetical order.
+	pub fn variants(&self, feature: Feature) -> Vec<&str> {
+		self.variants
+			.iter()
+			.filter(|(_, drawings)| drawings.keys().any(|name| feature.owns(name)))
+			.map(|(variant, _)| variant.as_str())
+			.collect()
+	}
+
+	/// Whether these parts draw a feature themselves, rather than only as variants.
+	pub fn draws(&self, feature: Feature) -> bool {
+		self.shapes.keys().any(|name| feature.owns(name))
+	}
+
+	/// Draws a feature as one of its variants: every part the feature was drawn with goes, and
+	/// the variant's parts take their place.
+	pub fn pick(&mut self, feature: Feature, variant: &str) -> Result<()> {
+		let drawn: Vec<(String, Shape)> = self
+			.variants
+			.get(variant)
+			.into_iter()
+			.flatten()
+			.filter(|(name, _)| feature.owns(name))
+			.map(|(name, shape)| (name.clone(), shape.clone()))
+			.collect();
+		anyhow::ensure!(
+			!drawn.is_empty(),
+			"no `{variant}` {} is drawn; the variants are {}",
+			feature.name(),
+			self.variants(feature).join(", ")
+		);
+		self.leave_out(feature);
+		self.shapes.extend(drawn);
+
+		Ok(())
+	}
+
+	/// Leaves a feature out: every part it is drawn with goes.
+	pub fn leave_out(&mut self, feature: Feature) {
+		self.shapes.retain(|name, _| !feature.owns(name));
+	}
+
+	/// Every drawing, and every variant's, redrawn by `redraw` from its part name and drawing.
+	#[must_use]
+	pub fn redrawn(&self, redraw: impl Fn(&str, &Shape) -> Shape) -> Parts {
+		let redraw_all = |drawings: &BTreeMap<String, Shape>| {
+			drawings
+				.iter()
+				.map(|(name, shape)| (name.clone(), redraw(name, shape)))
+				.collect()
+		};
+
+		Parts {
+			shapes: redraw_all(&self.shapes),
+			variants: self
+				.variants
+				.iter()
+				.map(|(variant, drawings)| (variant.clone(), redraw_all(drawings)))
+				.collect(),
+		}
 	}
 
 	pub fn get(&self, name: &str) -> Option<&Shape> {
@@ -525,6 +687,14 @@ fn is_part_name(id: &str) -> bool {
 
 	base.starts_with(|ch: char| ch.is_ascii_lowercase())
 		&& base
+			.chars()
+			.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+}
+
+/// Variant names, the `bob` of `hair.front@bob`, are lowercase words joined by hyphens.
+pub fn is_variant_name(name: &str) -> bool {
+	name.starts_with(|ch: char| ch.is_ascii_lowercase())
+		&& name
 			.chars()
 			.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
 }
