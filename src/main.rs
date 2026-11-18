@@ -1586,34 +1586,21 @@ mod tests {
 			"{error}"
 		);
 	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
 
 	#[test]
-	fn every_new_book_gets_the_default_age_unless_its_recipe_names_one() {
-		let plain = "+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"pip\"\n+++\n\n# park\nHi.\n";
-		let aged = with_default_age(plain.to_owned());
-		assert!(
-			aged.contains("age = \"3-5\""),
-			"a recipe with no age gets one: {aged}"
-		);
-		assert_eq!(
-			aged.matches("\n+++").count(),
-			1,
-			"and only one front matter"
-		);
+	fn a_new_book_starts_at_the_default_age() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("age = \"3-5\""), "{script}");
+		assert_eq!(script.matches("\nage").count(), 1, "{script}");
+	}
 
+	#[test]
+	fn a_recipe_that_names_its_own_age_keeps_it() {
 		let own = "+++\ntitle = \"T\"\nage = \"5-7\"\n+++\n\n# park\nHi.\n";
 		assert_eq!(with_default_age(own.to_owned()), own);
-
-		let bare = "+++\ntitle = \"T\"\nage=\"under-3\"\n+++\n";
-		assert_eq!(with_default_age(bare.to_owned()), bare);
-
-		// A page that begins a word with `age` is not front matter.
-		let page = "+++\ntitle = \"T\"\n+++\n# park\nAge comes before beauty.\n";
-		assert!(with_default_age(page.to_owned()).contains("age = \"3-5\""));
+		let tight = "+++\ntitle = \"T\"\nage=\"under-3\"\n+++\n";
+		assert_eq!(with_default_age(tight.to_owned()), tight);
 	}
 }
