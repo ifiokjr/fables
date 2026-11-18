@@ -1,0 +1,6 @@
+# rustfmt.toml uses unstable options, so the project builds on a pinned nightly. Every rustup
+# install (a contributor's, CI's, the devenv shell's) picks this exact compiler, with the two
+# components the checks need.
+[toolchain]
+channel = "nightly-2026-09-07"
+components = ["rustfmt", "clippy"]
