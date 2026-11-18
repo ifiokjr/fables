@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100" data-ambience="room" data-indoors="true">
   <title>Bathroom: a bubble bath with a duck under the window, the round mirror over the sink with the toothbrush cup, tiles and a night light</title>
   <path id="far-sky" d="M80 870 Q292.2 870 580 870 Q580 1125.4 580 1390 Q363.6 1390 80 1390 Q80 1114.8 80 870 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="330" cy="1410" data-glow="304 white 0.5" data-time="day"/>

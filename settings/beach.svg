@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2080">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2080" data-ambience="waves,breeze">
   <title>Beach: a wide sea to the horizon, the sun or the moon low over a striped umbrella, a sandcastle, and a lighthouse on the island</title>
   <path id="far-sky" d="M-160 -160 Q1288.5 -160 2560 -160 Q2560 834.8 2560 1580 Q1061.7 1580 -160 1580 Q-160 631.3 -160 -160 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="1200" cy="1440" data-glow="1500 white 0.5" data-time="day"/>

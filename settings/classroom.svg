@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100" data-ambience="room,crowd" data-indoors="true">
   <title>Classroom: a chalkboard of doodles over the bookcase, a tall window on the school field above the teacher&apos;s desk, and a pupil&apos;s desk up front</title>
   <path id="far-sky" d="M1860 1460 Q1861 1193 1860 970 Q2127.2 964.3 2370 970 Q2367.6 1238.5 2370 1460 Q2084.1 1465.9 1860 1460 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="2115" cy="1440" data-glow="320 white 0.5" data-time="day"/>

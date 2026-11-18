@@ -118,27 +118,28 @@ upper-arm = 104.0
 forearm = 96.0
 
 [bodies.grown-up]
-neck = [0.0, -600.0]
+neck = [0.0, -730.0]
 head-above-neck = 132.0
-shoulder-y = -574.0
-shoulder-half = 54.0
-shoulders-turned = [-48.0, 38.0]
-hips-turned = [-18.0, 26.0]
-hem-y = -360.0
-body-radius = 66.0
-leg-width = [28.0, 19.0]
-forearm-width = [17.0, 12.0]
+shoulder-y = -704.0
+shoulder-half = 58.0
+shoulders-turned = [-52.0, 40.0]
+hips-turned = [-20.0, 28.0]
+hem-y = -452.0
+body-radius = 72.0
+leg-width = [30.0, 20.0]
+forearm-width = [18.0, 13.0]
 hand-scale = 1.35
-reach = [86.0, 230.0]
-leg-profile = [36.0, 33.0, 29.0, 24.0, 27.0, 22.0, 17.5]
+reach = [90.0, 275.0]
+leg-profile = [38.0, 35.0, 30.0, 25.0, 28.0, 23.0, 18.0]
 arm-profile = [25.0, 23.0, 20.0, 17.0, 19.0, 15.0, 12.5]
+foot-scale = 1.3
 floor = true
 
 [bodies.grown-up.limbs]
-pelvis-y = -370.0
+pelvis-y = -460.0
 ankle-y = -24.0
-hip-spread = 26.0
-thigh = 175.0
-shin = 175.0
-upper-arm = 140.0
-forearm = 128.0
+hip-spread = 28.0
+thigh = 218.0
+shin = 218.0
+upper-arm = 170.0
+forearm = 154.0

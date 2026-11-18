@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100" data-ambience="room" data-indoors="true">
   <title>Shop: a corner shop with jars on high shelves, a counter with the till and a sweet jar, and the street through the window</title>
   <path id="far-sky" d="M17.6 815.1 Q232 815.1 488.8 815.1 Q488.8 1141.5 488.8 1447.5 Q268.6 1447.5 17.6 1447.5 Q17.6 1128.9 17.6 815.1 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="253" cy="1460" data-glow="300 white 0.5" data-time="day"/>

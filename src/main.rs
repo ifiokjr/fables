@@ -292,17 +292,25 @@ enum SettingAction {
 #[derive(Subcommand)]
 enum PuppetAction {
 	/// Check part files against the parts a figure is drawn with: missing parts, views without
-	/// their pair, parts that swap instead of blending, and names no figure uses.
+	/// their pair, parts that swap instead of blending, names no figure uses, and parts that
+	/// come apart when the figure is posed on its own body (a head clear of the torso, an arm or
+	/// leg starting outside it).
 	Check {
-		/// The cast id to check; leave it out to check every member with a part file.
+		/// The cast id to check; leave it out to check every person drawn from parts, their own
+		/// part file or their style's template for their body.
 		id: Option<String>,
 	},
 	/// Start a cast member's part file to redraw part by part, from the style's template or
 	/// another puppet's drawings, and point their cast entry at it.
 	///
+	/// Every style has two bodies, a kid and a grown-up, and a template drawn for each: a cast
+	/// member with `kind = "grown-up"` starts from the grown-up's torso, sleeves and legwear, cut
+	/// for the taller body; anyone else starts from the kid's.
+	///
 	/// Example: `fables puppet template pip`
 	Template {
-		/// The cast id the file is for, e.g. bogey.
+		/// The cast id the file is for, e.g. bogey. Its `kind` in the cast file (`kid` or
+		/// `grown-up`) picks the body the template is drawn for.
 		id: String,
 		/// The cast member whose drawings to start from (default: the style's template).
 		#[arg(long)]
@@ -364,13 +372,14 @@ enum VoiceAction {
 
 #[derive(Subcommand)]
 enum StyleAction {
-	/// List the drawing styles.
+	/// List the drawing styles, with the bodies (kid, grown-up) and page skin of each.
 	List,
-	/// Check a style: its template over its kit must draw a whole figure, and its bodies must
-	/// stand up.
+	/// Check a style: each body's template over its kit must draw a whole figure whose parts
+	/// join up when posed, and its bodies must stand up.
 	Check { name: String },
-	/// Describe a style: its finish, bodies, every part a figure is drawn with, its coordinate
-	/// space and the drawing rules. Read this before drawing a part.
+	/// Describe a style: its finish, bodies and the template each is drawn from, every part a
+	/// figure is drawn with, its coordinate space and the drawing rules. Read this before
+	/// drawing a part.
 	///
 	/// Example: `fables style describe chibi`
 	Describe { name: String },
@@ -581,7 +590,13 @@ fn run(cli: Cli) -> Result<()> {
 				StyleAction::List => {
 					for name in StylePack::names() {
 						let pack = StylePack::named(name)?;
-						say!("{name} (skin: {}): {}", pack.skin, pack.description)?;
+						let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
+						say!(
+							"{name} (skin: {}; bodies: {}): {}",
+							pack.skin,
+							bodies.join(", "),
+							pack.description
+						)?;
 					}
 
 					Ok(())
@@ -798,6 +813,37 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	Ok(())
 }
 
+/// The age band every new book is read aloud to until its author says otherwise.
+const NEW_BOOK_AGE: &str = "3-5";
+
+/// Gives a new book the default `age` in its front matter. Every new book's text passes here,
+/// whether it came from the world's `recipe.md` or from the built-in flow that starts a book
+/// in a world without one, so both paths get the band; a recipe that names its own `age`
+/// keeps it.
+fn with_default_age(script: String) -> String {
+	let front = script.split("\n+++").next().unwrap_or(&script);
+	let names_age = front.lines().skip(1).any(|line| {
+		line.trim()
+			.strip_prefix("age")
+			.is_some_and(|rest| rest.trim_start().starts_with('='))
+	});
+
+	if names_age {
+		return script;
+	}
+
+	match script.find("\n+++") {
+		Some(end) => {
+			format!(
+				"{}\nage = \"{NEW_BOOK_AGE}\"{}",
+				&script[..end],
+				&script[end..]
+			)
+		}
+		None => script,
+	}
+}
+
 /// Starts a book from the world's recipe, filled in with a title, a star and an author.
 fn new_story(
 	world: &World,
@@ -838,11 +884,13 @@ fn new_story(
 		+ std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
 			.map_or(0, |elapsed| elapsed.as_secs() / 31_556_952);
-	let script = recipe
-		.replace("{{title}}", title)
-		.replace("{{star}}", star)
-		.replace("{{author}}", author)
-		.replace("{{year}}", &year.to_string());
+	let script = with_default_age(
+		recipe
+			.replace("{{title}}", title)
+			.replace("{{star}}", star)
+			.replace("{{author}}", author)
+			.replace("{{year}}", &year.to_string()),
+	);
 
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
@@ -903,7 +951,12 @@ fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
 				report.puppet.as_deref().unwrap_or_default()
 			)
 		}
-		Some("template") => format!("drawn from the {} template", world.style),
+		Some("template") => {
+			format!(
+				"drawn from {}",
+				world.style()?.template_origin(brief.build.build())
+			)
+		}
 		_ => "drawn by the parametric puppet".to_owned(),
 	};
 	say!(
@@ -963,13 +1016,17 @@ fn style_describe(name: &str) -> Result<()> {
 
 	for body in &report.bodies {
 		say!(
-			"  {:<9} neck y={}, shoulder y={}, pelvis y={}",
+			"  {:<9} neck y={}, shoulder y={}, pelvis y={}; drawn from {} ({} parts)",
 			body.name,
 			body.neck_y,
 			body.shoulder_y,
-			body.pelvis_y
+			body.pelvis_y,
+			body.template,
+			body.template_parts
 		)?;
 	}
+
+	say!("  (`kind = \"grown-up\"` in the cast file puts a person on the grown-up body)")?;
 
 	say!("parts (name, views, need, home, space):")?;
 
@@ -1032,6 +1089,13 @@ fn check(story: &Story, cast: &Cast, notes: bool) -> Result<()> {
 		for note in &report.notes {
 			say!("  note: {note}")?;
 		}
+	}
+
+	if story.age.is_none() {
+		println!(
+			"· no `age` in the front matter, so the narrator keeps the older pace; add `age = \
+			 \"3-5\"` (or `under-3`, `5-7`) to pace the read-aloud."
+		);
 	}
 
 	Ok(())
@@ -1230,10 +1294,9 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 		None => {
 			cast.members
 				.values()
-				.filter(|member| {
-					matches!(&member.kind, fables::cast::Kind::Figure(look)
-						if look.puppet.as_ref().is_some_and(|puppet| !puppet.template))
-				})
+				.filter(
+					|member| matches!(&member.kind, fables::cast::Kind::Figure(look) if look.puppet.is_some()),
+				)
 				.map(|member| member.id.as_str())
 				.collect()
 		}
@@ -1253,12 +1316,14 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 				 drawing with `fables puppet template {id}`"
 			);
 		};
-		let findings = puppet.parts.check();
+		// The parts, and whether they join up on the character's own body, posed.
+		let mut findings = puppet.parts.check();
+		findings.extend(fables::art::puppet::joins(puppet, look.build));
 		let count = puppet.parts.iter().count();
 		let source = if puppet.template {
 			format!(
-				"the {} template (no part file of their own)",
-				puppet.style.name
+				"{} (no part file of their own)",
+				puppet.style.template_origin(look.build)
 			)
 		} else {
 			puppet.file.display().to_string()
@@ -1423,9 +1488,14 @@ fn style_check(name: &str) -> Result<()> {
 	let findings = pack.check();
 	let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
 	say!(
-		"{name}: {} kit parts, {} template parts, bodies: {}",
+		"{name}: {} kit parts, {} kid and {} grown-up template parts, bodies: {}",
 		pack.kit.iter().count(),
-		pack.template.iter().count(),
+		pack.template_for(fables::art::figure::Build::Kid)
+			.iter()
+			.count(),
+		pack.template_for(fables::art::figure::Build::Grownup)
+			.iter()
+			.count(),
 		bodies.join(", ")
 	)?;
 
@@ -1565,5 +1635,22 @@ mod tests {
 			error.contains("--author") && error.contains("world.toml"),
 			"{error}"
 		);
+	}
+
+	#[test]
+	fn a_new_book_starts_at_the_default_age() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("age = \"3-5\""), "{script}");
+		assert_eq!(script.matches("\nage").count(), 1, "{script}");
+	}
+
+	#[test]
+	fn a_recipe_that_names_its_own_age_keeps_it() {
+		let own = "+++\ntitle = \"T\"\nage = \"5-7\"\n+++\n\n# park\nHi.\n";
+		assert_eq!(with_default_age(own.to_owned()), own);
+		let tight = "+++\ntitle = \"T\"\nage=\"under-3\"\n+++\n";
+		assert_eq!(with_default_age(tight.to_owned()), tight);
 	}
 }
