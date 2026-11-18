@@ -36,7 +36,7 @@ worlds/kerfuffle/
   stories/        one folder per book, each with a story.md
 ```
 
-Commands find a script's world by walking up to the nearest `world.toml`. Commands without a script, such as `sheets`, `rig`, `new` and `puppet`, use the world above the current folder, or the only world in `./worlds/`. `--world <folder>` picks one explicitly, and a script can name its own with `world = "…"` in its front matter, relative to the script.
+Commands find a script's world by walking up to the nearest `world.toml`. Commands without a script, such as `sheets`, `rig`, `new` and `puppet`, use the world above the current folder, or the only world in `./worlds/`. `--world <folder>` picks one explicitly, and a script can name its own with `world = "…"` in its front matter: a path relative to the script, such as `world = "../.."`, never an absolute one. Every build prints the folder it resolved as `world: <folder>`.
 
 A world needs only a name to start:
 
@@ -157,7 +157,7 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `setting_list`, `setting_create` | A world's settings, built-in and its own; start one, blank or from a setting to repaint. |
 | `setting_parts`, `setting_set_parts`, `setting_render` | Read and redraw a setting's parts as SVG elements, and see it by day or night, wilted or not. |
 
-Worlds and characters are named by slugs, never paths, so the server only reads and writes under its root. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
+Worlds, books, settings and characters are named by slugs, never paths, so the server only reads and writes under its root: a name that is absolute or steps out with `..` is refused before any file is touched. A book written over MCP belongs to the world it is written into, so `story_write` refuses a script whose front matter names a `world`; at the command line, name one with `--world` or a relative `world =`. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
 
 ## Commands
 
@@ -198,7 +198,7 @@ Install with `cargo install --path .`, or use `cargo run --release --` in place 
 
 ## Writing a script
 
-A script is TOML front matter between `+++` lines, then pages. Each page starts with `# setting`. Below the heading, narration paragraphs and `@` stage directions interleave in reading order.
+A script is TOML front matter between `+++` lines, then pages. Each page starts with `# setting`. `title` and `author` are required, and the title needs at least one letter or digit: its slug names the output folder. Below the heading, narration paragraphs and `@` stage directions interleave in reading order.
 
 ```text
 +++
@@ -285,9 +285,10 @@ Teeth, stink and mint **carry over from page to page** until changed, so grotty 
 
 **Timing and sound** (video only):
 
-- `@pause 0.4` adds a beat of silence.
+- `@pause 0.4` adds a beat of silence, of at most 60 seconds.
 - `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`.
 - Fainting bonks, hops boing and entrances pop automatically.
+- A video runs at most 30 minutes (1800 seconds); a longer script is refused before any audio or frame is made.
 
 ### Guests
 
