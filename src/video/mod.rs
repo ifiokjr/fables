@@ -250,6 +250,11 @@ impl Clip<'_> {
 		render: impl Fn(usize) -> Result<Vec<u8>> + Sync,
 	) -> Result<()> {
 		let (width, height, frames) = (self.width, self.height, self.frames);
+		// Encoded under a working name and moved into place when whole, so `path` never holds
+		// a half-written file, or one two renders wrote at once.
+		let target = path;
+		let working = ffmpeg::partial(target);
+		let path = working.as_path();
 		let args = self.args(path);
 
 		ffmpeg::require(&args)?;
@@ -308,10 +313,12 @@ impl Clip<'_> {
 
 		let status = ffmpeg.wait().context("ffmpeg did not finish")?;
 		eprintln!();
+		let finished = rendered.is_ok() && status.success();
+		ffmpeg::settle(path, target, finished)?;
 		rendered?;
 
 		if !status.success() {
-			bail!("ffmpeg failed while encoding {}", path.display());
+			bail!("ffmpeg failed while encoding {}", target.display());
 		}
 
 		Ok(())
@@ -397,6 +404,7 @@ pub fn animatic(
 	let scratch = Scratch::new()?;
 	let soundtrack = dir.join("soundtrack.wav");
 	let path = dir.join(format!("{}-animatic.mp4", story.slug));
+	let working = ffmpeg::partial(&path);
 	let args = animatic_args(
 		story,
 		cast,
@@ -404,7 +412,7 @@ pub fn animatic(
 		format,
 		&soundtrack,
 		&scratch.path,
-		&path,
+		&working,
 	)?;
 
 	ffmpeg::require(&args)?;
@@ -417,6 +425,7 @@ pub fn animatic(
 		.status()
 		.context("could not run ffmpeg; install it to make videos")?;
 
+	ffmpeg::settle(&working, &path, status.success())?;
 	anyhow::ensure!(
 		status.success(),
 		"ffmpeg failed while writing {}",
