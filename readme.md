@@ -63,13 +63,17 @@ A drawing style is a folder in `styles/` that authored puppets are drawn with, s
 styles/cartoon/
   style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, and the bodies (kid, grown-up)
   kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
-  template.svg    a plain character's own parts, which `fables puppet template` starts new characters from
+  template.svg    a plain kid's own parts, which `fables puppet template` starts new kids from
+  template-grown-up.svg
+                  a plain grown-up's own parts, drawn for the grown-up body: grown-ups start from these
 ```
+
+Every style has two bodies, `kid` and `grown-up`, and a template for each, so a grown-up is drawn with the style's adult proportions instead of a kid's torso, sleeves and legwear stretched over a taller skeleton.
 
 | Command | What it does |
 | --- | --- |
 | `fables style list` | The drawing styles, with a sentence on each look. |
-| `fables style check <name>` | Checks the template over the kit draws a whole figure, and every body stands up. |
+| `fables style check <name>` | Checks each body's template over the kit draws a whole figure whose parts join, and every body stands up. Joins are measured standing, cheering and sitting, front-on and three-quarters: the head or its neck must touch the torso, each arm must start inside the torso or its sleeve, each leg inside the torso or the legwear, and a sleeve or trouser leg drawn in two pieces must meet at the elbow or knee. |
 | `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet) and `<name>-parts.png` (every kit and template part). |
 
 | Style | Look |
@@ -329,6 +333,8 @@ style = "A friendly, slightly mumbly six-year-old boy."
 ```
 
 Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book.
+
+A person is `kind = "kid"` (the default) or `kind = "grown-up"`, and the kind picks the body they stand on. A person can also be drawn from an authored puppet in the world's drawing style (see [Drawing styles](#drawing-styles)): add `puppet = "puppets/<id>.svg"` to their table and run `fables puppet template <id>`, which writes that file from the style's template for their body. A grown-up starts from the grown-up template, already cut for adult proportions, so redraw its parts rather than a kid's. `fables puppet check <id>` fails a figure whose parts come apart on its body, naming the part, the gap and the pose.
 
 ## Art styles and the rig
 
