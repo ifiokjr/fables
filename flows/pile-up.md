@@ -94,7 +94,7 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 # street day shot=wide
 @{{star}} x=0.10 grin
 @{{friend}} x=0.34 grin
-@bird.a x=0.22 y=0.62 z=3 size=0.85 enter=right happy
+@bird.a x=0.22 z=3 size=0.85 enter=right happy
 @camera move=push over=3
 // 25–40 words: the next link enters from the right and the chain repeats.
 [The next link enters from the right.]
@@ -102,7 +102,7 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 # street day shot=wide
 @{{star}} x=0.10 grin
 @{{friend}} x=0.34 grin
-@bird.a x=0.22 y=0.62 z=3 size=0.85 happy
+@bird.a x=0.22 z=3 size=0.85 happy
 @dog x=0.60 enter=right wag
 @camera move=push over=3
 // 30–45 words: the dog joins, and the whole chain repeats again.
@@ -111,9 +111,9 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 # street day shot=wide
 @{{star}} x=0.10 grin size=0.9
 @{{friend}} x=0.34 grin size=0.9
-@bird.a x=0.22 y=0.62 z=3 size=0.8 happy
+@bird.a x=0.22 z=3 size=0.8 happy
 @dog x=0.60 wag size=0.9
-@bird.b x=0.47 y=0.58 z=3 size=0.8 enter=right happy
+@bird.b x=0.47 z=3 size=0.8 enter=right happy
 @camera move=push over=3
 // 30–45 words: one more from the right; the chain is getting long now.
 [One more from the right.]
@@ -121,10 +121,10 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 # street day shot=wide
 @{{star}} x=0.10 grin size=0.9
 @{{friend}} x=0.34 grin size=0.9
-@bird.a x=0.22 y=0.62 z=3 size=0.8 happy
+@bird.a x=0.22 z=3 size=0.8 happy
 @dog x=0.60 wag size=0.9
-@bird.b x=0.47 y=0.58 z=3 size=0.8 happy
-@worm x=0.73 y=0.66 z=4 size=0.7 enter=right happy
+@bird.b x=0.47 z=3 size=0.8 happy
+@worm x=0.73 z=4 size=0.7 enter=right happy
 @camera move=push over=3
 // 30–45 words: the smallest link gets the biggest entrance.
 [The smallest link joins.]
@@ -132,10 +132,10 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 # street day shot=wide
 @{{star}} x=0.10 grin size=0.9
 @{{friend}} x=0.34 grin size=0.9
-@bird.a x=0.22 y=0.62 z=3 size=0.8 happy
+@bird.a x=0.22 z=3 size=0.8 happy
 @dog x=0.60 wag size=0.9
-@bird.b x=0.47 y=0.58 z=3 size=0.8 happy
-@worm x=0.73 y=0.66 z=4 size=0.7 happy
+@bird.b x=0.47 z=3 size=0.8 happy
+@worm x=0.73 z=4 size=0.7 happy
 @flower.1 x=0.86 enter=right happy size=0.95
 @camera move=push over=3
 // 30–45 words: the last link, and the whole street singing at once.
@@ -146,16 +146,16 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 // the bang, and the close after the shout catches the star's face.
 # street storm impact=1 shot=wide
 @camera shake=0.6
-@{{star}} x=0.10 shocked size=0.9
-@{{friend}} x=0.34 shocked size=0.9
-@bird.a x=0.22 y=0.62 z=3 size=0.8 shocked
-@dog x=0.60 shocked size=0.9
-@bird.b x=0.47 y=0.58 z=3 size=0.8 shocked
-@worm x=0.73 y=0.66 z=4 size=0.7 shocked
-@flower.1 x=0.86 shocked size=0.95
 @hold 0.8
 @music none
 @sfx bonk
+@{{star}} x=0.10 shocked size=0.9
+@{{friend}} x=0.34 shocked size=0.9
+@bird.a x=0.22 z=3 size=0.8 shocked
+@dog x=0.60 shocked size=0.9
+@bird.b x=0.47 z=3 size=0.8 shocked
+@worm x=0.73 z=4 size=0.7 shocked
+@flower.1 x=0.86 shocked size=0.95
 // 3–8 words: the bang, and nothing else.
 **SHOUT!**
 @camera shot=close on={{star}}
@@ -165,7 +165,7 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 # street overcast shot=full
 @{{star}} x=0.30 laugh
 @{{friend}} x=0.48 laugh
-@bird.a x=0.16 y=0.62 z=3 size=0.8 laugh
+@bird.a x=0.16 z=3 size=0.8 laugh
 @dog x=0.68 wag
 @flower.1 x=0.88 sleepy
 // 10–20 words: the hush, the heap, then the laugh.
@@ -176,6 +176,6 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 # street day shot=wide
 @{{star}} x=0.10 proud
 @{{friend}} x=0.34 happy
-@bird.c x=0.86 y=0.62 z=3 size=0.85 enter=right happy
+@bird.c x=0.86 z=3 size=0.85 enter=right happy
 // 10–15 words: the quiet again, and one new arrival at the edge.
 [Quiet again. Then, at the edge, somebody new.]
