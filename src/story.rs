@@ -825,7 +825,8 @@ fn parse_pages(body: &str, first_line: usize) -> Result<Vec<Page>> {
 			let page = pages.last_mut().with_context(|| {
 				format!("line {line_no}: stage direction before the first `# setting` heading")
 			})?;
-			page.beats.push(parse_direction(direction, line_no)?);
+			page.beats
+				.push(parse_direction(without_comment(direction), line_no)?);
 			continue;
 		}
 
@@ -879,6 +880,13 @@ fn parse_heading(heading: &str, line: usize) -> Result<Page> {
 		beats: Vec::new(),
 		line,
 	})
+}
+
+/// A stage direction may end with a `// note`, which is ignored (`@camera shot=wide // pinned`).
+fn without_comment(direction: &str) -> &str {
+	direction
+		.find(" //")
+		.map_or(direction, |at| &direction[..at])
 }
 
 fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
@@ -1229,6 +1237,20 @@ Hello.
 			]
 		);
 		assert_eq!(plain_text("**Hi** *there*"), "Hi there");
+	}
+
+	#[test]
+	fn a_direction_may_end_with_a_comment() {
+		let story = parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@camera shot=wide // pinned\nHi.\n",
+		)
+		.unwrap();
+		let Beat::Direct(directive) = &story.pages[0].beats[0] else {
+			panic!("a camera direction");
+		};
+		assert_eq!(directive.actor, "camera");
+		assert_eq!(directive.tokens.len(), 1, "{:?}", directive.tokens);
+		assert_eq!(directive.tokens[0].to_string(), "shot=wide");
 	}
 
 	#[test]

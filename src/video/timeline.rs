@@ -23,6 +23,7 @@ use crate::book;
 use crate::cast::Cast;
 use crate::cast::Kind;
 use crate::stage::Ambience;
+use crate::stage::Camera;
 use crate::stage::Rehearsal;
 use crate::stage::Scene;
 use crate::stage::ShotSize;
@@ -83,6 +84,12 @@ pub struct AmbienceCue {
 pub struct Key {
 	pub time: f32,
 	pub scene: Scene,
+	/// The script line of the direction that made this state, or the heading's line for the
+	/// state a page opens on. Zero for the title and end cards.
+	pub line: usize,
+	/// Seconds after the page opens at which this camera direction lands; `None` lands where
+	/// it is written.
+	pub after: Option<f32>,
 }
 
 /// A spoken line: a whole narrated paragraph, or one quote or tag from it.
@@ -99,6 +106,8 @@ pub struct Line {
 	pub text: String,
 	/// The character voicing the line, or `None` for the narrator.
 	pub voiced_by: Option<String>,
+	/// The script line the paragraph starts on (zero for the cards).
+	pub line: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +189,27 @@ pub enum Framing {
 	Shot { size: ShotSize, on: Vec<String> },
 }
 
+/// Where a camera setup came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+	/// Written as an `@camera` direction in the script.
+	Script,
+	/// Chosen by the automatic director.
+	Director,
+	/// The title or end card, which no script page starts.
+	Card,
+}
+
+impl Origin {
+	pub fn name(self) -> &'static str {
+		match self {
+			Origin::Script => "script",
+			Origin::Director => "director",
+			Origin::Card => "card",
+		}
+	}
+}
+
 /// One camera setup: a framing the camera holds or moves to, starting at `time`.
 #[derive(Clone, Debug)]
 pub struct Setup {
@@ -194,6 +224,10 @@ pub struct Setup {
 	pub over: f32,
 	/// A decaying shake that starts with the setup (0 = none).
 	pub shake: f32,
+	/// The script line of the direction or line that starts the setup; zero for a card.
+	pub line: usize,
+	/// Whether the script wrote this setup or the director chose it.
+	pub origin: Origin,
 }
 
 /// A sound effect at a moment in the video.
@@ -571,7 +605,12 @@ impl<S: Speaker> Builder<'_, S> {
 			kind: ShotKind::Title,
 			start,
 			end,
-			keys: vec![Key { time: start, scene }],
+			keys: vec![Key {
+				time: start,
+				scene,
+				line: 0,
+				after: None,
+			}],
 			lines: vec![Line {
 				start: line_start,
 				speech,
@@ -579,6 +618,7 @@ impl<S: Speaker> Builder<'_, S> {
 				speakers,
 				text: String::new(),
 				voiced_by: None,
+				line: 0,
 			}],
 			transition: Transition::Cut,
 			setups: Vec::new(),
@@ -606,7 +646,12 @@ impl<S: Speaker> Builder<'_, S> {
 			kind: ShotKind::End,
 			start,
 			end,
-			keys: vec![Key { time: start, scene }],
+			keys: vec![Key {
+				time: start,
+				scene,
+				line: 0,
+				after: None,
+			}],
 			lines: vec![Line {
 				start: line_start,
 				speech,
@@ -614,6 +659,7 @@ impl<S: Speaker> Builder<'_, S> {
 				speakers: Vec::new(),
 				text: moral.to_owned(),
 				voiced_by: None,
+				line: 0,
 			}],
 			transition: self.story.meta.video.transition.unwrap_or_default(),
 			setups: Vec::new(),
@@ -628,6 +674,8 @@ impl<S: Speaker> Builder<'_, S> {
 		let mut keys = vec![Key {
 			time: start,
 			scene: rehearsal.opening.clone(),
+			line: page.line,
+			after: None,
 		}];
 		let mut lines = Vec::new();
 		// A reveal holds the page for the script's `hold=`, and a page in a new place is seen
@@ -652,6 +700,9 @@ impl<S: Speaker> Builder<'_, S> {
 
 		let mut t = start + lead;
 		let mut opening = true;
+		let mut pending: Vec<Pending> = Vec::new();
+		let mut camera = keys[0].scene.camera.clone();
+		camera.after = None;
 		// An action's sound lands on its contact frame plus three frames, not before it. A book
 		// without an age keeps the timing every earlier video was rendered with.
 		let (action, fall) = if self.story.age.is_some() {
@@ -661,40 +712,99 @@ impl<S: Speaker> Builder<'_, S> {
 		};
 
 		for (beat, scene) in page.beats.iter().zip(&rehearsal.after) {
+			// A camera change written with `after=` lands later than its line. Land it once
+			// the page's clock reaches it, in time order, so a key never jumps backwards over
+			// an action that happens first.
+			land(&mut keys, &mut pending, start, t, &mut camera);
+
 			match beat {
-				Beat::Direct(_) if opening => {
-					// Directions before the first line set the scene the page opens on.
+				Beat::Direct(directive)
+					if opening
+						&& !(directive.actor == "camera"
+							&& scene.camera.after.is_some_and(|after| after > 0.0)) =>
+				{
+					// Directions before the first line set the scene the page opens on. A camera
+					// direction with `after=` lands later by its own clock, even here.
 					keys[0].scene = scene.clone();
+					keys[0].scene.camera.after = None;
+
+					if directive.actor == "camera" {
+						keys[0].after = scene.camera.after;
+					}
+
+					camera = keys[0].scene.camera.clone();
+					camera.after = None;
 				}
-				Beat::Direct(_) => {
-					if let Some(previous) = keys.last() {
+				Beat::Direct(directive) => {
+					let after = if directive.actor == "camera" {
+						scene.camera.after
+					} else {
+						None
+					};
+					let at = after.map_or(t, |after| (start + after).max(t));
+
+					if directive.actor == "camera" && at > t + 1e-3 {
+						let mut held = scene.clone();
+						held.camera = camera.clone();
+						held.apply_camera(directive)?;
+						held.camera.after = None;
+
+						pending.push(Pending {
+							at,
+							line: directive.line,
+							camera: held.camera,
+						});
+						continue;
+					}
+
+					// A camera direction moves no one, so it never makes a sound of its own.
+					if directive.actor != "camera"
+						&& let Some(previous) = keys.last()
+					{
 						auto_cues(
 							&previous.scene,
 							scene,
-							t,
+							at,
 							action,
 							fall,
 							&mut self.timeline.cues,
 						);
 					}
 
-					match keys.last_mut() {
-						Some(last) if (last.time - t).abs() < 1e-3 => last.scene = scene.clone(),
-						_ => {
-							keys.push(Key {
-								time: t,
-								scene: scene.clone(),
-							});
-						}
+					// A stage direction does not move the camera: only the camera that has
+					// actually landed carries, and a move, its length and a shake were
+					// written for the camera's own line. A camera direction builds on that
+					// camera and applies only its own tokens.
+					let mut state = scene.clone();
+					state.camera = camera.clone();
+
+					if directive.actor == "camera" {
+						state.apply_camera(directive)?;
+						state.camera.after = None;
+						camera = state.camera.clone();
+					} else {
+						state.camera.travel = None;
+						state.camera.over = 0.0;
+						state.camera.shake = 0.0;
 					}
+
+					push(
+						&mut keys,
+						at,
+						state,
+						directive.line,
+						after,
+						start,
+						directive.actor == "camera",
+					);
 				}
 				Beat::Say {
 					medium: Medium::BookOnly,
 					..
 				} => {}
-				Beat::Say { text, .. } => {
+				Beat::Say { text, line, .. } => {
 					opening = false;
-					t = self.paragraph(text, scene, t, &mut lines)?;
+					t = self.paragraph(text, *line, scene, t, &mut lines)?;
 				}
 				Beat::Pause { seconds, .. } => {
 					opening = false;
@@ -726,6 +836,8 @@ impl<S: Speaker> Builder<'_, S> {
 			}
 		}
 
+		land(&mut keys, &mut pending, start, f32::INFINITY, &mut camera);
+
 		let end = (t - self.pacing.gap + self.pacing.tail).max(start + lead + self.pacing.tail);
 
 		self.timeline.shots.push(Shot {
@@ -748,6 +860,7 @@ impl<S: Speaker> Builder<'_, S> {
 	fn paragraph(
 		&mut self,
 		text: &str,
+		script_line: usize,
 		scene: &Scene,
 		mut t: f32,
 		lines: &mut Vec<Line>,
@@ -782,6 +895,7 @@ impl<S: Speaker> Builder<'_, S> {
 						speakers: vec![actor.id.clone()],
 						text: format!("\u{201c}{part}\u{201d}"),
 						voiced_by: Some(actor.id.clone()),
+						line: script_line,
 					};
 					t += duration + self.pacing.beat;
 					line
@@ -799,6 +913,7 @@ impl<S: Speaker> Builder<'_, S> {
 						speakers: Vec::new(),
 						text: part,
 						voiced_by: None,
+						line: script_line,
 					};
 					t += duration + self.pacing.beat;
 					line
@@ -819,9 +934,98 @@ impl<S: Speaker> Builder<'_, S> {
 			speakers: talking.iter().map(|actor| actor.id.clone()).collect(),
 			text: text.to_owned(),
 			voiced_by: None,
+			line: script_line,
 		});
 
 		Ok(t + duration + self.pacing.gap)
+	}
+}
+
+/// A camera change written with `after=`, waiting for its moment on the page's clock.
+struct Pending {
+	/// When it lands, in seconds from the start of the video.
+	at: f32,
+	/// The script line that wrote it.
+	line: usize,
+	/// The camera it changes to.
+	camera: Camera,
+}
+
+/// Lands every pending camera change due by `until`, earliest first. A landing takes the scene
+/// the page has reached by then, so it never wipes an action it lands after.
+fn land(
+	keys: &mut Vec<Key>,
+	pending: &mut Vec<Pending>,
+	start: f32,
+	until: f32,
+	camera: &mut Camera,
+) {
+	while let Some(index) = pending
+		.iter()
+		.enumerate()
+		.filter(|(_, change)| change.at <= until + 1e-3)
+		.min_by(|(_, a), (_, b)| a.at.total_cmp(&b.at))
+		.map(|(index, _)| index)
+	{
+		let change = pending.remove(index);
+		let mut scene = keys
+			.iter()
+			.rev()
+			.find(|key| key.time <= change.at + 1e-3)
+			.map_or_else(|| keys[0].scene.clone(), |key| key.scene.clone());
+		scene.camera = change.camera;
+		scene.camera.after = None;
+		*camera = scene.camera.clone();
+
+		push(
+			keys,
+			change.at,
+			scene,
+			change.line,
+			Some(change.at - start),
+			start,
+			true,
+		);
+	}
+}
+
+/// Adds a key, or rewrites the one already at `at`: a camera change and an action at one
+/// moment are one state. The action brings the stage, the camera direction brings the camera,
+/// and a change that waits carries `after` to name its exact time.
+fn push(
+	keys: &mut Vec<Key>,
+	at: f32,
+	scene: Scene,
+	line: usize,
+	after: Option<f32>,
+	start: f32,
+	camera: bool,
+) {
+	// Only a landing that waits names its own time; `after=0` or an inherited value is
+	// already where the key sits.
+	let after = after.filter(|after| *after > 1e-3 && (start + after - at).abs() < 1e-3);
+
+	match keys.last_mut() {
+		Some(last) if (last.time - at).abs() < 1e-3 => {
+			if camera {
+				last.scene = scene;
+				last.after = after.or(last.after);
+			} else {
+				// The action landed on a camera change: keep the framing and the move, take
+				// the action's stage.
+				let framing = last.scene.camera.clone();
+				last.scene = scene;
+				last.scene.camera = framing;
+			}
+		}
+		_ => {
+			keys.push(Key {
+				time: at,
+				scene,
+				line,
+				after,
+			});
+		}
 	}
 }
 
@@ -1189,6 +1393,26 @@ mod tests {
 		}
 
 		assert!((tl.duration - tl.shots.last().unwrap().end).abs() < 1e-4);
+	}
+
+	#[test]
+	fn a_camera_direction_can_land_inside_a_hold() {
+		let tl = timeline(
+			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@camera shot=close on=kid \
+			 after=4\nWhy hello to you too.\n",
+		);
+		let shot = &tl.shots[1];
+		let late = shot
+			.keys
+			.iter()
+			.find(|key| key.scene.camera.shot == Some(ShotSize::Close))
+			.expect("the late close-up is a key");
+
+		assert!(
+			(late.time - (shot.start + 4.0)).abs() < 1e-3,
+			"the direction lands 4s after the page opens, not at {:.2}s",
+			late.time
+		);
 	}
 
 	#[test]

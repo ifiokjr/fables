@@ -35,8 +35,10 @@ use crate::story::Direction;
 use crate::story::Story;
 use crate::story::TextPlace;
 use crate::video::timeline::Framing;
+use crate::video::timeline::Origin;
 use crate::video::timeline::Setup;
 use crate::video::timeline::Shot;
+use crate::video::timeline::ShotKind;
 
 /// How long the camera takes to reframe when it glides.
 pub(crate) const CAMERA_EASE: f32 = 0.9;
@@ -577,6 +579,14 @@ pub fn direct(story: &Story, shot: &mut Shot, explicit: bool) -> Result<()> {
 		}
 	}
 
+	// The cards belong to no page and no script line.
+	if matches!(shot.kind, ShotKind::Title | ShotKind::End) {
+		for setup in shot.setups.iter_mut().chain(&mut shot.portrait_setups) {
+			setup.origin = Origin::Card;
+			setup.line = 0;
+		}
+	}
+
 	Ok(())
 }
 
@@ -608,15 +618,34 @@ fn locked(shot: &Shot) -> Vec<Setup> {
 				travel: Travel::Glide,
 				over: CAMERA_EASE,
 				shake: 0.0,
+				line: beat_line(shot, anchor),
+				origin: Origin::Director,
 			}
 		})
 		.collect()
+}
+
+/// The script line a moment comes from: a key's direction, else a paragraph's first line.
+fn beat_line(shot: &Shot, at: f32) -> usize {
+	shot.keys
+		.iter()
+		.find(|key| (key.time - at).abs() < 0.05)
+		.map(|key| key.line)
+		.or_else(|| {
+			shot.lines
+				.iter()
+				.find(|line| (line.start - at).abs() < 0.05)
+				.map(|line| line.line)
+		})
+		.unwrap_or(0)
 }
 
 /// What happens in a shot, in order: lines spoken, and stage changes worth reframing.
 #[derive(Clone, Debug)]
 struct Event {
 	at: f32,
+	/// The script line the event happens on.
+	line: usize,
 	kind: EventKind,
 }
 
@@ -659,6 +688,7 @@ fn events(shot: &Shot) -> Vec<Event> {
 			if (enters || leaves || faints || hops || walks) && !(enters && speaking) {
 				out.push(Event {
 					at,
+					line: pair[1].line,
 					kind: EventKind::Action,
 				});
 			} else if previous.is_some_and(|other| other.mood != actor.mood)
@@ -667,6 +697,7 @@ fn events(shot: &Shot) -> Vec<Event> {
 			{
 				out.push(Event {
 					at,
+					line: pair[1].line,
 					kind: EventKind::Reaction {
 						actor: actor.id.clone(),
 					},
@@ -678,6 +709,7 @@ fn events(shot: &Shot) -> Vec<Event> {
 	for line in &shot.lines {
 		out.push(Event {
 			at: line.start,
+			line: line.line,
 			kind: EventKind::Speech {
 				duration: line.duration,
 				speaker: line.speakers.first().cloned(),
@@ -721,6 +753,8 @@ fn plan(shot: &Shot, events: &[Event], portrait: bool, explicit: bool) -> Result
 		travel: Travel::Cut,
 		over: 0.0,
 		shake: 0.0,
+		line: shot.keys.first().map_or(0, |key| key.line),
+		origin: Origin::Director,
 	}];
 	// The establishing shot reads for at least 1.5 seconds, then one cut per 1.2 at most.
 	let mut floor = shot.start + ESTABLISH;
@@ -747,6 +781,8 @@ fn plan(shot: &Shot, events: &[Event], portrait: bool, explicit: bool) -> Result
 			travel: Travel::Cut,
 			over: 0.0,
 			shake: 0.0,
+			line: event.line,
+			origin: Origin::Director,
 		});
 		floor = at + MIN_CUT_GAP;
 	}
@@ -824,7 +860,7 @@ fn other_of(shot: &Shot, speaker: &str, at: f32) -> Option<String> {
 
 /// Where a cut may land: never just after a line begins (it moves to just before the line
 /// instead), never sooner than `floor`, never at the very end of a shot.
-fn place_cut(at: f32, shot: &Shot, floor: f32) -> Option<f32> {
+pub(crate) fn place_cut(at: f32, shot: &Shot, floor: f32) -> Option<f32> {
 	let mut t = at.max(floor);
 
 	if let Some(line) = shot
@@ -855,6 +891,7 @@ fn slow_pushes(setups: &mut Vec<Setup>, shot: &Shot) {
 		if hold_until - setups[index].time > LONG_HOLD && !setups[index].travel.is_move() {
 			let time = (setups[index].time + LONG_HOLD).min(hold_until - MIN_SHOT);
 			let framing = setups[index].framing.clone();
+			let line = setups[index].line;
 			setups.insert(
 				index + 1,
 				Setup {
@@ -864,6 +901,8 @@ fn slow_pushes(setups: &mut Vec<Setup>, shot: &Shot) {
 					travel: Travel::Push,
 					over: 0.0,
 					shake: 0.0,
+					line,
+					origin: Origin::Director,
 				},
 			);
 			index += 2;
@@ -959,12 +998,16 @@ fn written(shot: &Shot) -> Result<Vec<Setup>> {
 				_ => (key.time.max(shot.start), camera.over),
 			};
 			setups.push(Setup {
-				time,
+				time: key
+					.after
+					.map_or(time, |after| (shot.start + after).max(shot.start)),
 				anchor: key.time,
 				framing: framing_of(camera).unwrap_or(Framing::Auto),
 				travel,
 				over,
 				shake: camera.shake,
+				line: key.line,
+				origin: Origin::Script,
 			});
 			continue;
 		}
@@ -1009,12 +1052,16 @@ fn written(shot: &Shot) -> Result<Vec<Setup>> {
 		};
 
 		setups.push(Setup {
-			time,
+			time: key
+				.after
+				.map_or(time, |after| (shot.start + after).max(shot.start)),
 			anchor: key.time,
 			framing,
 			travel,
 			over,
 			shake: camera.shake,
+			line: key.line,
+			origin: Origin::Script,
 		});
 	}
 
@@ -1026,6 +1073,8 @@ fn written(shot: &Shot) -> Result<Vec<Setup>> {
 			travel: Travel::Glide,
 			over: CAMERA_EASE,
 			shake: 0.0,
+			line: shot.keys.first().map_or(0, |key| key.line),
+			origin: Origin::Script,
 		});
 	}
 

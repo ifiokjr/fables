@@ -27,6 +27,7 @@ use std::ops::Mul;
 use std::ops::Sub;
 
 pub use light::Light;
+pub use light::Plane;
 pub use palette::Color;
 use shape::Shape;
 use style::Shading;
@@ -483,6 +484,9 @@ pub struct Svg {
 	/// The scene's light while scene art is drawn; `None` for page furniture and for flat
 	/// daylight, which grades nothing.
 	pub light: Option<Light>,
+	/// What is being painted, which decides how much of the light it takes: the setting by
+	/// default, a figure while an actor is drawn (see [`Svg::set_plane`]).
+	plane: Plane,
 	/// How each open group's units map to the document's, innermost last, so an offset can be
 	/// kept the same on the page however a part is turned.
 	frames: Vec<Linear>,
@@ -693,6 +697,7 @@ impl Svg {
 			style,
 			brush: Brush::default(),
 			light: None,
+			plane: Plane::Ground(0.0),
 			frames: Vec::new(),
 			measuring: false,
 			measure: Vec::new(),
@@ -711,10 +716,25 @@ impl Svg {
 		self.light = None;
 	}
 
-	/// A colour through the scene light's grade, if one is active.
+	/// Paints what follows as `plane` (an actor as a figure, a setting part at its depth) and
+	/// returns the plane it replaces, to put back with another call.
+	pub fn set_plane(&mut self, plane: Plane) -> Plane {
+		std::mem::replace(&mut self.plane, plane)
+	}
+
+	/// A colour through the scene light's grade for the plane being painted, if a light is
+	/// active.
 	#[must_use]
 	pub fn graded(&self, colour: Color) -> Color {
-		self.light.map_or(colour, |light| light.grade(colour))
+		self.light
+			.map_or(colour, |light| light.grade(colour, self.plane))
+	}
+
+	/// A pool of light's colour (a lamp's glow) under the scene light, if one is active: it
+	/// takes the light's colour but keeps its own brightness.
+	#[must_use]
+	pub fn glowing(&self, colour: Color) -> Color {
+		self.light.map_or(colour, |light| light.glow(colour))
 	}
 
 	/// Picks up `brush` for what's drawn from here on, measuring its register offset in the
@@ -925,11 +945,13 @@ impl Svg {
 
 	/// A line drawn once, or several times with a little drift for pencil and crayon.
 	fn sketchy(&mut self, path: &Path, color: Color, width: f32, opacity: f32) {
-		let color = self.graded(color);
 		let Some((passes, drift)) = self.style.sketch else {
+			// The plain stroke grades its own colour.
 			self.plain_stroke(path, color, width, opacity);
 			return;
 		};
+
+		let color = self.graded(color);
 
 		self.note(path, Pt::default(), width / 2.0 + drift);
 
@@ -1073,13 +1095,16 @@ impl Svg {
 		}
 
 		// A light rim along the lit edge: styles that ask for one always, and every shaded
-		// style under lights that cast one (golden, dusk, moonlit, candle).
+		// style under lights that cast one (golden, dusk, moonlit, candle). Under a light the
+		// rim is the part's own colour lit by the glow, so it never washes the part grey.
 		if self.brush.highlight == dials::Highlight::Rim || self.light.is_some_and(|s| s.rim) {
 			let path = shape.path();
 			let rim = Path::new()
 				.append(&path)
 				.append(&shape.shift(light * -0.55).path());
-			let colour = self.light.map_or(palette::WHITE, |scene| scene.glow_colour);
+			let colour = self.light.map_or(palette::WHITE, |scene| {
+				scene.rim_on(self.brush.last_fill.unwrap_or(scene.glow_colour))
+			});
 			self.begin_clip(&path);
 			let _ = write!(
 				self.body,
@@ -1092,10 +1117,14 @@ impl Svg {
 	}
 
 	/// One band of cel shadow: the shape minus itself moved towards the light, multiplied.
+	/// The paint it multiplies is graded already, so the tone takes the light's shade (see
+	/// [`Light::shade`]) rather than its grade.
 	fn shadow_band(&mut self, shape: &Shape, light: Pt, shadow: Color) {
 		let path = shape.path();
 		self.note(&path, Pt::default(), 0.0);
-		let shadow = self.graded(shadow);
+		let shadow = self
+			.light
+			.map_or(shadow, |scene| scene.shade(shadow, self.plane));
 		let lit = Path::new().append(&path).append(&shape.shift(light).path());
 		let id = self.next_id("cel");
 		let _ = write!(
@@ -1504,7 +1533,7 @@ mod tests {
 		);
 		let golden = Light::of(light::Preset::Golden);
 
-		// Under golden, every shaded style catches a rim in the light's glow colour.
+		// Under golden, every shaded style catches a rim: its own colour, lit by the glow.
 		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
 		svg.set_light(golden);
 		svg.brushed_shaded(
@@ -1516,8 +1545,9 @@ mod tests {
 			4.0,
 		);
 		assert!(
-			svg.body.contains(&golden.glow_colour.to_string()),
-			"the rim is the glow colour: {}",
+			svg.body
+				.contains(&golden.rim_on(Color(0xFF_FF_FF)).to_string()),
+			"the rim is the white part lit by the glow: {}",
 			svg.body
 		);
 
@@ -1551,36 +1581,82 @@ mod tests {
 
 		let mut svg = Svg::styled(Style::named(style::StyleName::Riso));
 		svg.set_light(dusk);
+		svg.set_plane(Plane::Figure);
 		svg.shaded(&square.path(), base, shade, pt(-20.0, -20.0), 60.0, 4.0);
 		let riso = svg.finish((0.0, 0.0, 100.0, 100.0), 64, 64);
 		assert!(
-			riso.contains(&format!("fill=\"{}\"", dusk.grade(shade))),
+			riso.contains(&format!("fill=\"{}\"", dusk.grade(shade, Plane::Figure))),
 			"the crescent is graded once: {riso}"
 		);
 		assert!(
-			riso.contains(&format!("fill=\"{}\"", dusk.grade(base))),
+			riso.contains(&format!("fill=\"{}\"", dusk.grade(base, Plane::Figure))),
 			"the lit side is graded once: {riso}"
 		);
 		assert!(
-			!riso.contains(&dusk.grade(dusk.grade(base)).to_string()),
+			!riso.contains(
+				&dusk
+					.grade(dusk.grade(base, Plane::Figure), Plane::Figure)
+					.to_string()
+			),
 			"the base is never graded twice: {riso}"
 		);
 
 		let mut svg = Svg::styled(Style::named(style::StyleName::Tv));
 		svg.set_light(dusk);
+		svg.set_plane(Plane::Figure);
 		svg.shaded(&square.path(), base, shade, pt(-20.0, -20.0), 60.0, 4.0);
 		let tv = svg.finish((0.0, 0.0, 100.0, 100.0), 64, 64);
 		assert!(
-			tv.contains(&format!("stop-color=\"{}\"", dusk.grade(base))),
+			tv.contains(&format!(
+				"stop-color=\"{}\"",
+				dusk.grade(base, Plane::Figure)
+			)),
 			"the gradient's base stop is graded once: {tv}"
 		);
 		assert!(
-			tv.contains(&format!("stop-color=\"{}\"", dusk.grade(shade))),
+			tv.contains(&format!(
+				"stop-color=\"{}\"",
+				dusk.grade(shade, Plane::Figure)
+			)),
 			"the gradient's shade stop is graded once: {tv}"
 		);
 		assert!(
-			!tv.contains(&dusk.grade(dusk.grade(base)).to_string()),
+			!tv.contains(
+				&dusk
+					.grade(dusk.grade(base, Plane::Figure), Plane::Figure)
+					.to_string()
+			),
 			"the base is never graded twice: {tv}"
+		);
+	}
+
+	/// An ink outline in a style with a single plain line is graded once too: drawn twice
+	/// through the grade, ink drifted towards the light's colour.
+	#[test]
+	fn an_outline_is_graded_exactly_once() {
+		let golden = Light::of(light::Preset::Golden);
+		let style = Style::named(style::StyleName::Clear);
+		assert!(
+			style.sketch.is_none() && style.outline > 0.0,
+			"the clear skin draws one plain line"
+		);
+
+		let mut svg = Svg::styled(style);
+		svg.set_light(golden);
+		svg.inked(&Path::rect(10.0, 10.0, 80.0, 80.0), palette::SKY);
+		let ink = style.ink;
+		let once = golden.grade(ink, Plane::Ground(0.0));
+		let twice = golden.grade(once, Plane::Ground(0.0));
+		assert_ne!(once, twice, "the test needs a grade that shows twice");
+		assert!(
+			svg.body.contains(&format!("stroke=\"{once}\"")),
+			"the outline is graded once: {}",
+			svg.body
+		);
+		assert!(
+			!svg.body.contains(&format!("stroke=\"{twice}\"")),
+			"the outline is not graded twice: {}",
+			svg.body
 		);
 	}
 

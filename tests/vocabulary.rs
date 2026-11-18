@@ -248,3 +248,30 @@ fn every_documented_stage_direction_word_key_and_value_parses() {
 		);
 	}
 }
+
+/// The comment row's examples: a comment on its own line, and a direction that ends in one, as
+/// a pinned camera line does.
+#[test]
+fn every_documented_comment_form_parses() {
+	let (_, meaning) = table("### Text")
+		.into_iter()
+		.find(|(form, _)| form.contains("//"))
+		.expect("the text table documents comments");
+	let directions: Vec<String> = spans(&meaning)
+		.into_iter()
+		.map(|(_, span)| span)
+		.filter(|span| span.starts_with('@') && span.contains("//"))
+		.collect();
+
+	assert!(
+		!directions.is_empty(),
+		"the comment row shows a direction that ends in a comment: {meaning}"
+	);
+
+	parses("# park\n// note\n@stinky\n").unwrap_or_else(|error| panic!("// note: {error}"));
+
+	for direction in &directions {
+		parses(&format!("# park\n{direction}\n"))
+			.unwrap_or_else(|error| panic!("{direction}: {error}"));
+	}
+}
