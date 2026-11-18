@@ -70,6 +70,7 @@ note = "Return to the opening staging with the star changed, and end on the refr
 // Three Tries: three tries that fail bigger, then a fourth that uses what they taught.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: Home and the want, said aloud. Two pages, 25–35 words a page.
 // Wide first, so the reader knows the place before anyone speaks.

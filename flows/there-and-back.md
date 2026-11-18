@@ -82,6 +82,7 @@ note = "The opening framing again, with the souvenir on show."
 // There and Back: out through three places, then home changed by what was found.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: Home and the reason to go. Two pages, 25–35 words.
 # town day shot=wide on={{star}}

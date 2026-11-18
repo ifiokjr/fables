@@ -100,6 +100,7 @@ note = "The ask returns, and the answer answers it; then the end card, and out."
 // The Habit Tale: a habit shows, earns a name, costs a friend, and is chosen.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: The place and its rule. One page, 20–30 words.
 # town day shot=wide

@@ -76,6 +76,7 @@ note = "The first clash's pose again, now shared: the same picture says how far 
 // The Odd Couple: two opposites, three clashes, and a swap.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: Meet A in their world. Two pages, 25–35 words.
 # shop indoor shot=medium on={{star}}
