@@ -121,7 +121,7 @@ What `fables review` checks for a book whose `flow = "…"` names one of these s
 | Rule | Flows | What it asks |
 | --- | --- | --- |
 | `refrain` | `three-tries`, `pile-up` | One line (a phrase between commas or full stops) comes back word for word at least three times, and changes once after it first appears. |
-| `goal-early` | `three-tries`, `there-and-back`, `gag-short` | The star speaks (`talk`), `point`s or `reach-out`s on page 1 or 2: the want is on the page early. |
+| `goal-early` | `three-tries`, `there-and-back` | The star speaks (`talk`), `point`s or `reach-out`s on page 1 or 2: the want is on the page early. |
 | `return-image` | `round-we-go`, `there-and-back` | The last page is in the same setting as the first. |
 | `wind-down` | `goodnight-tour` | Over the last third the words a page fall, the light never brightens (`candle` counts as dim as `moonlit`), the star never livens up, and nobody new arrives in the last three pages. |
 

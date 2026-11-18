@@ -1530,7 +1530,7 @@ fn screen_direction(story: &Story, rehearsals: &[Rehearsal]) -> Vec<Finding> {
 
 /// The flows whose shape each flow-aware rule checks.
 const REFRAIN_FLOWS: [&str; 2] = ["three-tries", "pile-up"];
-const GOAL_FLOWS: [&str; 3] = ["three-tries", "there-and-back", "gag-short"];
+const GOAL_FLOWS: [&str; 2] = ["three-tries", "there-and-back"];
 const RETURN_FLOWS: [&str; 2] = ["round-we-go", "there-and-back"];
 const WIND_DOWN_FLOWS: [&str; 1] = ["goodnight-tour"];
 
