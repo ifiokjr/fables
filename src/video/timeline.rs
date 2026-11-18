@@ -433,7 +433,7 @@ impl<S: Speaker> Builder<'_, S> {
 				Beat::Direct(directive)
 					if opening
 						&& !(directive.actor == "camera"
-							&& after(directive).is_some_and(|after| after > 0.0)) =>
+							&& scene.camera.after.is_some_and(|after| after > 0.0)) =>
 				{
 					// Directions before the first line set the scene the page opens on. A camera
 					// direction with `after=` lands later by its own clock, even here.
@@ -626,16 +626,6 @@ impl<S: Speaker> Builder<'_, S> {
 
 		Ok(t + duration + GAP)
 	}
-}
-
-/// When a camera direction lands, in seconds after the page opens, when it says `after=`.
-fn after(directive: &crate::story::Directive) -> Option<f32> {
-	directive
-		.tokens
-		.iter()
-		.find(|token| token.key == "after")
-		.and_then(|token| token.value.as_deref())
-		.and_then(|value| value.parse::<f32>().ok())
 }
 
 /// A camera change written with `after=`, waiting for its moment on the page's clock.
