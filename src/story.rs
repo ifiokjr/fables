@@ -256,6 +256,10 @@ pub struct Meta {
 	/// The cast member drawn on the cover.
 	#[serde(default)]
 	pub star: Option<String>,
+	/// The story flow the book was started from (`fables new --flow`, or a world's own flow):
+	/// `three-tries`, `pile-up`, `there-and-back` and the rest of `fables flow list`.
+	#[serde(default)]
+	pub flow: Option<String>,
 	/// The world the book belongs to, as a folder relative to the script. Defaults to the
 	/// nearest `world.toml` above the script (see [`world`](crate::world)).
 	#[serde(default)]
@@ -767,7 +771,7 @@ pub fn parse(source: &str) -> Result<Story> {
 	})
 }
 
-fn split_front_matter(source: &str) -> Result<(&str, &str, usize)> {
+pub(crate) fn split_front_matter(source: &str) -> Result<(&str, &str, usize)> {
 	let Some(rest) = source.trim_start().strip_prefix("+++") else {
 		bail!("a story must begin with TOML front matter between `+++` lines");
 	};

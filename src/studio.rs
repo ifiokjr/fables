@@ -180,6 +180,21 @@ pub struct Colours {
 	pub eyes: String,
 }
 
+/// A book to start from a story flow: its title, its star, and optionally the second
+/// character and the flow (or the world's recipe.md when neither names one).
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct StoryBrief {
+	pub title: String,
+	/// The cast id of the star.
+	pub star: String,
+	/// The cast id of the second character, for a flow that stages two or a crowd.
+	pub friend: Option<String>,
+	/// The flow, from `flow_list`. Without one, the world's `recipe.md`, or three-tries.
+	pub flow: Option<String>,
+	/// The author on the title page; the world's author when left out.
+	pub author: Option<String>,
+}
+
 /// A new character: who they are and their colours. Their drawing starts as the style's
 /// template, to redraw part by part.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1007,6 +1022,39 @@ impl Studio {
 	pub fn review_story(&self, folder: &str, story: &str) -> Result<Vec<crate::review::Finding>> {
 		let (_, script, cast) = self.book(folder, story)?;
 		publish::review(&script, &cast, &self.root.join("out"))
+	}
+
+	/// The story flows a world's books can start from: its own first, then the built-ins.
+	pub fn flows(&self, folder: &str) -> Result<Vec<crate::flow::Report>> {
+		let world = self.world(folder)?;
+
+		Ok(crate::flow::list(Some(&world))?
+			.iter()
+			.map(crate::flow::Flow::report)
+			.collect())
+	}
+
+	/// One story flow by name, with its beats.
+	pub fn describe_flow(&self, folder: &str, name: &str) -> Result<crate::flow::Report> {
+		let world = self.world(folder)?;
+
+		Ok(crate::flow::find(Some(&world), name)?.report())
+	}
+
+	/// The script a new book starts from: a flow's scaffold, or the world's own recipe. The
+	/// book is not written; the agent fills the bracketed lines in and calls `story_write`.
+	pub fn start_story(&self, folder: &str, brief: &StoryBrief) -> Result<String> {
+		let world = self.world(folder)?;
+
+		Ok(crate::flow::start(
+			&world,
+			&brief.title,
+			&brief.star,
+			brief.friend.as_deref(),
+			brief.flow.as_deref(),
+			brief.author.as_deref(),
+		)?
+		.script)
 	}
 
 	/// Makes a book's outputs under the root's `out/`. Returns what was written, and the proofs'
