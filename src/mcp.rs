@@ -72,12 +72,12 @@ fables is a studio for illustrated books and cartoons. A world (a series) has a 
 
 To design a character:
 1. `world_list`, or `world_create` for a new series.
-2. `style_describe` to learn the parts a figure is drawn with, the space each is drawn in, and \
-	 the hair, brows, noses and builds each body offers.
+2. `style_describe` to learn the parts a figure is drawn with, the space each is drawn in, and the \
+	 hair, brows, noses and builds each body offers.
 3. `character_create` with who they are, their colours, and their `kind` (kid or grown-up), \
-	 `hair`, `build`, `brows` and `nose`. Their parts start as the style's template for their body \
-	 (a grown-up's are cut for a grown-up) with those variants; without a `hair` or `build`, one is \
-	 picked from their id and written into the cast.
+	 `hair`, `build`, `brows` and `nose`. Their parts start as the style's template for their \
+	 body (a grown-up's are cut for a grown-up) with those variants; without a `hair` or `build`, \
+	 one is picked from their id and written into the cast.
 4. `character_sheet` to see them. `character_parts` reads parts back as SVG path data (name kit \
 	 parts to see the shared ones).
 5. `character_set_parts` to redraw parts, then look at the sheet again. Repeat until they read as \
@@ -449,10 +449,10 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "Describe a drawing style: its finish, its bodies and the hair, brows, noses \
-		               and builds each offers, every part a figure is drawn with (views, whether \
-		               it's required, the coordinate space) and the rules for drawing parts. Read \
-		               this before drawing."
+		description = "Describe a drawing style: its finish, its bodies and the hair, brows, \
+		               noses and builds each offers, every part a figure is drawn with (views, \
+		               whether it's required, the coordinate space) and the rules for drawing \
+		               parts. Read this before drawing."
 	)]
 	#[expect(
 		clippy::unused_self,
@@ -504,11 +504,12 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "Add a character to a world's cast: their id, name, kind (kid or \
-		               grown-up), who they are, their habit and colours, and the hair, build (slim, \
-		               plain or stout), brows and nose style_describe lists for their body. Their \
-		               drawing starts as the style's template for their body with those; redraw it \
-		               with character_set_parts."
+		description = "Add a character to a world's cast: their id, name, kind (kid or grown-up), \
+		               who they are, their habit and colours, and the hair, build (slim, plain or \
+		               stout), brows and nose style_describe lists for their body. Their drawing \
+		               starts as the style's template for their body with those (any left out are \
+		               picked from the ones the cast uses least, and written into the cast); \
+		               redraw it with character_set_parts."
 	)]
 	fn character_create(
 		&self,

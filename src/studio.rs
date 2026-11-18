@@ -1676,20 +1676,22 @@ pub fn create_character(world: &World, brief: &CharacterBrief) -> Result<MemberR
 		ensure!(!puppet.exists(), "{} already exists", puppet.display());
 	}
 
-	// The hair and build they're given are written out, so they keep them even if their style
-	// later draws more to pick from.
+	// The variants they're given are written out, so they keep them even if their style later
+	// draws more to pick from. Those the brief leaves out are the ones the cast uses least.
 	let build = brief.kind.build();
-	let hair = brief.hair.clone().unwrap_or_else(|| {
-		crate::cast::default_hair(&brief.id, &style, build).to_owned()
-	});
-	let physique = brief.build.map_or_else(
-		|| crate::cast::default_build(&brief.id),
-		PhysiqueName::physique,
-	);
-	// The template drawn for their body, with their hair: a grown-up's parts are cut for a
-	// grown-up. A hair the style doesn't draw stops here, before anything is written.
+	let (fresh, fresh_physique) =
+		crate::cast::fresh_picks(&brief.id, &style, build, &cast_words(&before));
+	let picks = Picks {
+		hair: brief.hair.clone().or(fresh.hair),
+		brows: brief.brows.clone().or(fresh.brows),
+		nose: brief.nose.clone().or(fresh.nose),
+	};
+	let physique = brief.build.map_or(fresh_physique, PhysiqueName::physique);
+	// The template drawn for their body with their variants: a grown-up's parts are cut for a
+	// grown-up. A variant the style doesn't draw stops here, before anything is written.
+	style.figure(build, &picks)?;
 	let template = if brief.draw {
-		Some(style.template_with_hair(build, Some(&hair))?)
+		Some(style.template_with(build, &picks)?)
 	} else {
 		None
 	};
@@ -1699,9 +1701,14 @@ pub fn create_character(world: &World, brief: &CharacterBrief) -> Result<MemberR
 		cast.push('\n');
 	}
 
-	// A part file draws their hair, so only a template-drawn character's cast names it.
-	let named_hair = template.is_none().then_some(hair.as_str());
-	cast.push_str(&cast_entry(brief, named_hair, physique));
+	// A part file draws their hair, brows and nose, so only a template-drawn character's cast
+	// names them.
+	let named = if template.is_none() {
+		picks
+	} else {
+		Picks::default()
+	};
+	cast.push_str(&cast_entry(brief, &named, physique));
 	std::fs::write(&cast_file, &cast)
 		.with_context(|| format!("could not write {}", cast_file.display()))?;
 
@@ -1870,9 +1877,7 @@ fn own_parts(world: &World, id: &str) -> Result<OwnParts> {
 	};
 	// A character still drawn from the template has the template for their body as their own.
 	let parts = if puppet.template {
-		puppet
-			.style
-			.template_with_hair(look.build, puppet.picks.hair.as_deref())?
+		puppet.style.template_with(look.build, &puppet.picks)?
 	} else {
 		Parts::load(&puppet.file)?
 	};
@@ -2044,23 +2049,21 @@ pub fn template_puppet(world: &World, id: &str, from: Option<&str>) -> Result<Me
 		target.display()
 	);
 
-	let (parts, origin) = match from {
-		Some(from) => {
-			let source = own_parts(world, from)?;
-			(source.parts, format!("{from}'s drawings"))
-		}
-		// The template drawn for their body, with the hair they have: a grown-up's parts are cut
-		// for a grown-up.
-		None => {
-			let hair = look
-				.puppet
-				.as_ref()
-				.and_then(|puppet| puppet.picks.hair.as_deref());
-			(
-				style.template_with_hair(look.build, hair)?,
-				style.template_origin(look.build),
-			)
-		}
+	let (parts, origin) = if let Some(from) = from {
+		let source = own_parts(world, from)?;
+		(source.parts, format!("{from}'s drawings"))
+	} else {
+		// The template drawn for their body, with the hair, brows and nose they have: a
+		// grown-up's parts are cut for a grown-up.
+		let picks = look
+			.puppet
+			.as_ref()
+			.map(|puppet| puppet.picks.clone())
+			.unwrap_or_default();
+		(
+			style.template_with(look.build, &picks)?,
+			style.template_origin(look.build),
+		)
 	};
 	let title = format!(
 		"{}: own parts (started from {origin}; redraw each one)",
@@ -2312,9 +2315,36 @@ fn member_report(world: &World, member: &Member) -> MemberReport {
 	}
 }
 
-/// A cast table for a new character, with a `puppet` line only when one was written, a `hair`
-/// line when they are drawn from the template with it, and how heavily built they are.
-fn cast_entry(brief: &CharacterBrief, hair: Option<&str>, physique: Physique) -> String {
+/// The variants a cast file's members use, as `(kind, field, word)`: what a new character's
+/// variants are picked to differ from. A cast that doesn't read gives none.
+fn cast_words(cast: &str) -> Vec<(String, String, String)> {
+	let Ok(table) = cast.parse::<toml::Table>() else {
+		return Vec::new();
+	};
+
+	table
+		.values()
+		.filter_map(toml::Value::as_table)
+		.flat_map(|entry| {
+			let kind = entry
+				.get("kind")
+				.and_then(toml::Value::as_str)
+				.unwrap_or("kid")
+				.to_owned();
+
+			["hair", "build", "brows", "nose"]
+				.into_iter()
+				.filter_map(move |field| {
+					let word = entry.get(field)?.as_str()?;
+					Some((kind.clone(), field.to_owned(), word.to_owned()))
+				})
+		})
+		.collect()
+}
+
+/// A cast table for a new character, with a `puppet` line only when one was written, the
+/// variants they are drawn from the template with (`picks`), and how heavily built they are.
+fn cast_entry(brief: &CharacterBrief, picks: &Picks, physique: Physique) -> String {
 	let mut lines = vec![
 		format!("[{}]", brief.id),
 		format!("name = {}", quoted(&brief.name)),
@@ -2335,13 +2365,13 @@ fn cast_entry(brief: &CharacterBrief, hair: Option<&str>, physique: Physique) ->
 		keys.push(("puppet", &puppet));
 	}
 
-	if let Some(hair) = hair {
+	if let Some(hair) = &picks.hair {
 		keys.push(("hair", hair));
 	}
 
 	keys.push(("build", physique.name()));
 
-	for (key, value) in [("brows", &brief.brows), ("nose", &brief.nose)] {
+	for (key, value) in [("brows", &picks.brows), ("nose", &picks.nose)] {
 		if let Some(value) = value {
 			keys.push((key, value));
 		}
@@ -2480,18 +2510,32 @@ fn variant_lineups(pack: &std::sync::Arc<StylePack>) -> Result<Vec<sheets::Lineu
 
 	for build in [Build::Kid, Build::Grownup] {
 		let body = body_name(build);
-		let look = |picks: Picks, physique| {
-			crate::cast::template_look_with(pack, build, &picks, physique)
-		};
+		let look =
+			|picks: Picks, physique| crate::cast::template_look_with(pack, build, &picks, physique);
 		let heads = |feature: Feature| -> Result<Vec<(String, crate::art::figure::Look)>> {
 			own_first(pack, build, feature)
 				.into_iter()
 				.map(|offer| {
 					let pick = Some(offer.clone());
 					let picks = match feature {
-						Feature::Hair => Picks { hair: pick, ..Picks::default() },
-						Feature::Brows => Picks { brows: pick, ..Picks::default() },
-						Feature::Nose => Picks { nose: pick, ..Picks::default() },
+						Feature::Hair => {
+							Picks {
+								hair: pick,
+								..Picks::default()
+							}
+						}
+						Feature::Brows => {
+							Picks {
+								brows: pick,
+								..Picks::default()
+							}
+						}
+						Feature::Nose => {
+							Picks {
+								nose: pick,
+								..Picks::default()
+							}
+						}
 					};
 					Ok((offer, look(picks, Physique::Plain)?))
 				})
@@ -2642,6 +2686,130 @@ mod tests {
 			extras: vec!["freckles".into()],
 			draw: false,
 		}
+	}
+
+	#[test]
+	fn a_new_character_gets_variants_of_their_own_written_into_the_cast() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					hair: Some("bun".into()),
+					build: Some(PhysiqueName::Stout),
+					..brief("ned")
+				},
+			)
+			.unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let cast = std::fs::read_to_string(world.cast_file()).unwrap();
+		let table: toml::Table = cast.parse().unwrap();
+		let word = |id: &str, field: &str| -> String {
+			table[id][field]
+				.as_str()
+				.unwrap_or_else(|| panic!("{id} has no {field}: {cast}"))
+				.to_owned()
+		};
+
+		assert_eq!(word("ned", "hair"), "bun");
+		assert_ne!(
+			word("nell", "hair"),
+			"bun",
+			"Nell came first, but Ned asked"
+		);
+		assert_eq!(word("ned", "build"), "stout");
+		assert_ne!(
+			word("nell", "brows"),
+			word("ned", "brows"),
+			"Ned gets the brows the cast uses least"
+		);
+		assert_ne!(word("nell", "nose"), word("ned", "nose"));
+		assert_eq!(cast_words(&cast).len(), 8, "four words each");
+
+		// The cast reads back as written, so the picks never change afterwards.
+		let ned = world.cast().unwrap();
+		let Kind::Figure(look) = &ned.member("ned").unwrap().kind else {
+			panic!("ned is a person");
+		};
+		let puppet = look.puppet.as_ref().unwrap();
+		assert_eq!(puppet.physique, Physique::Stout);
+		assert_eq!(puppet.picks.hair.as_deref(), Some("bun"));
+	}
+
+	#[test]
+	fn a_variant_the_style_does_not_draw_adds_nobody() {
+		let (_dir, studio) = studio();
+		let error = studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					hair: Some("mohawk".into()),
+					..brief("nell")
+				},
+			)
+			.unwrap_err();
+		assert!(format!("{error:#}").contains("pigtails"), "{error:#}");
+
+		let error = studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					nose: Some("none".into()),
+					draw: true,
+					..brief("nell")
+				},
+			)
+			.unwrap_err();
+		assert!(format!("{error:#}").contains("part file"), "{error:#}");
+
+		let world = studio.world("nibbleton").unwrap();
+		assert!(world.cast().unwrap().member("nell").is_none());
+		assert!(!world.dir.join("puppets/nell.svg").exists());
+	}
+
+	#[test]
+	fn a_drawn_character_s_file_draws_their_variants() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					hair: Some("bob".into()),
+					brows: Some("thin".into()),
+					draw: true,
+					..brief("nell")
+				},
+			)
+			.unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let file = Parts::load(&world.dir.join("puppets/nell.svg")).unwrap();
+		let style = world.style().unwrap();
+		let bob = style
+			.figure(
+				Build::Kid,
+				&Picks {
+					hair: Some("bob".into()),
+					brows: Some("thin".into()),
+					..Picks::default()
+				},
+			)
+			.unwrap();
+
+		assert_eq!(file.get("hair.front"), bob.get("hair.front"));
+		assert_eq!(file.get("brow"), bob.get("brow"));
+		assert!(
+			file.get("tuft.front").is_none(),
+			"the bob replaces the tuft"
+		);
+		let cast = std::fs::read_to_string(world.cast_file()).unwrap();
+		assert!(!cast.contains("hair = "), "the file draws the hair: {cast}");
+		assert!(
+			cast.contains("build = "),
+			"the build is still the cast's: {cast}"
+		);
 	}
 
 	fn studio() -> (tempfile::TempDir, Studio) {
@@ -2852,6 +3020,10 @@ mod tests {
 				kind: BuildName::GrownUp,
 				extras: Vec::new(),
 				draw,
+				// The style's own, so Pop's file is the template's parts and no more.
+				hair: Some("short".into()),
+				brows: Some("arched".into()),
+				nose: Some("round".into()),
 				..brief(id)
 			}
 		};

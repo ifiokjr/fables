@@ -502,11 +502,25 @@ pub fn variants_sheet(title: &str, lineups: &[Lineup], px: u32) -> Result<Pixmap
 		);
 		svg.raw(&text::svg(&block, Ink::default()));
 	};
-	label(&mut svg, width / 2.0, 40.0, width, 46.0, &format!("**{title}**"));
+	label(
+		&mut svg,
+		width / 2.0,
+		40.0,
+		width,
+		46.0,
+		&format!("**{title}**"),
+	);
 	let mut top = 140.0;
 
 	for lineup in lineups {
-		label(&mut svg, width / 2.0, top + 20.0, width, 34.0, &lineup.title);
+		label(
+			&mut svg,
+			width / 2.0,
+			top + 20.0,
+			width,
+			34.0,
+			&lineup.title,
+		);
 		let left = (width - row_width(lineup)) / 2.0;
 		top += LINEUP_TITLE;
 
@@ -531,7 +545,7 @@ pub fn variants_sheet(title: &str, lineups: &[Lineup], px: u32) -> Result<Pixmap
 						// The head's middle sits a little above the cell's, leaving room for
 						// the shoulders and long hair below.
 						let head = pt(x, cell_top + HEAD_CELL.1 * 0.42);
-						let at = head - (frame.head + pt(0.0, (lo.y + hi.y) / 2.0)) * scale;
+						let at = head - (frame.head + pt(0.0, f32::midpoint(lo.y, hi.y))) * scale;
 						let mut state = FigureState::new(&frame);
 						state.facing = facing;
 						state.hands = frame.hands(Pose::Idle, facing);

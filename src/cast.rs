@@ -215,23 +215,17 @@ fn default_kind() -> String {
 }
 
 impl Entry {
-	/// The cast fields set that a figure's drawing doesn't read. A figure drawn from parts
-	/// ignores the parametric puppet's shapes (`head`, `body`, `mouth`); one drawn from its own
-	/// part file also keeps its own hair, and its own brows and nose when the file draws them.
-	/// The parametric puppet ignores the variants (`build`, `brows`).
+	/// The cast fields set that a figure's drawing doesn't read. A figure drawn from the
+	/// template ignores the parametric puppet's shapes (`head`, `body`, `mouth`); one drawn from
+	/// its own part file ignores those and the variants it draws itself (`hair`, `brows`,
+	/// `nose`), and reads only `build`.
+	/// The parametric puppet ignores the variants it has no shapes for (`build`, `brows`).
 	fn unused_fields(&self, look: &Look) -> Vec<&'static str> {
 		let reads = |field: &str| {
 			match &look.puppet {
 				None => !matches!(field, "build" | "brows"),
 				Some(puppet) if puppet.template => !matches!(field, "head" | "body" | "mouth"),
-				Some(puppet) => {
-					match field {
-						"build" => true,
-						"brows" => !puppet.file_features.contains(&Feature::Brows),
-						"nose" => !puppet.file_features.contains(&Feature::Nose),
-						_ => false,
-					}
-				}
+				Some(_) => field == "build",
 			}
 		};
 
@@ -453,14 +447,24 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 	let parametric = entry.puppet.as_deref() == Some(PARAMETRIC);
 	// The parametric puppet reads `hair` and `nose` as its own shapes; a figure drawn from parts
 	// reads them as variants its style offers (see below).
-	let nose = match entry.nose.as_deref().filter(|_| parametric).unwrap_or("button") {
+	let nose = match entry
+		.nose
+		.as_deref()
+		.filter(|_| parametric)
+		.unwrap_or("button")
+	{
 		"button" => Nose::Button,
 		"round" => Nose::Round,
 		"long" => Nose::Long,
 		"none" => Nose::None,
 		other => bail!("unknown nose `{other}`; use button, round, long or none"),
 	};
-	let hair = match entry.hair.as_deref().filter(|_| parametric).unwrap_or("tuft") {
+	let hair = match entry
+		.hair
+		.as_deref()
+		.filter(|_| parametric)
+		.unwrap_or("tuft")
+	{
 		"bald" => HairStyle::Bald,
 		"tuft" => HairStyle::Tuft,
 		"bun" => HairStyle::Bun,
@@ -511,34 +515,26 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 		})
 		.collect::<Result<Vec<_>>>()?;
 
-	let picks = |hair: Option<String>| {
-		Picks {
-			hair,
-			brows: entry.brows.clone(),
-			nose: entry.nose.clone(),
-		}
-	};
 	let puppet = match entry.puppet.as_deref() {
 		Some(PARAMETRIC) => None,
-		// Their own part file draws their hair; the brows and nose they pick are drawn unless
-		// it draws its own. They are as heavily built as the cast says, plain by default.
+		// Their own part file draws their hair, brows and nose (the kit's where it draws none),
+		// so those words leave it as it is. They are as heavily built as the cast says, plain
+		// by default.
 		Some(file) => {
-			let file = crate::world::under(dir, "puppet", file)?;
-			let puppet = Authored::load(&file, style, build, &picks(None))?;
+			let puppet = Authored::load(&crate::world::under(dir, "puppet", file)?, style)?;
 			Some(puppet.built(build, physique.unwrap_or_default()))
 		}
-		// Drawn from the template, they get a hair and build of their own unless the cast
-		// names them.
+		// Drawn from the template, with the variants the cast names; the template's own where
+		// it names none, so a cast written before variants keeps its drawing. `fables
+		// character new` writes a hair and build picked from the id into the cast.
 		None => {
-			let hair = entry
-				.hair
-				.clone()
-				.unwrap_or_else(|| default_hair(id, style, build).to_owned());
-			let puppet = Authored::from_template(style, build, &picks(Some(hair)))?;
-			Some(puppet.built(
-				build,
-				physique.unwrap_or_else(|| default_build(id)),
-			))
+			let picks = Picks {
+				hair: entry.hair.clone(),
+				brows: entry.brows.clone(),
+				nose: entry.nose.clone(),
+			};
+			let puppet = Authored::from_template(style, build, &picks)?;
+			Some(puppet.built(build, physique.unwrap_or_default()))
 		}
 	};
 
@@ -564,27 +560,61 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 	})
 }
 
-/// One of `choices` for a character, picked by their id and the cast `field` it fills, so the
-/// same character gets the same one in every book and different characters mostly don't.
-fn by_id<T: Copy>(id: &str, field: &str, choices: &[T]) -> T {
-	choices[(seed_of(&format!("{id}.{field}")) % choices.len() as u64) as usize]
-}
+/// The variants a new character is drawn with where their brief names none, so a cast reads as
+/// different people: for each of the hair, build, brows and nose, one of the ways the style
+/// draws it that the cast's other members (`taken`, as `(kind, field, word)` from their cast
+/// entries) use least, picked among those by the character's id. A kid only goes bald, and
+/// nobody goes without a nose, by asking. The picks are written into the cast, so they never
+/// change once made.
+pub fn fresh_picks(
+	id: &str,
+	style: &StylePack,
+	build: Build,
+	taken: &[(String, String, String)],
+) -> (Picks, Physique) {
+	let kind = crate::art::pack::body_name(build);
+	let least_used = |field: &str, mut offers: Vec<&str>, same_kind: bool| {
+		let asked_only = match field {
+			"hair" if build == Build::Kid => Some(BALD),
+			"nose" => Some(crate::art::pack::NO_NOSE),
+			_ => None,
+		};
+		offers.retain(|offer| Some(*offer) != asked_only);
+		let uses = |offer: &str| {
+			taken
+				.iter()
+				.filter(|(their_kind, their_field, word)| {
+					their_field == field && word == offer && (!same_kind || their_kind == kind)
+				})
+				.count()
+		};
+		let fewest = offers.iter().map(|offer| uses(offer)).min().unwrap_or(0);
+		offers.retain(|offer| uses(offer) == fewest);
+		offers[(seed_of(&format!("{id}.{field}")) % offers.len() as u64) as usize].to_owned()
+	};
+	let picks = Picks {
+		hair: Some(least_used("hair", style.offers(build, Feature::Hair), true)),
+		brows: Some(least_used(
+			"brows",
+			style.offers(build, Feature::Brows),
+			false,
+		)),
+		nose: Some(least_used(
+			"nose",
+			style.offers(build, Feature::Nose),
+			false,
+		)),
+	};
+	let physique = least_used(
+		"build",
+		Physique::ALL
+			.iter()
+			.map(|physique| physique.name())
+			.collect(),
+		true,
+	);
 
-/// The hair a template-drawn character gets when the cast names none: one of the style's for
-/// their body, picked by [`by_id`]. A kid only goes bald when the cast asks.
-pub fn default_hair<'a>(id: &str, style: &'a StylePack, build: Build) -> &'a str {
-	let mut offers = style.offers(build, Feature::Hair);
-
-	if build == Build::Kid && offers.len() > 1 {
-		offers.retain(|hair| *hair != BALD);
-	}
-
-	by_id(id, "hair", &offers)
-}
-
-/// The build a template-drawn character gets when the cast names none, picked by [`by_id`].
-pub fn default_build(id: &str) -> Physique {
-	by_id(id, "build", &Physique::ALL)
+	(picks, Physique::named(&physique).unwrap_or_default())
 }
 
 /// The hair variant that draws no hair, which a kid only gets by asking.
@@ -807,6 +837,142 @@ colour = "#c9865a"
 			look.puppet.is_some_and(|puppet| puppet.template),
 			"the default cast is drawn from the cartoon template"
 		);
+	}
+
+	/// A person's figure, drawn from the cast table `toml` in `style`.
+	fn figure(toml: &str, style: &str) -> Result<Authored> {
+		let style = StylePack::named(style)?;
+		let cast = Cast::parse_in(toml, Path::new(""), &style)?;
+		let Kind::Figure(look) = cast.resolve("pip")? else {
+			bail!("pip is a person");
+		};
+		look.puppet.context("drawn from parts")
+	}
+
+	#[test]
+	fn a_template_drawn_person_without_variants_keeps_the_plain_template() {
+		for style in ["cartoon", "chibi", "rubber-hose"] {
+			let plain = figure("[pip]\nname = \"Pip\"\nkind = \"grown-up\"\n", style).unwrap();
+			let template = StylePack::named(style)
+				.unwrap()
+				.template_figure(Build::Grownup);
+
+			assert_eq!(plain.physique, Physique::Plain);
+			for (name, shape) in template.iter() {
+				assert_eq!(plain.parts.get(name), Some(shape), "{style}: {name}");
+			}
+		}
+	}
+
+	#[test]
+	fn a_template_drawn_person_is_drawn_with_the_variants_they_name() {
+		let pip = figure(
+			"[pip]\nname = \"Pip\"\nhair = \"bob\"\nbuild = \"stout\"\nbrows = \"thin\"\nnose = \
+			 \"none\"\n",
+			"cartoon",
+		)
+		.unwrap();
+		let plain = figure("[pip]\nname = \"Pip\"\n", "cartoon").unwrap();
+
+		assert_eq!(pip.physique, Physique::Stout);
+		assert_eq!(pip.picks.hair.as_deref(), Some("bob"));
+		assert_ne!(pip.parts.get("hair.front"), plain.parts.get("hair.front"));
+		assert_ne!(pip.parts.get("brow"), plain.parts.get("brow"));
+		assert!(
+			pip.parts.get("nose").is_none(),
+			"nose = \"none\" leaves it out"
+		);
+		assert!(
+			pip.body(Build::Kid).shoulder_half > plain.body(Build::Kid).shoulder_half,
+			"a stout body is broader"
+		);
+	}
+
+	#[test]
+	fn a_variant_the_style_does_not_draw_is_an_error_naming_those_it_does() {
+		let error = figure("[pip]\nname = \"Pip\"\nhair = \"mohawk\"\n", "cartoon").unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("`mohawk`"), "{message}");
+		assert!(
+			message.contains("bob") && message.contains("pigtails"),
+			"{message}"
+		);
+
+		let error = figure("[pip]\nname = \"Pip\"\nbuild = \"huge\"\n", "cartoon").unwrap_err();
+		assert!(
+			format!("{error:#}").contains("slim, plain or stout"),
+			"{error:#}"
+		);
+
+		let error = figure("[pip]\nname = \"Pip\"\nnose = \"none\"\n", "rubber-hose").unwrap_err();
+		assert!(format!("{error:#}").contains("round"), "{error:#}");
+	}
+
+	#[test]
+	fn a_part_file_keeps_its_own_features_and_reads_only_the_build() {
+		let world = Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle");
+		let style = StylePack::named("cartoon").unwrap();
+		let load = |extra: &str| {
+			let cast = Cast::parse_in(
+				&format!("[pip]\nname = \"Pip\"\npuppet = \"puppets/stinky.svg\"\n{extra}"),
+				&world,
+				&style,
+			)
+			.unwrap();
+			let unused = cast.member("pip").unwrap().unused_fields.clone();
+			let Kind::Figure(look) = cast.resolve("pip").unwrap() else {
+				panic!("pip is a person");
+			};
+			(look.puppet.unwrap(), unused)
+		};
+		let (own, _) = load("");
+		let (picked, unused) = load("hair = \"bob\"\nbrows = \"thin\"\nnose = \"long\"\n");
+
+		for name in ["hair.front", "brow", "nose"] {
+			assert_eq!(own.parts.get(name), picked.parts.get(name), "{name}");
+		}
+		assert_eq!(unused, vec!["hair", "brows", "nose"]);
+
+		let (stout, unused) = load("build = \"stout\"\n");
+		assert_eq!(stout.physique, Physique::Stout);
+		assert!(unused.is_empty(), "{unused:?}");
+	}
+
+	#[test]
+	fn fresh_picks_differ_from_the_rest_of_the_cast() {
+		let style = StylePack::named("cartoon").unwrap();
+		let mut taken: Vec<(String, String, String)> = Vec::new();
+		let mut hairs = Vec::new();
+
+		for id in ["ann", "ben", "cat", "dot", "eli", "fay", "gus", "hal"] {
+			let (picks, physique) = fresh_picks(id, &style, Build::Kid, &taken);
+			let hair = picks.hair.unwrap();
+			assert_ne!(hair, BALD, "a kid is only bald by asking");
+			assert_ne!(picks.nose.as_deref(), Some("none"), "nor noseless");
+			assert_eq!(
+				fresh_picks(id, &style, Build::Kid, &taken)
+					.0
+					.hair
+					.as_deref(),
+				Some(hair.as_str()),
+				"the same cast gives the same pick"
+			);
+
+			for (field, word) in [
+				("hair", hair.clone()),
+				("build", physique.name().to_owned()),
+				("brows", picks.brows.unwrap()),
+				("nose", picks.nose.unwrap()),
+			] {
+				taken.push(("kid".to_owned(), field.to_owned(), word));
+			}
+
+			hairs.push(hair);
+		}
+
+		hairs.sort();
+		hairs.dedup();
+		assert_eq!(hairs.len(), 8, "eight kids, eight hairdos: {hairs:?}");
 	}
 
 	#[test]

@@ -449,8 +449,8 @@ impl StylePack {
 				let own = pack.own(build, feature);
 				ensure!(
 					is_variant_name(own) && own != NO_NOSE,
-					"style.toml's [own] {} `{own}` must be lowercase words joined by hyphens, \
-					 and not `{NO_NOSE}`",
+					"style.toml's [own] {} `{own}` must be lowercase words joined by hyphens, and \
+					 not `{NO_NOSE}`",
 					feature.name()
 				);
 				ensure!(
@@ -494,14 +494,32 @@ impl StylePack {
 	}
 
 	/// A template-drawn character's own parts, as a part file started from them should draw
-	/// them: the template for a build's body with the `hair` they have (its own when `None`).
-	pub fn template_with_hair(&self, build: Build, hair: Option<&str>) -> Result<Parts> {
+	/// them: the template for a build's body, with the hair, brows and nose they `picks` drawn
+	/// in where they pick other than the style's own. A part file always has a nose (the kit's
+	/// stands in for one it leaves out), so it can't be started from a face with none.
+	pub fn template_with(&self, build: Build, picks: &Picks) -> Result<Parts> {
+		let figure = self.figure(build, picks)?;
 		let mut parts = self.template_for(build);
-		let picks = Picks {
-			hair: hair.map(str::to_owned),
-			..Picks::default()
-		};
-		self.pick(&mut parts, build, &picks)?;
+
+		for feature in Feature::ALL {
+			let Some(pick) = picks
+				.get(feature)
+				.filter(|&pick| pick != self.own(build, feature))
+			else {
+				continue;
+			};
+			ensure!(
+				pick != NO_NOSE,
+				"a part file always draws a nose: a face with nose `{NO_NOSE}` is drawn from the \
+				 template, without a part file of its own"
+			);
+			parts.leave_out(feature);
+
+			for (name, shape) in figure.iter().filter(|(name, _)| feature.owns(name)) {
+				parts.insert(name, shape.clone());
+			}
+		}
+
 		Ok(parts)
 	}
 
@@ -619,9 +637,24 @@ impl StylePack {
 
 				let pick = Some(offer.to_owned());
 				let picks = match feature {
-					Feature::Hair => Picks { hair: pick, ..Picks::default() },
-					Feature::Brows => Picks { brows: pick, ..Picks::default() },
-					Feature::Nose => Picks { nose: pick, ..Picks::default() },
+					Feature::Hair => {
+						Picks {
+							hair: pick,
+							..Picks::default()
+						}
+					}
+					Feature::Brows => {
+						Picks {
+							brows: pick,
+							..Picks::default()
+						}
+					}
+					Feature::Nose => {
+						Picks {
+							nose: pick,
+							..Picks::default()
+						}
+					}
 				};
 				variety.push((
 					format!(" ({} {offer})", feature.name()),

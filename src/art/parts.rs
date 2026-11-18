@@ -386,19 +386,14 @@ impl Parts {
 	/// Reads a character's part file over their style's `kit`, with a world's own kit (a
 	/// `kit.svg` beside the file, for the world's props) in between.
 	pub fn load_puppet(path: &Path, kit: &Parts) -> Result<Parts> {
-		Self::load(path)?.over_kits(path, kit)
-	}
-
-	/// A character's own parts, read from `path`, over the world's kit beside that file (if it
-	/// has one) and then their style's `kit`.
-	pub fn over_kits(self, path: &Path, kit: &Parts) -> Result<Parts> {
+		let own = Self::load(path)?;
 		let world_kit = path.with_file_name(KIT_FILE);
 
 		if world_kit == path || !world_kit.is_file() {
-			return Ok(self.over(kit.clone()));
+			return Ok(own.over(kit.clone()));
 		}
 
-		Ok(self.over(Self::load(&world_kit)?.over(kit.clone())))
+		Ok(own.over(Self::load(&world_kit)?.over(kit.clone())))
 	}
 
 	/// Reads parts from SVG text.

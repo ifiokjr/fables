@@ -109,7 +109,7 @@ enum Command {
 	/// Add a character to a world's cast.
 	Character {
 		#[command(subcommand)]
-		action: CharacterAction,
+		action: Box<CharacterAction>,
 	},
 	/// Start a world's own setting, blank or from one it already uses.
 	Setting {
@@ -549,7 +549,7 @@ fn run(cli: Cli) -> Result<()> {
 			}
 		}
 		Command::Character { action } => {
-			match action {
+			match *action {
 				CharacterAction::New {
 					id,
 					name,
@@ -1189,7 +1189,8 @@ fn style_describe(name: &str) -> Result<()> {
 	say!("  (`kind = \"grown-up\"` in the cast file puts a person on the grown-up body)")?;
 	say!(
 		"  (a cast picks each with `hair`, `brows`, `nose` and `build`; the first is the style's \
-		 own, and without a `hair` or `build` a template-drawn person gets one picked from their id)"
+		 own, and without a `hair` or `build` a template-drawn person gets one picked from their \
+		 id)"
 	)?;
 
 	say!("parts (name, views, need, home, space):")?;

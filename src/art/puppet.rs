@@ -270,6 +270,7 @@ impl Proportions {
 			}
 		})
 	}
+
 	/// A hip joint's x, `side` -1 near and 1 far, turned by `t`.
 	fn hip_x(&self, side: f32, t: f32) -> f32 {
 		let (near, far) = self.hips_turned;
@@ -364,42 +365,15 @@ pub struct Authored {
 	/// How heavily built the figure is. Its parts are already fitted to it, and
 	/// [`Authored::body`] is its body built to match.
 	pub physique: Physique,
-	/// The features its own part file draws (always its hair), which a cast's picks leave as
-	/// they are. None for a template.
-	pub file_features: Vec<Feature>,
-	/// The ways of drawing its features it was drawn with: the hair a template-drawn figure
-	/// has, and the brows and nose a cast picked that its file doesn't draw.
+	/// The ways of drawing its features a template-drawn figure was drawn with (none for a
+	/// figure drawn from its own part file).
 	pub picks: Picks,
 }
 
 impl Authored {
-	/// Reads a part file over its style's kit, refusing parts that can't draw a figure. The
-	/// brows and nose a character `picks` are drawn unless their file draws its own; the file
-	/// always draws its own hair.
-	pub fn load(
-		file: &FilePath,
-		style: &Arc<StylePack>,
-		build: Build,
-		picks: &Picks,
-	) -> Result<Authored> {
-		let own = Parts::load(file)?;
-		let file_features: Vec<Feature> = Feature::ALL
-			.into_iter()
-			.filter(|&feature| own.draws(feature))
-			.collect();
-		let picks = Picks {
-			hair: None,
-			brows: picks.brows.clone().filter(|_| !own.draws(Feature::Brows)),
-			nose: picks.nose.clone().filter(|_| !own.draws(Feature::Nose)),
-		};
-		let mut parts = own.over_kits(file, &style.kit)?;
-		style.pick(&mut parts, build, &picks)?;
-
-		Ok(Authored {
-			file_features,
-			picks,
-			..Self::from_parts(file, parts, style)?
-		})
+	/// Reads a part file over its style's kit, refusing parts that can't draw a figure.
+	pub fn load(file: &FilePath, style: &Arc<StylePack>) -> Result<Authored> {
+		Self::from_parts(file, Parts::load_puppet(file, &style.kit)?, style)
 	}
 
 	/// A character drawn straight from their style's template for their body over its kit,
@@ -465,7 +439,6 @@ impl Authored {
 			ink_style: None,
 			template: false,
 			physique: Physique::Plain,
-			file_features: Vec::new(),
 			picks: Picks::default(),
 		})
 	}
@@ -1366,8 +1339,8 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 /// A soft contact shadow under the feet, so the figure stands on the ground.
 pub fn shadow(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState, lift: f32) {
 	let fade = (1.0 - lift / 120.0).clamp(0.35, 1.0);
-	let size = puppet.body(look.build).limbs.hip_spread
-		/ puppet.style.body(Build::Kid).limbs.hip_spread;
+	let size =
+		puppet.body(look.build).limbs.hip_spread / puppet.style.body(Build::Kid).limbs.hip_spread;
 	let turn = (state.facing / STAGED_FACING).clamp(-1.0, 1.0);
 	let spread = 1.0 + state.lie * 1.8;
 	svg.fill_alpha(
@@ -2791,11 +2764,7 @@ fn draw_nose(svg: &mut Svg, puppet: &Authored, inks: &Inks, t: f32, wrinkle: boo
 	let Some(nose) = puppet.part("nose", t) else {
 		return;
 	};
-	let nose = nose
-		.map(|p| p * scale)
-		.shift(at)
-		.map(warp)
-		.shift(poke);
+	let nose = nose.map(|p| p * scale).shift(at).map(warp).shift(poke);
 	svg.brush_fill(&nose.path(), inks.nose, inks.line, inks.finish.detail * 1.1);
 	svg.cel_shade(&nose, pt(-4.0, -4.0), inks.finish.cel_shadow);
 	svg.brush_line(&nose.path(), inks.line, inks.finish.detail * 1.1);
@@ -3465,7 +3434,7 @@ mod tests {
 			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 
 		for name in ["stinky", "bogey", "grubby", "shouty", "fibby"] {
-			let puppet = Authored::load(&world.join(format!("{name}.svg")), &cartoon(), Build::Kid, &Picks::default())
+			let puppet = Authored::load(&world.join(format!("{name}.svg")), &cartoon())
 				.unwrap_or_else(|error| panic!("{name}: {error:#}"));
 
 			for turning in ["head", "hair", "torso", "legwear"] {
@@ -3543,7 +3512,7 @@ mod tests {
 		let world =
 			std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("worlds/kerfuffle/puppets");
 		let hair = |name: &str| {
-			Authored::load(&world.join(format!("{name}.svg")), &cartoon(), Build::Kid, &Picks::default())
+			Authored::load(&world.join(format!("{name}.svg")), &cartoon())
 				.unwrap()
 				.required("hair", 1.0)
 		};
