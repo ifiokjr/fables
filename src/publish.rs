@@ -203,7 +203,7 @@ fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Spee
 	use crate::video::voice::SAMPLE_RATE;
 
 	// The same key `voice::speak` caches takes under, so a recorded take gives the real length.
-	let key = format!("{:?}|{:?}|{}", line.voice, line.delivery, line.text);
+	let key = crate::video::voice::cache_key(line.voice, line.delivery, line.text);
 	let wav = cache.join(format!("{:016x}.wav", seed_of(&key)));
 	let seconds = match crate::video::voice::read_wav(&wav) {
 		Ok((samples, _rate)) => samples.len() as f32 / SAMPLE_RATE as f32,
