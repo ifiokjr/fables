@@ -1,0 +1,11 @@
+The Kerfuffle series is not public domain.
+
+The story text, the character names and designs, the series bible
+(`kerfuffle.md`) and the puppet drawings in `worlds/kerfuffle/` are
+
+    Copyright (c) Ifiok Jr. All rights reserved.
+
+They are included in this repository so the tool can be seen working on
+a real series, not as material you may republish or sell. The code that
+draws them is software, and is released under the Unlicense in the
+`LICENSE` file at the root of this repository like the rest of the code.

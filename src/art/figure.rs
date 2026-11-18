@@ -127,8 +127,9 @@ pub struct Look {
 	/// Mouth width multiplier; Stinky's mouth is the star of his book.
 	pub mouth_size: f32,
 	pub seed: u64,
-	/// The character's authored puppet (see [`puppet`](super::puppet)), once they have been
-	/// redrawn; otherwise they are drawn by this module's parametric puppet.
+	/// The character's drawing from parts (see [`puppet`](super::puppet)): their own part
+	/// file, or their drawing style's template. `None` asks for this module's parametric
+	/// puppet (`puppet = "parametric"` in the cast).
 	pub puppet: Option<puppet::Authored>,
 }
 

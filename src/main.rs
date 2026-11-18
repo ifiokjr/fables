@@ -1,5 +1,6 @@
 //! The `fables` command line.
 
+use std::io::Write as _;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -9,7 +10,6 @@ use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
 use fables::art::pack::StylePack;
-use fables::art::parts;
 use fables::art::parts::Level;
 use fables::art::parts::Parts;
 use fables::art::settings::built_in_names;
@@ -21,9 +21,32 @@ use fables::press;
 use fables::publish;
 use fables::raster;
 use fables::story::Story;
+use fables::studio::BuildName;
+use fables::studio::CharacterBrief;
+use fables::studio::Colours;
+use fables::studio::PartData;
 use fables::studio::SheetKind;
+use fables::studio::Studio;
+use fables::studio::WorldBrief;
 use fables::video::frames::Format;
 use fables::world::World;
+
+/// Writes a line of the command's output, returning its error instead of panicking the way
+/// `println!` does.
+///
+/// The reader can go away before the command has finished: `fables style list | head -1` closes
+/// the pipe after its one line. [`main`] treats that broken pipe as the end of the job.
+fn say(line: std::fmt::Arguments<'_>) -> Result<()> {
+	writeln!(std::io::stdout().lock(), "{line}")?;
+	Ok(())
+}
+
+/// Writes a line of output through [`say`].
+macro_rules! say {
+	($($arg:tt)*) => {
+		say(format_args!($($arg)*))
+	};
+}
 
 /// Turn a picture-book script into proofs, an ePub, KDP print files and narrated videos.
 ///
@@ -34,15 +57,19 @@ use fables::world::World;
 struct Cli {
 	#[command(subcommand)]
 	command: Command,
-	/// Draw in these art styles instead of the script's own: riso, tv, bold, cut-paper, crayon,
-	/// storybook, clear, a comma-separated list (bold,tv), or all. Each style renders into its
-	/// own folder.
+	/// Draw in these page skins instead of the script's own: riso, tv, bold, cut-paper, crayon,
+	/// storybook, clear, a comma-separated list (bold,tv), or all. Each skin renders into its
+	/// own folder. For the drawing styles figures are built with (chibi, clear-line…), see
+	/// `fables style list`.
 	#[arg(long, global = true)]
 	style: Option<String>,
 	/// The world to work in: a folder with a world.toml. Defaults to the nearest world above the
 	/// script (or the current folder), or the only one in a `worlds/` folder here.
 	#[arg(long, global = true)]
 	world: Option<PathBuf>,
+	/// The folder whose `worlds/` the studio works in (default: the current folder).
+	#[arg(long, global = true, default_value = ".")]
+	root: PathBuf,
 }
 
 #[derive(Subcommand)]
@@ -54,11 +81,27 @@ enum Command {
 		/// The cast id of the star, from the world's cast.toml.
 		#[arg(long)]
 		star: String,
-		#[arg(long, default_value = "Ifiok Jr.")]
-		author: String,
+		/// The author on the title page. Defaults to the world's `author` in world.toml.
+		#[arg(long)]
+		author: Option<String>,
 		/// Where books live (default: the world's stories/ folder).
 		#[arg(long)]
 		dir: Option<PathBuf>,
+	},
+	/// Start a world, and add characters to one.
+	World {
+		#[command(subcommand)]
+		action: WorldAction,
+	},
+	/// Add a character to a world's cast.
+	Character {
+		#[command(subcommand)]
+		action: CharacterAction,
+	},
+	/// Start a world's own setting, blank or from one it already uses.
+	Setting {
+		#[command(subcommand)]
+		action: SettingAction,
 	},
 	/// Check a script for mistakes without rendering anything.
 	Check { story: PathBuf },
@@ -93,7 +136,7 @@ enum Command {
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
-	/// Draw the same pages in every art style, side by side, to choose a look.
+	/// Draw the same pages in every page skin, side by side, to choose a look.
 	Styles {
 		story: PathBuf,
 		#[arg(long, default_value = "out")]
@@ -124,11 +167,7 @@ enum Command {
 	},
 	/// Serve the studio to an agent over MCP (stdio): worlds, styles and characters, with
 	/// model sheets returned as images.
-	Mcp {
-		/// The folder whose `worlds/` the studio works in.
-		#[arg(long, default_value = ".")]
-		root: PathBuf,
-	},
+	Mcp,
 	/// Hear voices: the providers, the offline voices, and a line in a character's voice.
 	Voice {
 		#[command(subcommand)]
@@ -187,21 +226,126 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum WorldAction {
+	/// Start a world: a world.toml, an empty cast with a commented example, and stories/.
+	///
+	/// Example: `fables world new "Teacup Lane" --style chibi --author "Ifiok Jr."`
+	New {
+		/// The world's name, e.g. "Teacup Lane". Its folder is the name as a slug.
+		name: String,
+		/// The drawing style its folk are drawn in, from `fables style list`.
+		#[arg(long)]
+		style: String,
+		/// A sentence or two on the world: where it is, its rule, its tone.
+		#[arg(long)]
+		about: Option<String>,
+		/// The author credited in its books, unless a book names its own.
+		#[arg(long)]
+		author: Option<String>,
+	},
+}
+
+#[derive(Subcommand)]
+enum CharacterAction {
+	/// Add a character to the world's cast, in their own colours.
+	///
+	/// Example: `fables character new pip --name "Pip Pocket" --top teal --draw`
+	New {
+		/// The cast id scripts use after `@`: lowercase letters, digits and hyphens.
+		id: String,
+		/// Their full name, e.g. "Pip Pocket".
+		#[arg(long)]
+		name: String,
+		/// kid or grown-up.
+		#[arg(long, default_value = "kid", value_parser = ["kid", "grown-up"])]
+		kind: String,
+		/// Who they are, in a sentence.
+		#[arg(long)]
+		about: Option<String>,
+		#[arg(long)]
+		skin: Option<String>,
+		#[arg(long = "hair-colour")]
+		hair_colour: Option<String>,
+		#[arg(long)]
+		top: Option<String>,
+		#[arg(long)]
+		trim: Option<String>,
+		#[arg(long)]
+		bottom: Option<String>,
+		#[arg(long)]
+		shoes: Option<String>,
+		#[arg(long)]
+		eyes: Option<String>,
+		/// The pattern on the top, in the trim colour: plain, stripes, dots or star.
+		#[arg(long)]
+		pattern: Option<String>,
+		/// Also write their part file from the style's template, so it can be redrawn.
+		#[arg(long)]
+		draw: bool,
+	},
+}
+
+#[derive(Subcommand)]
+enum SettingAction {
+	/// Start a world's own setting, blank or from a setting it already uses.
+	///
+	/// Example: `fables setting new harbour --from park --about "The harbour wall"`
+	New {
+		/// The setting's name, as a page heading uses it (`# harbour`).
+		name: String,
+		/// A setting to start from, to repaint it; leave out for a sky over the ground.
+		#[arg(long)]
+		from: Option<String>,
+		/// A line on what the place is (default: the name in words).
+		#[arg(long)]
+		about: Option<String>,
+	},
+}
+
+#[derive(Subcommand)]
 enum PuppetAction {
 	/// Check part files against the parts a figure is drawn with: missing parts, views without
 	/// their pair, parts that swap instead of blending, and names no figure uses.
 	Check {
-		/// The cast id to check; leave it out to check every member with a puppet.
+		/// The cast id to check; leave it out to check every member with a part file.
 		id: Option<String>,
 	},
 	/// Start a cast member's part file to redraw part by part, from the style's template or
-	/// another puppet's drawings.
+	/// another puppet's drawings, and point their cast entry at it.
+	///
+	/// Example: `fables puppet template pip`
 	Template {
 		/// The cast id the file is for, e.g. bogey.
 		id: String,
-		/// The puppet whose drawings to start from (default: the style's template).
+		/// The cast member whose drawings to start from (default: the style's template).
 		#[arg(long)]
 		from: Option<String>,
+	},
+	/// Print a character's parts as path data: their own (or their style's template) and the
+	/// kit's, marked.
+	///
+	/// Example: `fables puppet parts pip head.front ear`
+	Parts {
+		/// The cast id, e.g. stinky.
+		id: String,
+		/// Parts to read; leave empty for all their own parts.
+		parts: Vec<String>,
+	},
+	/// Write or replace a character's parts, through the same check the MCP server uses: a
+	/// change that would break the figure is refused with the findings.
+	///
+	/// Example: `fables puppet set pip ear --d "M0 -20 C-16 -32 -36 -20 -34 2 Z"`
+	Set {
+		/// The cast id, e.g. stinky.
+		id: String,
+		/// The part to write, e.g. hair.front, with `--d`.
+		part: Option<String>,
+		/// SVG path data for the part.
+		#[arg(long, value_name = "PATH")]
+		d: Option<String>,
+		/// An SVG file of several parts, each path's id its name.
+		#[arg(long, value_name = "FILE")]
+		file: Option<PathBuf>,
 	},
 	/// Render every part of a puppet: each turning part front-on, half-turned and three-quarters.
 	Sheet {
@@ -238,6 +382,11 @@ enum StyleAction {
 	/// Check a style: its template over its kit must draw a whole figure, and its bodies must
 	/// stand up.
 	Check { name: String },
+	/// Describe a style: its finish, bodies, every part a figure is drawn with, its coordinate
+	/// space and the drawing rules. Read this before drawing a part.
+	///
+	/// Example: `fables style describe chibi`
+	Describe { name: String },
 	/// Render a style: its template character on a model sheet, and its kit and template parts.
 	Sheet {
 		name: String,
@@ -267,31 +416,115 @@ impl Shape {
 }
 
 fn main() {
-	if let Err(error) = run(Cli::parse()) {
-		eprintln!("error: {error:#}");
-		std::process::exit(1);
+	match run(Cli::parse()) {
+		Ok(()) => {}
+		Err(error) if broken_pipe(&error) => {}
+		Err(error) => {
+			eprintln!("error: {error:#}");
+			std::process::exit(1);
+		}
 	}
 }
 
+/// Whether the command failed only because its reader went away (`| head -1`), which is not a
+/// failure to report.
+fn broken_pipe(error: &anyhow::Error) -> bool {
+	error.chain().any(|cause| {
+		cause
+			.downcast_ref::<std::io::Error>()
+			.is_some_and(|error| error.kind() == std::io::ErrorKind::BrokenPipe)
+	})
+}
+
 fn run(cli: Cli) -> Result<()> {
-	let choices = style_choices(cli.style.as_deref())?;
-	let flag = cli.world.as_deref();
+	let Cli {
+		command,
+		style,
+		world: flag,
+		root,
+	} = cli;
+	let flag = flag.as_deref();
 	// The world for commands that don't start from a script.
 	let world = || {
 		match flag {
 			Some(dir) => World::load(dir),
-			None => World::find(Path::new(".")),
+			None => World::find(&root),
 		}
 	};
 
-	match cli.command {
+	match command {
 		Command::New {
 			title,
 			star,
 			author,
 			dir,
-		} => new_story(&world()?, &title, &star, &author, dir.as_deref()),
+		} => new_story(&world()?, &title, &star, author.as_deref(), dir.as_deref()),
+		Command::World { action } => {
+			match action {
+				WorldAction::New {
+					name,
+					style,
+					about,
+					author,
+				} => world_new(&root, &name, &style, about.as_deref(), author.as_deref()),
+			}
+		}
+		Command::Character { action } => {
+			match action {
+				CharacterAction::New {
+					id,
+					name,
+					kind,
+					about,
+					skin,
+					hair_colour,
+					top,
+					trim,
+					bottom,
+					shoes,
+					eyes,
+					pattern,
+					draw,
+				} => {
+					let build = if kind == "grown-up" {
+						BuildName::GrownUp
+					} else {
+						BuildName::Kid
+					};
+					let brief = CharacterBrief {
+						id,
+						name,
+						build,
+						born: None,
+						about,
+						habit: None,
+						colours: Colours {
+							skin: skin.unwrap_or_else(|| "tangerine".into()),
+							hair: hair_colour.unwrap_or_else(|| "plum".into()),
+							top: top.unwrap_or_else(|| "teal".into()),
+							trim: trim.unwrap_or_else(|| "cream".into()),
+							bottom: bottom.unwrap_or_else(|| "night".into()),
+							shoes: shoes.unwrap_or_else(|| "ink".into()),
+							eyes: eyes.unwrap_or_else(|| "cocoa".into()),
+						},
+						pattern,
+						extras: Vec::new(),
+						draw,
+					};
+
+					character_new(&world()?, &brief)
+				}
+			}
+		}
+		Command::Setting { action } => {
+			match action {
+				SettingAction::New { name, from, about } => {
+					setting_new(&world()?, &name, from.as_deref(), about.as_deref())
+				}
+			}
+		}
 		Command::Sheets { moods, out } => {
+			let choices = style_choices(style.as_deref())?;
 			let world = world()?;
 
 			for style in sheet_styles(&choices) {
@@ -311,23 +544,33 @@ fn run(cli: Cli) -> Result<()> {
 				PuppetAction::Template { id, from } => {
 					puppet_template(&world()?, &id, from.as_deref())
 				}
+				PuppetAction::Parts { id, parts: names } => puppet_parts(&world()?, &id, &names),
+				PuppetAction::Set { id, part, d, file } => {
+					puppet_set(
+						&world()?,
+						&id,
+						part.as_deref(),
+						d.as_deref(),
+						file.as_deref(),
+					)
+				}
 				PuppetAction::Sheet { id, out } => puppet_sheet(&world()?, &id, &out),
 			}
 		}
-		Command::Mcp { root } => fables::mcp::serve(&root),
+		Command::Mcp => fables::mcp::serve(&root),
 		Command::Voice { action } => {
 			match action {
 				VoiceAction::Providers => {
-					for provider in fables::studio::Studio::voice_providers() {
+					for provider in Studio::voice_providers() {
 						let state = if provider.ready { "ready" } else { "not ready" };
-						println!("{:<11} {state:<10} {}", provider.provider, provider.needs);
+						say!("{:<11} {state:<10} {}", provider.provider, provider.needs)?;
 					}
 
 					Ok(())
 				}
 				VoiceAction::List => {
-					for (name, language) in fables::studio::Studio::say_voices()? {
-						println!("{name:<28} {language}");
+					for (name, language) in Studio::say_voices()? {
+						say!("{name:<28} {language}")?;
 					}
 
 					Ok(())
@@ -345,16 +588,18 @@ fn run(cli: Cli) -> Result<()> {
 				StyleAction::List => {
 					for name in StylePack::names() {
 						let pack = StylePack::named(name)?;
-						println!("{name}: {}", pack.description);
+						say!("{name} (skin: {}): {}", pack.skin, pack.description)?;
 					}
 
 					Ok(())
 				}
 				StyleAction::Check { name } => style_check(&name),
+				StyleAction::Describe { name } => style_describe(&name),
 				StyleAction::Sheet { name, out } => style_sheet(&name, &out),
 			}
 		}
 		Command::Rig { id, motion, out } => {
+			let choices = style_choices(style.as_deref())?;
 			let world = world()?;
 
 			for style in sheet_styles(&choices) {
@@ -371,34 +616,41 @@ fn run(cli: Cli) -> Result<()> {
 		}
 		Command::Styles { story, out } => {
 			each(&story, |path| {
-				let (story, cast) = load(path, None, flag)?;
+				let (story, cast, _) = load(path, None, flag)?;
 				styles(&story, &cast, &out)
 			})
 		}
-		Command::Check { story } => each_style(&story, &choices, flag, check),
+		Command::Check { story } => {
+			let choices = style_choices(style.as_deref())?;
+			each_style(&story, &choices, flag, check)
+		}
 		Command::Review { story, out } => {
 			each(&story, |path| {
-				let (story, cast) = load(path, None, flag)?;
+				let (story, cast, _) = load(path, None, flag)?;
 				review(&story, &cast, &out)
 			})
 		}
 		Command::Proofs { story, out } => {
-			each_style(&story, &choices, flag, |story, cast| {
+			let choices = style_choices(style.as_deref())?;
+			each_style(&story, &choices, flag, |story, cast, _| {
 				proofs(story, cast, &out)
 			})
 		}
 		Command::Ebook { story, out } => {
-			each_style(&story, &choices, flag, |story, cast| {
+			let choices = style_choices(style.as_deref())?;
+			each_style(&story, &choices, flag, |story, cast, _| {
 				ebook(story, cast, &out)
 			})
 		}
 		Command::Print { story, out } => {
-			each_style(&story, &choices, flag, |story, cast| {
+			let choices = style_choices(style.as_deref())?;
+			each_style(&story, &choices, flag, |story, cast, _| {
 				print(story, cast, &out)
 			})
 		}
 		Command::Book { story, out } => {
-			each_style(&story, &choices, flag, |story, cast| {
+			let choices = style_choices(style.as_deref())?;
+			each_style(&story, &choices, flag, |story, cast, _| {
 				proofs(story, cast, &out)?;
 				ebook(story, cast, &out)?;
 				print(story, cast, &out)
@@ -410,7 +662,8 @@ fn run(cli: Cli) -> Result<()> {
 			format,
 			preview,
 		} => {
-			each_style(&story, &choices, flag, |story, cast| {
+			let choices = style_choices(style.as_deref())?;
+			each_style(&story, &choices, flag, |story, cast, _| {
 				video(story, cast, &out, &format.formats(), preview)
 			})
 		}
@@ -429,23 +682,19 @@ fn run(cli: Cli) -> Result<()> {
 				!(pin.is_some() && unpin),
 				"--pin writes camera directions and --unpin removes them; use one"
 			);
+			let choices = style_choices(style.as_deref())?;
 
-			each(&story, |path| {
-				if let Some(spec) = &pin {
-					pin_story(path, flag, spec, &out)?;
-				}
+			if pin.is_some() || unpin {
+				each(&story, |path| {
+					match &pin {
+						Some(spec) => pin_story(path, flag, spec, &out),
+						None => unpin_story(path),
+					}
+				})?;
+			}
 
-				if unpin {
-					unpin_story(path)?;
-				}
-
-				for choice in &choices {
-					let (story, cast) = load(path, choice.as_deref(), flag)?;
-					println!("  style: {}", story.style().name.name());
-					storyboard(&story, &cast, &out, format == Shape::Portrait)?;
-				}
-
-				Ok(())
+			each_style(&story, &choices, flag, |story, cast, _| {
+				storyboard(story, cast, &out, format == Shape::Portrait)
 			})
 		}
 		Command::Animatic { story, out, format } => {
@@ -453,13 +702,15 @@ fn run(cli: Cli) -> Result<()> {
 				format != Shape::Both,
 				"animatic cuts one shape; use --format landscape or portrait"
 			);
+			let choices = style_choices(style.as_deref())?;
 
-			each_style(&story, &choices, flag, |story, cast| {
+			each_style(&story, &choices, flag, |story, cast, _| {
 				animatic(story, cast, &out, format == Shape::Portrait)
 			})
 		}
 		Command::All { story, out } => {
-			each_style(&story, &choices, flag, |story, cast| {
+			let choices = style_choices(style.as_deref())?;
+			each_style(&story, &choices, flag, |story, cast, _| {
 				proofs(story, cast, &out)?;
 				ebook(story, cast, &out)?;
 				print(story, cast, &out)?;
@@ -469,8 +720,8 @@ fn run(cli: Cli) -> Result<()> {
 	}
 }
 
-/// The styles asked for with `--style`: one name, a comma-separated list, or `all`. `None` in
-/// the list means "the script's own style".
+/// The page skins asked for with `--style`: one name, a comma-separated list, or `all`. `None`
+/// in the list means "the skin the script or its drawing style names".
 fn style_choices(argument: Option<&str>) -> Result<Vec<Option<String>>> {
 	let Some(argument) = argument else {
 		return Ok(vec![None]);
@@ -491,7 +742,8 @@ fn style_choices(argument: Option<&str>) -> Result<Vec<Option<String>>> {
 			if Style::parse(name).is_none() {
 				let names: Vec<&str> = StyleName::ALL.iter().map(|(name, _)| *name).collect();
 				anyhow::bail!(
-					"unknown style `{name}`; use {}, a comma-separated list, or all",
+					"unknown page skin `{name}`; use {}, a comma-separated list, or all (for \
+					 drawing styles such as chibi, run `fables style list`)",
 					names.join(", ")
 				);
 			}
@@ -509,18 +761,32 @@ fn sheet_styles(choices: &[Option<String>]) -> Vec<Style> {
 		.collect()
 }
 
-/// Runs `action` on every script (see [`each`]) once per chosen style.
+/// Runs `action` on every script (see [`each`]) once per chosen page skin. The third argument
+/// says whether this is the first skin, so a note is printed once rather than once per skin.
 fn each_style(
 	path: &Path,
 	choices: &[Option<String>],
 	world: Option<&Path>,
-	mut action: impl FnMut(&Story, &Cast) -> Result<()>,
+	mut action: impl FnMut(&Story, &Cast, bool) -> Result<()>,
 ) -> Result<()> {
 	each(path, |script| {
-		for choice in choices {
-			let (story, cast) = load(script, choice.as_deref(), world)?;
-			println!("  style: {}", story.style().name.name());
-			action(&story, &cast)?;
+		let mut resolved = None;
+
+		for (index, choice) in choices.iter().enumerate() {
+			let (story, cast, dir) = load(script, choice.as_deref(), world)?;
+
+			// Say which world a script resolved, so a redirected build is visible.
+			if resolved.as_ref() != Some(&dir) {
+				say!("  world: {}", dir.display())?;
+				resolved = Some(dir);
+			}
+
+			say!(
+				"  drawing: {} · skin: {}",
+				story.drawing_style,
+				story.style().name.name()
+			)?;
+			action(&story, &cast, index == 0)?;
 		}
 
 		Ok(())
@@ -562,7 +828,7 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	}
 
 	for script in &scripts {
-		println!("— {}", script.display());
+		say!("— {}", script.display())?;
 		action(script).with_context(|| format!("while building {}", script.display()))?;
 	}
 
@@ -574,9 +840,12 @@ fn new_story(
 	world: &World,
 	title: &str,
 	star: &str,
-	author: &str,
+	author: Option<&str>,
 	dir: Option<&Path>,
 ) -> Result<()> {
+	let author = author.or(world.author.as_deref()).with_context(|| {
+		"no author for the title page: pass --author, or set author in the world's world.toml"
+	})?;
 	let recipe = world.recipe().with_context(|| {
 		format!(
 			"{} has no recipe.md to start a book from",
@@ -586,6 +855,10 @@ fn new_story(
 	let recipe = std::fs::read_to_string(&recipe)
 		.with_context(|| format!("could not read {}", recipe.display()))?;
 	let slug = fables::story::slugify(title);
+	anyhow::ensure!(
+		!slug.is_empty(),
+		"the title needs at least one letter or digit: it names the book's folder"
+	);
 	let folder = dir
 		.map_or_else(|| world.stories(), Path::to_path_buf)
 		.join(&slug);
@@ -611,30 +884,163 @@ fn new_story(
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
 	std::fs::write(&path, script).with_context(|| format!("could not write {}", path.display()))?;
-	println!("✓ wrote {} from the {} recipe", path.display(), world.name);
+	say!("✓ wrote {} from the {} recipe", path.display(), world.name)?;
 
 	if let Err(error) =
-		load(&path, None, Some(&world.dir)).and_then(|(story, cast)| check(&story, &cast))
+		load(&path, None, Some(&world.dir)).and_then(|(story, cast, _)| check(&story, &cast, true))
 	{
-		println!("  next: {error:#}");
-		println!(
+		say!("  next: {error:#}")?;
+		say!(
 			"  (add `[{star}]` to {}, then run `fables proofs {}`)",
 			world.cast_file().display(),
 			path.display()
-		);
+		)?;
 	}
 
 	Ok(())
 }
 
+/// Starts a world under `<root>/worlds/`, and says what to make next.
+fn world_new(
+	root: &Path,
+	name: &str,
+	style: &str,
+	about: Option<&str>,
+	author: Option<&str>,
+) -> Result<()> {
+	let studio = Studio::new(root);
+	let world = studio.create_world(&WorldBrief {
+		name: name.to_owned(),
+		about: about.map(str::to_owned),
+		style: Some(style.to_owned()),
+		author: author.map(str::to_owned),
+	})?;
+	let dir = root.join("worlds").join(&world.folder);
+	let skin = StylePack::named(&world.style)?.skin.clone();
+	say!(
+		"✓ started {} in {} (drawing style {}, page skin {skin})",
+		world.name,
+		dir.display(),
+		world.style
+	)?;
+	say!(
+		"  next: fables character new pip --name \"Pip Pocket\" --world {}",
+		dir.display()
+	)?;
+	Ok(())
+}
+
+/// Adds a character to a world's cast, drawn from its style's template.
+fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
+	let report = fables::studio::create_character(world, brief)?;
+	let how = match report.drawn {
+		Some("puppet") => {
+			format!(
+				"own part file {}",
+				report.puppet.as_deref().unwrap_or_default()
+			)
+		}
+		Some("template") => format!("drawn from the {} template", world.style),
+		_ => "drawn by the parametric puppet".to_owned(),
+	};
+	say!(
+		"✓ added {} ({}) to {} — {how}",
+		report.name,
+		report.id,
+		world.cast_file().display()
+	)?;
+	let next = if brief.draw {
+		format!("fables puppet parts {}", brief.id)
+	} else {
+		format!("fables puppet sheet {}", brief.id)
+	};
+	say!("  next: {next}")?;
+	Ok(())
+}
+
+/// Starts a world's own setting.
+fn setting_new(world: &World, name: &str, from: Option<&str>, about: Option<&str>) -> Result<()> {
+	let about = about.map_or_else(|| name.replace('-', " "), str::to_owned);
+	let setting = fables::studio::create_setting(world, name, &about, from)?;
+	say!(
+		"✓ created `{}` in {}",
+		setting.name,
+		world
+			.dir
+			.join("settings")
+			.join(format!("{name}.svg"))
+			.display()
+	)?;
+	say!("  next: fables sheets   (see every setting drawn)")?;
+	Ok(())
+}
+
+/// Prints what a drawing style offers a character designer.
+fn style_describe(name: &str) -> Result<()> {
+	let report = Studio::describe_style(name)?;
+	say!("{}: {}", report.name, report.description)?;
+	say!("page skin: {}", report.skin)?;
+	let finish = &report.finish;
+	say!(
+		"finish: line {}, detail {}, light ({}, {}), cel shadow {}, far {}",
+		finish.line,
+		finish.detail,
+		finish.light.x,
+		finish.light.y,
+		finish.cel_shadow,
+		finish.far
+	)?;
+	say!(
+		"face: turn {}, radius {}, slide {} (head units)",
+		report.face.turn,
+		report.face.radius,
+		report.face.slide
+	)?;
+	say!("bodies (figure units, soles at y = 0, up is negative):")?;
+
+	for body in &report.bodies {
+		say!(
+			"  {:<9} neck y={}, shoulder y={}, pelvis y={}",
+			body.name,
+			body.neck_y,
+			body.shoulder_y,
+			body.pelvis_y
+		)?;
+	}
+
+	say!("parts (name, views, need, home, space):")?;
+
+	for part in &report.parts {
+		say!(
+			"  {:<22} {:<8} {:<8} {:<9} {}",
+			part.name,
+			part.views,
+			part.need,
+			part.home,
+			part.space
+		)?;
+	}
+
+	say!("rules:")?;
+
+	for rule in &report.rules {
+		say!("  - {rule}")?;
+	}
+
+	say!("  next: fables character new pip --name \"Pip Pocket\"   (start one from the template)")?;
+	Ok(())
+}
+
 /// Loads a script and its world's cast, furnished with the world's book matter and narrator.
-fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story, Cast)> {
+/// Returns the resolved world folder too, so a build says which world it read.
+fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story, Cast, PathBuf)> {
 	let mut story = Story::load(path)?;
 
 	if let Some(name) = style {
 		if Style::parse(name).is_none() {
 			anyhow::bail!(
-				"unknown style `{name}`; use riso, tv, bold, cut-paper, crayon, storybook or clear"
+				"unknown page skin `{name}`; use riso, tv, bold, cut-paper, crayon, storybook or \
+				 clear (for drawing styles, run `fables style list`)"
 			);
 		}
 
@@ -645,15 +1051,25 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 	world.furnish(&mut story)?;
 	let cast = world.cast_for(&story)?;
 
-	Ok((story, cast))
+	Ok((story, cast, world.dir.clone()))
 }
 
-fn check(story: &Story, cast: &Cast) -> Result<()> {
+fn check(story: &Story, cast: &Cast, notes: bool) -> Result<()> {
 	let report = publish::check(story, cast)?;
-	println!(
+	say!(
 		"✓ {} — {} script pages, {} book pages, {} words, {} cast members",
-		report.title, report.script_pages, report.book_pages, report.words, report.cast_members
-	);
+		report.title,
+		report.script_pages,
+		report.book_pages,
+		report.words,
+		report.cast_members
+	)?;
+
+	if notes {
+		for note in &report.notes {
+			say!("  note: {note}")?;
+		}
+	}
 
 	Ok(())
 }
@@ -673,44 +1089,46 @@ fn review(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 			fables::review::Severity::Consider => "consider",
 		};
 
-		println!(
+		say!(
 			"{severity} line {}: {} {}",
-			finding.line, finding.observation, finding.suggestion
-		);
+			finding.line,
+			finding.observation,
+			finding.suggestion
+		)?;
 	}
 
 	if findings.is_empty() {
-		println!("Nothing a director would change.");
+		say!("Nothing a director would change.")?;
 	}
 
-	println!(
+	say!(
 		"— {} ({} pages, {} words): {fixes} fix, {considers} consider.",
 		story.meta.title,
 		story.pages.len(),
 		fables::review::story_words(story)
-	);
+	)?;
 
 	Ok(())
 }
 
 fn proofs(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	done(&publish::proofs(story, cast, out)?, started);
+	done(&publish::proofs(story, cast, out)?, started)?;
 	Ok(())
 }
 
 fn ebook(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	done(&publish::ebook(story, cast, out)?.epub, started);
+	done(&publish::ebook(story, cast, out)?.epub, started)?;
 	Ok(())
 }
 
 fn print(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
 	let print = publish::print(story, cast, out)?;
-	done(&print.interior, started);
-	done(&print.cover, started);
-	println!("{}", print.specs);
+	done(&print.interior, started)?;
+	done(&print.cover, started)?;
+	say!("{}", print.specs)?;
 	Ok(())
 }
 
@@ -725,14 +1143,14 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 		&path,
 		raster::png(&press::sheets::cast_sheet(&cast, &world.name, style)?)?,
 	)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	let path = out.join(format!("{slug}-places.png"));
 	std::fs::write(
 		&path,
 		raster::png(&press::sheets::places_sheet(&*world.settings()?, style)?)?,
 	)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	// One setting with one cast member, drawn under every light: the world's colour script.
 	let settings = world.settings()?;
@@ -756,7 +1174,7 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 			style,
 		)?)?,
 	)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	if let Some(id) = moods {
 		let member = cast
@@ -766,7 +1184,7 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 			.with_context(|| format!("`{id}` is not a person, so has no moods"))?;
 		let path = out.join(format!("{id}-moods.png"));
 		std::fs::write(&path, raster::png(&sheet)?)?;
-		done(&path, started);
+		done(&path, started)?;
 	}
 
 	Ok(())
@@ -789,7 +1207,7 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 		&sheet,
 		raster::png(&fables::video::motion::rig_sheet(look, style)?)?,
 	)?;
-	done(&sheet, started);
+	done(&sheet, started)?;
 
 	let (motion, label) = if let Some(name) = motion {
 		(StylePack::named(name)?.motion, format!("-{name}"))
@@ -802,7 +1220,7 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 	};
 	let video = dir.join(format!("{id}-motion{label}.mp4"));
 	fables::video::motion::motion_test(look, &member.name, (style, &motion), &video)?;
-	done(&video, started);
+	done(&video, started)?;
 
 	// A second motion clip: the acting rules, in order, on this character and a scene
 	// partner (the next person in the cast, or a copy of the same one).
@@ -827,54 +1245,22 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 		(style, &motion),
 		&acting,
 	)?;
-	done(&acting, started);
+	done(&acting, started)?;
 
 	Ok(())
 }
 
-/// A cast member's puppet part file, or an explanation of why they have none.
-fn puppet_file(world: &World, cast: &Cast, id: &str) -> Result<PathBuf> {
-	let cast_path = world.cast_file();
-	let member = cast
-		.member(id)
-		.with_context(|| format!("`{id}` is not in {}", cast_path.display()))?;
-
-	match &member.kind {
-		fables::cast::Kind::Figure(look) => {
-			look.puppet
-				.as_ref()
-				.map(|puppet| puppet.file.clone())
-				.with_context(|| {
-					let file = cast_path
-						.with_file_name("puppets")
-						.join(format!("{id}.svg"));
-					let start = if file.exists() {
-						format!("{} exists, so", file.display())
-					} else {
-						format!("start one with `fables puppet template {id}`, then")
-					};
-					format!(
-						"`{id}` has no puppet yet: {start} add `puppet = \"puppets/{id}.svg\"` to \
-						 [{id}] in {}",
-						cast_path.display()
-					)
-				})
-		}
-		_ => anyhow::bail!("`{id}` is not a person, so has no puppet"),
-	}
-}
-
 fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 	let cast = world.cast()?;
-	let style = world.style()?;
 	let ids: Vec<&str> = match id {
 		Some(id) => vec![id],
 		None => {
 			cast.members
 				.values()
-				.filter(
-					|member| matches!(&member.kind, fables::cast::Kind::Figure(look) if look.puppet.is_some()),
-				)
+				.filter(|member| {
+					matches!(&member.kind, fables::cast::Kind::Figure(look)
+						if look.puppet.as_ref().is_some_and(|puppet| !puppet.template))
+				})
 				.map(|member| member.id.as_str())
 				.collect()
 		}
@@ -882,18 +1268,32 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 	let mut errors = 0;
 
 	for id in ids {
-		let path = puppet_file(world, &cast, id)?;
-		let parts = Parts::load_puppet(&path, &style.kit)?;
-		let findings = parts.check();
-		let count = parts.iter().count();
-		println!(
-			"{id}: {count} parts from {} over the {} kit",
-			path.display(),
-			style.name
-		);
+		let member = cast
+			.member(id)
+			.with_context(|| format!("`{id}` is not in {}", world.cast_file().display()))?;
+		let fables::cast::Kind::Figure(look) = &member.kind else {
+			anyhow::bail!("`{id}` is not a person, so has no puppet");
+		};
+		let Some(puppet) = &look.puppet else {
+			anyhow::bail!(
+				"`{id}` is drawn by the parametric puppet, so has no parts to check; start a \
+				 drawing with `fables puppet template {id}`"
+			);
+		};
+		let findings = puppet.parts.check();
+		let count = puppet.parts.iter().count();
+		let source = if puppet.template {
+			format!(
+				"the {} template (no part file of their own)",
+				puppet.style.name
+			)
+		} else {
+			puppet.file.display().to_string()
+		};
+		say!("{id}: {count} parts from {source}")?;
 
 		for finding in &findings {
-			println!("  {finding}");
+			say!("  {finding}")?;
 		}
 
 		errors += findings
@@ -906,50 +1306,108 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 	Ok(())
 }
 
-/// Starts a part file from another puppet's own parts, or from the style's template.
-fn puppet_template(world: &World, id: &str, from: Option<&str>) -> Result<()> {
-	let cast = world.cast()?;
-	let style = world.style()?;
-	let member = cast
-		.member(id)
-		.with_context(|| format!("`{id}` is not in {}", world.cast_file().display()))?;
-	let target = world.dir.join("puppets").join(format!("{id}.svg"));
-	anyhow::ensure!(
-		!target.exists(),
-		"{} already exists; edit it, or move it aside to start again",
-		target.display()
-	);
+/// A character's parts as path data, each marked with where it came from.
+fn puppet_parts(world: &World, id: &str, names: &[String]) -> Result<()> {
+	let parts = fables::studio::character_parts(world, id, names)?;
 
-	// Only the character's own parts: the kit is shared, and redrawing a kit part is a choice.
-	let (parts, origin) = match from {
-		Some(from) => {
-			(
-				Parts::load(&puppet_file(world, &cast, from)?)?,
-				from.to_owned(),
+	for part in &parts {
+		say!("{:<8} {:<24} {}", part.from, part.name, part.d)?;
+	}
+
+	say!("— {} parts", parts.len())?;
+	say!(
+		"  next: fables puppet set {id} <part> --d \"M…\"   (redraw one, checked before it is \
+		 written)"
+	)?;
+	Ok(())
+}
+
+/// Writes parts through the studio's checked operation: a change that would break the figure is
+/// refused with the findings.
+fn puppet_set(
+	world: &World,
+	id: &str,
+	part: Option<&str>,
+	d: Option<&str>,
+	file: Option<&Path>,
+) -> Result<()> {
+	let parts = match (part, d, file) {
+		(Some(part), Some(d), None) => {
+			vec![PartData {
+				name: part.to_owned(),
+				d: d.to_owned(),
+			}]
+		}
+		(Some(part), None, None) => {
+			anyhow::bail!("`{part}` needs `--d \"<path data>\"`, or use `--file <svg>`")
+		}
+		(None, Some(_), None) => {
+			anyhow::bail!(
+				"`--d` needs a part name, e.g. `fables puppet set {id} hair.front --d \"M…\"`"
 			)
 		}
-		None => {
-			(
-				style.template.clone(),
-				format!("the {} template", style.name),
+		(None, None, Some(file)) => parts_from_file(file)?,
+		(None, None, None) => {
+			anyhow::bail!(
+				"name a part with `--d`, or an SVG file of parts with `--file`; `fables puppet \
+				 parts {id}` lists the names"
 			)
 		}
+		_ => anyhow::bail!("use either `--d` or `--file`, not both"),
 	};
-	let drawings: Vec<(&str, &fables::art::shape::Shape)> = parts.iter().collect();
-	let title = format!(
-		"{}: own parts (started from {origin}; redraw each one)",
-		member.name
+
+	anyhow::ensure!(!parts.is_empty(), "no parts to write");
+	let update = fables::studio::set_parts(world, id, &parts, &[])?;
+
+	for finding in &update.findings {
+		say!("  {finding}")?;
+	}
+
+	anyhow::ensure!(
+		update.written,
+		"the change would break `{id}`'s figure, so nothing was written"
 	);
-	std::fs::create_dir_all(world.dir.join("puppets"))
-		.with_context(|| format!("could not create {}", world.dir.join("puppets").display()))?;
-	std::fs::write(&target, parts::write(&title, &drawings))
-		.with_context(|| format!("could not write {}", target.display()))?;
-	println!(
-		"✓ wrote {}\n  Add `puppet = \"puppets/{id}.svg\"` to [{id}] in {}, redraw the parts, and \
-		 run `fables puppet check {id}`.",
-		target.display(),
+	say!(
+		"✓ wrote {} part{} to {id}'s part file ({} own parts)",
+		parts.len(),
+		if parts.len() == 1 { "" } else { "s" },
+		update.own_parts
+	)?;
+	say!("  next: fables puppet sheet {id}")?;
+	Ok(())
+}
+
+/// Parts from an SVG file: a whole document, or a fragment of elements.
+fn parts_from_file(file: &Path) -> Result<Vec<PartData>> {
+	let source = std::fs::read_to_string(file)
+		.with_context(|| format!("could not read {}", file.display()))?;
+	let document = if source.trim_start().starts_with("<svg") {
+		source
+	} else {
+		format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{source}</svg>")
+	};
+	let parts = Parts::parse(&document).with_context(|| format!("in {}", file.display()))?;
+
+	Ok(parts
+		.iter()
+		.map(|(name, shape)| {
+			PartData {
+				name: name.to_owned(),
+				d: shape.exact_data(),
+			}
+		})
+		.collect())
+}
+
+/// Starts a part file and points the cast entry at it.
+fn puppet_template(world: &World, id: &str, from: Option<&str>) -> Result<()> {
+	let report = fables::studio::template_puppet(world, id, from)?;
+	say!(
+		"✓ wrote {} and set `puppet` in {}",
+		report.puppet.as_deref().unwrap_or("the part file"),
 		world.cast_file().display()
-	);
+	)?;
+	say!("  next: fables puppet sheet {id}")?;
 	Ok(())
 }
 
@@ -965,7 +1423,7 @@ fn puppet_sheet(world: &World, id: &str, out: &Path) -> Result<()> {
 		let sheet = dir.join(format!("{id}-{kind}.png"));
 		std::fs::write(&sheet, image.png)
 			.with_context(|| format!("could not write {}", sheet.display()))?;
-		done(&sheet, started);
+		done(&sheet, started)?;
 	}
 
 	Ok(())
@@ -982,8 +1440,8 @@ fn audition(world: &World, who: &str, line: &str, mood: Option<&str>, out: &Path
 	));
 	std::fs::write(&path, take.wav)
 		.with_context(|| format!("could not write {}", path.display()))?;
-	println!("  {} ({:.1}s)", take.label, take.seconds);
-	done(&path, started);
+	say!("  {} ({:.1}s)", take.label, take.seconds)?;
+	done(&path, started)?;
 	Ok(())
 }
 
@@ -991,15 +1449,15 @@ fn style_check(name: &str) -> Result<()> {
 	let pack = StylePack::named(name)?;
 	let findings = pack.check();
 	let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
-	println!(
+	say!(
 		"{name}: {} kit parts, {} template parts, bodies: {}",
 		pack.kit.iter().count(),
 		pack.template.iter().count(),
 		bodies.join(", ")
-	);
+	)?;
 
 	for finding in &findings {
-		println!("  {finding}");
+		say!("  {finding}")?;
 	}
 
 	let errors = findings
@@ -1017,12 +1475,12 @@ fn style_sheet(name: &str, out: &Path) -> Result<()> {
 
 	for (kind, image) in ["model", "parts"]
 		.iter()
-		.zip(fables::studio::Studio::style_sheets(name, 2600)?)
+		.zip(Studio::style_sheets(name, 2600)?)
 	{
 		let sheet = dir.join(format!("{name}-{kind}.png"));
 		std::fs::write(&sheet, image.png)
 			.with_context(|| format!("could not write {}", sheet.display()))?;
-		done(&sheet, started);
+		done(&sheet, started)?;
 	}
 
 	Ok(())
@@ -1047,7 +1505,7 @@ fn styles(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 
 	let path = out.join(&story.slug).join("styles.png");
 	press::board::write(&picks, &path)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	Ok(())
 }
@@ -1056,7 +1514,7 @@ fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bo
 	let started = Instant::now();
 
 	for path in publish::video(story, cast, out, formats, preview)? {
-		done(&path, started);
+		done(&path, started)?;
 	}
 
 	Ok(())
@@ -1064,7 +1522,7 @@ fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bo
 
 /// Writes the director's shots into the script at `path` as `@camera` directions.
 fn pin_story(path: &Path, world: Option<&Path>, spec: &str, out: &Path) -> Result<()> {
-	let (story, cast) = load(path, None, world)?;
+	let (story, cast, _) = load(path, None, world)?;
 	let pages = pages_spec(spec, story.pages.len())?;
 	let timeline = publish::estimated_timeline(&story, &cast, out)?;
 	let source = std::fs::read_to_string(path)
@@ -1074,7 +1532,7 @@ fn pin_story(path: &Path, world: Option<&Path>, spec: &str, out: &Path) -> Resul
 		.with_context(|| format!("could not write {}", path.display()))?;
 
 	for note in &pinned.notes {
-		println!("  {note}");
+		say!("  {note}")?;
 	}
 
 	let list = pinned
@@ -1083,13 +1541,11 @@ fn pin_story(path: &Path, world: Option<&Path>, spec: &str, out: &Path) -> Resul
 		.map(usize::to_string)
 		.collect::<Vec<_>>()
 		.join(", ");
-	println!(
+	say!(
 		"✓ pinned {} camera directions into {} (pages {list})",
 		pinned.count,
 		path.display()
-	);
-
-	Ok(())
+	)
 }
 
 /// Removes the camera directions a previous `--pin` wrote.
@@ -1099,12 +1555,10 @@ fn unpin_story(path: &Path) -> Result<()> {
 	let (restored, removed) = press::storyboard::unpin(&source);
 	std::fs::write(path, &restored)
 		.with_context(|| format!("could not write {}", path.display()))?;
-	println!(
+	say!(
 		"✓ removed {removed} pinned camera directions from {}",
 		path.display()
-	);
-
-	Ok(())
+	)
 }
 
 /// The pages named by `--pin`: `all`, or `page=3,5`.
@@ -1145,29 +1599,83 @@ fn animatic(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()
 	};
 	let dir = publish::book_dir(out, story).join("animatic");
 	let path = fables::video::animatic(story, cast, &timeline, format, &dir)?;
-	done(&path, started);
-
-	Ok(())
+	done(&path, started)
 }
 
 fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
 	let started = Instant::now();
 	let board = publish::storyboard(story, cast, out, portrait)?;
 
-	println!("{}", board.text);
+	say!("{}", board.text)?;
 
 	for path in &board.images {
-		done(path, started);
+		done(path, started)?;
 	}
 
-	done(&board.list, started);
-	Ok(())
+	done(&board.list, started)
 }
 
-fn done(path: &Path, started: Instant) {
-	println!(
+fn done(path: &Path, started: Instant) -> Result<()> {
+	say!(
 		"✓ wrote {} in {:.1}s",
 		path.display(),
 		started.elapsed().as_secs_f32()
-	);
+	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A minimal world whose recipe `fables new` can start a book from.
+	fn new_world(dir: &Path, extra: &str) -> World {
+		let home = dir.join("worlds/home");
+		std::fs::create_dir_all(home.join("stories")).unwrap();
+		std::fs::write(
+			home.join(fables::world::FILE),
+			format!("name = \"Home\"\n{extra}"),
+		)
+		.unwrap();
+		std::fs::write(
+			home.join("recipe.md"),
+			"+++\ntitle = \"{{title}}\"\nauthor = \"{{author}}\"\nstar = \"{{star}}\"\n+++\n# \
+			 plain\nOnce upon a time.\n",
+		)
+		.unwrap();
+		World::load(&home).unwrap()
+	}
+
+	/// Runs `new_story` and reads the book it wrote.
+	fn new_book(world: &World, author: Option<&str>) -> Result<String> {
+		let path = world.stories().join("a-new-tale/story.md");
+		new_story(world, "A New Tale", "mo", author, None)?;
+		Ok(std::fs::read_to_string(path)?)
+	}
+
+	#[test]
+	fn the_author_flag_wins_over_the_world() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, Some("Flag Author")).unwrap();
+		assert!(script.contains("author = \"Flag Author\""), "{script}");
+	}
+
+	#[test]
+	fn the_worlds_author_is_the_default() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("author = \"World Author\""), "{script}");
+	}
+
+	#[test]
+	fn no_author_is_an_error_that_says_what_to_do() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "");
+		let error = format!("{:#}", new_book(&world, None).unwrap_err());
+		assert!(
+			error.contains("--author") && error.contains("world.toml"),
+			"{error}"
+		);
+	}
 }

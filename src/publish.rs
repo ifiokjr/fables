@@ -12,6 +12,7 @@ use serde::Serialize;
 use crate::book;
 use crate::book::Side;
 use crate::cast::Cast;
+use crate::cast::Kind;
 use crate::press;
 use crate::press::print::Spec;
 use crate::raster;
@@ -25,10 +26,17 @@ use crate::video::voice::Speech;
 #[derive(Clone, Debug, Serialize)]
 pub struct CheckReport {
 	pub title: String,
+	/// The drawing style its world draws figures with, e.g. `chibi`.
+	pub drawing: String,
+	/// The page skin it prints in, e.g. `riso`.
+	pub skin: String,
 	pub script_pages: usize,
 	pub book_pages: usize,
 	pub words: usize,
 	pub cast_members: usize,
+	/// Things worth knowing that are not mistakes: cast fields a drawn character ignores, and
+	/// the like. One line per member at most.
+	pub notes: Vec<String>,
 }
 
 /// The ePub and its store cover.
@@ -66,11 +74,63 @@ pub fn check(story: &Story, cast: &Cast) -> Result<CheckReport> {
 
 	Ok(CheckReport {
 		title: story.meta.title.clone(),
+		drawing: story.drawing_style.clone(),
+		skin: story.style().name.name().to_owned(),
 		script_pages: rehearsals.len(),
 		book_pages: pages.len(),
 		words,
 		cast_members: cast.members.len(),
+		notes: cast_notes(cast),
 	})
+}
+
+/// The cast fields a drawn character cannot use, once per member, naming them.
+fn cast_notes(cast: &Cast) -> Vec<String> {
+	cast.members
+		.values()
+		.filter_map(|member| {
+			let Kind::Figure(look) = &member.kind else {
+				return None;
+			};
+			let puppet = look.puppet.as_ref()?;
+
+			if member.parametric_fields.is_empty() {
+				return None;
+			}
+
+			let drawn = if puppet.template {
+				format!("drawn from the {} template", puppet.style.name)
+			} else {
+				"drawn from an authored puppet".to_owned()
+			};
+			let fields: Vec<String> = member
+				.parametric_fields
+				.iter()
+				.map(|field| format!("`{field}`"))
+				.collect();
+
+			Some(format!(
+				"{} is {drawn}, so {} do nothing; remove them, or set `puppet = \"{}\"` to draw \
+				 the older parametric puppet.",
+				member.id,
+				join_names(&fields),
+				crate::cast::PARAMETRIC
+			))
+		})
+		.collect()
+}
+
+/// A list of names with commas and a final `and`.
+fn join_names(names: &[String]) -> String {
+	match names {
+		[] => String::new(),
+		[one] => one.clone(),
+		[one, two] => format!("{one} and {two}"),
+		_ => {
+			let (last, rest) = names.split_last().expect("a list of three or more");
+			format!("{} and {last}", rest.join(", "))
+		}
+	}
 }
 
 /// Every page as a PNG, covers included, plus a contact sheet. Returns the folder.
@@ -211,7 +271,7 @@ fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Spee
 	use crate::video::voice::SAMPLE_RATE;
 
 	// The same key `voice::speak` caches takes under, so a recorded take gives the real length.
-	let key = format!("{:?}|{:?}|{}", line.voice, line.delivery, line.text);
+	let key = crate::video::voice::cache_key(line.voice, line.delivery, line.text);
 	let wav = cache.join(format!("{:016x}.wav", seed_of(&key)));
 	let seconds = match crate::video::voice::read_wav(&wav) {
 		Ok((samples, _rate)) => samples.len() as f32 / SAMPLE_RATE as f32,
@@ -223,5 +283,45 @@ fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Spee
 		samples: vec![0.0; (seconds * SAMPLE_RATE as f32) as usize],
 		envelope: Vec::new(),
 		track: Track::default(),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::story;
+
+	#[test]
+	fn a_field_only_the_parametric_puppet_reads_is_noted_once() {
+		let cast = Cast::parse("[pip]\nname = \"Pip\"\nhead = \"wide\"\nmouth = 1.2\n").unwrap();
+		let story =
+			story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\n@pip\nHi.\n").unwrap();
+		let report = check(&story, &cast).unwrap();
+		assert_eq!(report.notes.len(), 1, "{:?}", report.notes);
+		assert!(
+			report.notes[0].contains("`head` and `mouth`"),
+			"{:?}",
+			report.notes
+		);
+		assert!(report.notes[0].contains("template"), "{:?}", report.notes);
+
+		let parametric = Cast::parse(
+			"[pip]\nname = \"Pip\"\nhead = \"wide\"\nmouth = 1.2\npuppet = \"parametric\"\n",
+		)
+		.unwrap();
+		assert!(
+			check(&story, &parametric).unwrap().notes.is_empty(),
+			"the parametric puppet reads those fields"
+		);
+	}
+
+	#[test]
+	fn a_check_reports_the_drawing_style_and_page_skin() {
+		let cast = Cast::parse("[pip]\nname = \"Pip\"\n").unwrap();
+		let story =
+			story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\n@pip\nHi.\n").unwrap();
+		let report = check(&story, &cast).unwrap();
+		assert_eq!(report.drawing, crate::art::pack::DEFAULT);
+		assert_eq!(report.skin, "riso");
 	}
 }

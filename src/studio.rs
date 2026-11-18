@@ -75,6 +75,8 @@ pub struct WorldSummary {
 	pub name: String,
 	pub style: String,
 	pub about: Option<String>,
+	/// The author credited in its books, unless a book names its own.
+	pub author: Option<String>,
 }
 
 /// A world in full: who lives there and which books are set there.
@@ -113,6 +115,9 @@ pub struct MemberReport {
 	pub about: Option<String>,
 	/// The authored puppet's part file, relative to the world.
 	pub puppet: Option<String>,
+	/// How a person is drawn: `puppet` (their part file), `template` (their world's drawing
+	/// style's template) or `parametric` (the older puppet). `None` for animals and things.
+	pub drawn: Option<&'static str>,
 }
 
 /// A new world.
@@ -124,6 +129,8 @@ pub struct WorldBrief {
 	pub about: Option<String>,
 	/// The drawing style (see `style_list`); the default is `cartoon`.
 	pub style: Option<String>,
+	/// The author credited in the world's books, unless a book names its own.
+	pub author: Option<String>,
 }
 
 /// A body to build a character on.
@@ -182,6 +189,10 @@ pub struct CharacterBrief {
 	/// Extras from the kit, e.g. glasses, freckles, lashes, bow.
 	#[serde(default)]
 	pub extras: Vec<String>,
+	/// Also write `puppets/<id>.svg` from the style's template and set `puppet = …`, so every
+	/// part can be redrawn. Without it the character is drawn straight from the template.
+	#[serde(default)]
+	pub draw: bool,
 }
 
 /// One part as SVG path data.
@@ -208,6 +219,8 @@ pub struct PartReport {
 pub struct StyleReport {
 	pub name: String,
 	pub description: String,
+	/// The page skin the look prints in (riso, clear…).
+	pub skin: String,
 	pub finish: Finish,
 	pub face: Face,
 	pub bodies: Vec<BodyReport>,
@@ -592,7 +605,7 @@ impl Studio {
 	/// A world by its folder.
 	pub fn world(&self, folder: &str) -> Result<World> {
 		check_slug("world", folder)?;
-		let dir = self.worlds_dir().join(folder);
+		let dir = world::under(&self.worlds_dir(), "world", folder)?;
 		ensure!(
 			dir.join(world::FILE).is_file(),
 			"there is no world `{folder}`; `world_list` shows the worlds"
@@ -600,7 +613,8 @@ impl Studio {
 		World::load(&dir)
 	}
 
-	/// Starts a world: a `world.toml`, an empty cast and empty `puppets/` and `stories/`.
+	/// Starts a world: a `world.toml`, a commented cast example and empty `puppets/` and
+	/// `stories/`.
 	pub fn create_world(&self, brief: &WorldBrief) -> Result<WorldSummary> {
 		let folder = crate::story::slugify(&brief.name);
 		ensure!(
@@ -609,7 +623,7 @@ impl Studio {
 		);
 		let style = brief.style.as_deref().unwrap_or(crate::art::pack::DEFAULT);
 		StylePack::named(style)?;
-		let dir = self.worlds_dir().join(&folder);
+		let dir = world::under(&self.worlds_dir(), "world", &folder)?;
 		ensure!(!dir.exists(), "a world already lives in worlds/{folder}");
 
 		let mut file = format!(
@@ -622,19 +636,17 @@ impl Studio {
 			file = format!("{file}about = {}\n", quoted(about));
 		}
 
+		if let Some(author) = &brief.author {
+			file = format!("{file}author = {}\n", quoted(author));
+		}
+
 		for sub in ["puppets", "stories"] {
 			std::fs::create_dir_all(dir.join(sub))
 				.with_context(|| format!("could not create worlds/{folder}/{sub}"))?;
 		}
 
 		std::fs::write(dir.join(world::FILE), file)?;
-		std::fs::write(
-			dir.join("cast.toml"),
-			format!(
-				"# The folk of {}. Every table is one character.\n",
-				brief.name
-			),
-		)?;
+		std::fs::write(dir.join("cast.toml"), cast_example(&brief.name, style))?;
 
 		Ok(summary(&World::load(&dir)?))
 	}
@@ -692,93 +704,21 @@ impl Studio {
 		})
 	}
 
-	/// Adds a character to a world's cast, with a part file started from the style's template.
+	/// Adds a character to a world's cast. With `draw`, their part file is written from the
+	/// style's template and `puppet = …` set; without it they are drawn from the template.
 	pub fn create_character(&self, folder: &str, brief: &CharacterBrief) -> Result<MemberReport> {
-		let world = self.world(folder)?;
-		check_slug("character", &brief.id)?;
-		let style = world.style()?;
-		let cast_file = world.cast_file();
-		let before = std::fs::read_to_string(&cast_file).unwrap_or_default();
-		ensure!(
-			world.cast()?.member(&brief.id).is_none(),
-			"`{}` is already in the cast",
-			brief.id
-		);
-		let puppet = world.dir.join("puppets").join(format!("{}.svg", brief.id));
-		ensure!(!puppet.exists(), "{} already exists", puppet.display());
-
-		let drawings: Vec<(&str, &crate::art::shape::Shape)> = style.template.iter().collect();
-		let title = format!(
-			"{}: own parts (started from the {} template; redraw each one)",
-			brief.name, style.name
-		);
-		std::fs::create_dir_all(world.dir.join("puppets"))?;
-		std::fs::write(&puppet, parts::write(&title, &drawings))?;
-		let mut cast = before.clone();
-
-		if !cast.is_empty() && !cast.ends_with("\n\n") {
-			cast.push('\n');
-		}
-
-		cast.push_str(&cast_entry(brief));
-		std::fs::write(&cast_file, &cast)?;
-
-		// A brief the cast file can't read (an unknown colour or extra) is undone, so the world
-		// still loads.
-		match world.cast() {
-			Ok(cast) => {
-				let member = cast
-					.member(&brief.id)
-					.context("the new character is missing from the cast")?;
-				Ok(member_report(&world, member))
-			}
-			Err(error) => {
-				std::fs::write(&cast_file, before)?;
-				std::fs::remove_file(&puppet)?;
-				Err(error.context(format!("`{}` was not added", brief.id)))
-			}
-		}
+		create_character(&self.world(folder)?, brief)
 	}
 
 	/// A character's parts as path data: their own parts, or the named parts from wherever the
-	/// character gets them (their file or the kit).
+	/// character gets them (their file, their style's template or the kit).
 	pub fn character_parts(
 		&self,
 		folder: &str,
 		id: &str,
 		names: &[String],
 	) -> Result<Vec<PartReport>> {
-		let world = self.world(folder)?;
-		let file = puppet_file(&world, id)?;
-		let own = Parts::load(&file)?;
-		let kit = world.style()?.kit.clone();
-		let report = |name: &str, shape: &crate::art::shape::Shape, from| {
-			PartReport {
-				name: name.to_owned(),
-				d: shape.path().as_str().to_owned(),
-				from,
-			}
-		};
-
-		if names.is_empty() {
-			return Ok(own
-				.iter()
-				.map(|(name, shape)| report(name, shape, "own"))
-				.collect());
-		}
-
-		names
-			.iter()
-			.map(|name| {
-				if let Some(shape) = own.get(name) {
-					Ok(report(name, shape, "own"))
-				} else if let Some(shape) = kit.get(name) {
-					Ok(report(name, shape, "kit"))
-				} else {
-					bail!("`{id}` has no part `{name}`")
-				}
-			})
-			.collect()
+		character_parts(&self.world(folder)?, id, names)
 	}
 
 	/// Writes or replaces parts in a character's file and removes others, then checks the
@@ -790,46 +730,18 @@ impl Studio {
 		parts: &[PartData],
 		remove: &[String],
 	) -> Result<PartsUpdate> {
-		let world = self.world(folder)?;
-		let file = puppet_file(&world, id)?;
-		let style = world.style()?;
-		let mut own = Parts::load(&file)?;
-		let mut problems = Vec::new();
+		set_parts(&self.world(folder)?, id, parts, remove)
+	}
 
-		for part in parts {
-			match parts::read_part(&part.name, &part.d) {
-				Ok(shape) => own.insert(&part.name, shape),
-				Err(error) => problems.push(format!("{error:#}")),
-			}
-		}
-
-		for name in remove {
-			if own.remove(name).is_none() {
-				problems.push(format!("`{name}` is not one of `{id}`'s own parts"));
-			}
-		}
-
-		ensure!(
-			problems.is_empty(),
-			"nothing was written:\n  {}",
-			problems.join("\n  ")
-		);
-
-		let findings = own.clone().over(style.kit.clone()).check();
-		let written = !findings.iter().any(|finding| finding.level == Level::Error);
-
-		if written {
-			let title = first_title(&file).unwrap_or_else(|| format!("{id}: own parts"));
-			let drawings: Vec<(&str, &crate::art::shape::Shape)> = own.iter().collect();
-			std::fs::write(&file, parts::write(&title, &drawings))
-				.with_context(|| format!("could not write {}", file.display()))?;
-		}
-
-		Ok(PartsUpdate {
-			written,
-			own_parts: own.iter().count(),
-			findings: findings.iter().map(ToString::to_string).collect(),
-		})
+	/// Starts a character's own part file (from the style's template, or another cast member's
+	/// drawings) and points their cast entry at it, so either order works.
+	pub fn template_puppet(
+		&self,
+		folder: &str,
+		id: &str,
+		from: Option<&str>,
+	) -> Result<MemberReport> {
+		template_puppet(&self.world(folder)?, id, from)
 	}
 
 	/// Renders a character's sheets, [`SHEET_PX`] wide.
@@ -962,7 +874,7 @@ impl Studio {
 	fn book(&self, folder: &str, story: &str) -> Result<(World, Story, crate::cast::Cast)> {
 		let world = self.world(folder)?;
 		check_slug("story", story)?;
-		let path = world.stories().join(story).join("story.md");
+		let path = world::under(&world.stories(), "story", Path::new(story).join("story.md"))?;
 		ensure!(
 			path.is_file(),
 			"{} has no story `{story}`; world_describe lists its stories",
@@ -975,7 +887,8 @@ impl Studio {
 	}
 
 	/// Writes a book's script (a whole `story.md`) and checks it against the cast. A script
-	/// that doesn't parse or rehearse is not kept; the error says what to fix, by line.
+	/// that doesn't parse or rehearse is not kept; the error says what to fix, by line. A story
+	/// belongs to the world it is written into, so its front matter may not name a `world`.
 	pub fn write_story(
 		&self,
 		folder: &str,
@@ -984,19 +897,28 @@ impl Studio {
 	) -> Result<publish::CheckReport> {
 		let world = self.world(folder)?;
 		check_slug("story", story)?;
-		crate::story::parse(script)?;
-		let dir = world.stories().join(story);
+		let parsed = crate::story::parse(script)?;
+		ensure!(
+			parsed.meta.world.is_none(),
+			"a story written over MCP belongs to the world it is written into; remove `world =` \
+			 from its front matter (use `--world` or a relative `world =` at the command line)"
+		);
+		let dir = world::under(&world.stories(), "story", story)?;
 		let path = dir.join("story.md");
 		let before = std::fs::read_to_string(&path).ok();
+		let created = !dir.exists();
 		std::fs::create_dir_all(&dir)?;
 		std::fs::write(&path, script)?;
 
 		match self.check_story(folder, story) {
 			Ok(report) => Ok(report),
 			Err(error) => {
+				// Only what this call made is rolled back: the folder if it created it, else
+				// just the script, so a folder's other files are never lost.
 				match before {
 					Some(text) => std::fs::write(&path, text)?,
-					None => std::fs::remove_dir_all(&dir)?,
+					None if created => std::fs::remove_dir_all(&dir)?,
+					None => std::fs::remove_file(&path)?,
 				}
 
 				Err(error.context(format!("`{story}` was not written")))
@@ -1008,7 +930,7 @@ impl Studio {
 	pub fn read_story(&self, folder: &str, story: &str) -> Result<String> {
 		let world = self.world(folder)?;
 		check_slug("story", story)?;
-		let path = world.stories().join(story).join("story.md");
+		let path = world::under(&world.stories(), "story", Path::new(story).join("story.md"))?;
 		std::fs::read_to_string(&path).with_context(|| format!("could not read {}", path.display()))
 	}
 
@@ -1169,7 +1091,7 @@ impl Studio {
 		unpin: bool,
 	) -> Result<PinReport> {
 		let (world, script, cast) = self.book(folder, story)?;
-		let path = world.stories().join(story).join("story.md");
+		let path = world::under(&world.stories(), "story", Path::new(story).join("story.md"))?;
 		let source = std::fs::read_to_string(&path)
 			.with_context(|| format!("could not read {}", path.display()))?;
 
@@ -1214,9 +1136,10 @@ impl Studio {
 			VideoShape::Landscape => Format::Landscape,
 			VideoShape::Portrait => Format::Portrait,
 		};
-		let cache = self.root.join(&script.slug).join("cache").join("voice");
-		let timeline = crate::video::plan(&script, &cast, &cache)?;
+		// The video's own take cache, so a line narrated for one is reused by the other.
 		let out = self.root.join("out");
+		let book = world::under(&out, "book", &script.slug)?;
+		let timeline = crate::video::plan(&script, &cast, &book.join("cache").join("voice"))?;
 		let dir = publish::book_dir(&out, &script).join("animatic");
 		let path = crate::video::animatic(&script, &cast, &timeline, format, &dir)?;
 		let portrait = shape == VideoShape::Portrait;
@@ -1308,21 +1231,21 @@ impl Studio {
 		let world = self.world(folder)?;
 		let own = world.dir.join("settings");
 
-		Ok(world
+		world
 			.settings()?
 			.settings()
 			.map(|setting| {
-				SettingSummary {
+				// A name read from the folder's file names: prove the file it names stays in
+				// the world before asking whether it is there.
+				let file = world::under(&own, "setting", format!("{}.svg", setting.name()))?;
+
+				Ok(SettingSummary {
 					name: setting.name().to_owned(),
 					about: setting.about().to_owned(),
-					from: if own.join(format!("{}.svg", setting.name())).is_file() {
-						"world"
-					} else {
-						"built-in"
-					},
-				}
+					from: if file.is_file() { "world" } else { "built-in" },
+				})
 			})
-			.collect())
+			.collect()
 	}
 
 	/// Starts a world's own setting: a copy of a setting it can already use (to repaint it), or
@@ -1334,63 +1257,18 @@ impl Studio {
 		about: &str,
 		from: Option<&str>,
 	) -> Result<SettingSummary> {
-		let world = self.world(folder)?;
-		check_slug("setting", name)?;
-		let file = world.dir.join("settings").join(format!("{name}.svg"));
-		ensure!(
-			!file.exists(),
-			"{} already has its own `{name}`",
-			world.name
-		);
-		let source = match from {
-			Some(base) => {
-				let own = world.dir.join("settings").join(format!("{base}.svg"));
-
-				if own.is_file() {
-					std::fs::read_to_string(&own)?
-				} else {
-					settings::built_in_source(base)
-						.with_context(|| format!("there is no setting `{base}` to start from"))?
-						.to_owned()
-				}
-			}
-			None => {
-				settings::SettingFile {
-					ground: 2060.0,
-					title: about.to_owned(),
-					parts: vec![
-					(
-						"far-sky".into(),
-						r#"<path id="far-sky" d="M-160 -160 L2560 -160 L2560 1660 L-160 1660 Z" fill="sky" data-night="night" data-line="none"/>"#.into(),
-					),
-					(
-						"near-ground".into(),
-						r#"<path id="near-ground" d="M-160 1600 L2560 1600 L2560 2560 L-160 2560 Z" fill="meadow" data-wilt="moss" data-line="none"/>"#.into(),
-					),
-				],
-				}
-				.write()
-			}
-		};
-		let mut setting_file = settings::SettingFile::read(&source)?;
-		about.clone_into(&mut setting_file.title);
-		let text = setting_file.write();
-		Setting::parse(name, &text)?;
-		std::fs::create_dir_all(world.dir.join("settings"))?;
-		std::fs::write(&file, text)?;
-
-		Ok(SettingSummary {
-			name: name.to_owned(),
-			about: about.to_owned(),
-			from: "world",
-		})
+		create_setting(&self.world(folder)?, name, about, from)
 	}
 
 	/// A setting's parts as markup.
 	pub fn setting_parts(&self, folder: &str, name: &str) -> Result<Vec<SettingPart>> {
 		let world = self.world(folder)?;
 		check_slug("setting", name)?;
-		let own = world.dir.join("settings").join(format!("{name}.svg"));
+		let own = world::under(
+			&world.dir.join("settings"),
+			"setting",
+			format!("{name}.svg"),
+		)?;
 		let source = if own.is_file() {
 			std::fs::read_to_string(&own)?
 		} else {
@@ -1416,7 +1294,11 @@ impl Studio {
 	) -> Result<SettingSummary> {
 		let world = self.world(folder)?;
 		check_slug("setting", name)?;
-		let file = world.dir.join("settings").join(format!("{name}.svg"));
+		let file = world::under(
+			&world.dir.join("settings"),
+			"setting",
+			format!("{name}.svg"),
+		)?;
 		ensure!(
 			file.is_file(),
 			"{} has no setting `{name}` of its own; setting_create it first (from a built-in to \
@@ -1550,6 +1432,7 @@ impl Studio {
 		Ok(StyleReport {
 			name: pack.name.clone(),
 			description: pack.description.clone(),
+			skin: pack.skin.clone(),
 			finish: pack.finish,
 			face: pack.face,
 			bodies: pack
@@ -1615,6 +1498,456 @@ impl Studio {
 			},
 		])
 	}
+}
+
+/// Adds a character to a world's cast. With `brief.draw`, their part file is written from the
+/// style's template and `puppet = …` set; without it they are drawn from the template in their
+/// own colours.
+pub fn create_character(world: &World, brief: &CharacterBrief) -> Result<MemberReport> {
+	check_slug("character", &brief.id)?;
+	let style = world.style()?;
+	let cast_file = world.cast_file();
+	let before = std::fs::read_to_string(&cast_file).unwrap_or_default();
+	ensure!(
+		world.cast()?.member(&brief.id).is_none(),
+		"`{}` is already in the cast",
+		brief.id
+	);
+	let puppet = world::under(
+		&world.dir,
+		"puppet",
+		Path::new("puppets").join(format!("{}.svg", brief.id)),
+	)?;
+
+	if brief.draw {
+		ensure!(!puppet.exists(), "{} already exists", puppet.display());
+	}
+
+	let mut cast = before.clone();
+
+	if !cast.is_empty() && !cast.ends_with("\n\n") {
+		cast.push('\n');
+	}
+
+	cast.push_str(&cast_entry(brief));
+	std::fs::write(&cast_file, &cast)
+		.with_context(|| format!("could not write {}", cast_file.display()))?;
+
+	if brief.draw {
+		let drawings: Vec<(&str, &crate::art::shape::Shape)> = style.template.iter().collect();
+		let title = format!(
+			"{}: own parts (started from the {} template; redraw each one)",
+			brief.name, style.name
+		);
+		std::fs::create_dir_all(world.dir.join("puppets"))
+			.with_context(|| format!("could not create {}", world.dir.join("puppets").display()))?;
+
+		if let Err(error) = std::fs::write(&puppet, parts::write(&title, &drawings)) {
+			// Put the cast back, so a failed write never leaves a half-made character.
+			std::fs::write(&cast_file, before)?;
+			return Err(error).with_context(|| format!("could not write {}", puppet.display()));
+		}
+	}
+
+	// A brief the cast file can't read (an unknown colour or extra) is undone, so the world
+	// still loads.
+	match world.cast() {
+		Ok(cast) => {
+			let member = cast
+				.member(&brief.id)
+				.context("the new character is missing from the cast")?;
+			let report = member_report(world, member);
+
+			if brief.draw && report.puppet.is_none() {
+				std::fs::write(&cast_file, before)?;
+				let _ = std::fs::remove_file(&puppet);
+				bail!(
+					"`{}`'s `puppet` line was not kept; nothing was added",
+					brief.id
+				);
+			}
+
+			Ok(report)
+		}
+		Err(error) => {
+			std::fs::write(&cast_file, before)?;
+
+			if brief.draw {
+				let _ = std::fs::remove_file(&puppet);
+			}
+
+			Err(error.context(format!("`{}` was not added", brief.id)))
+		}
+	}
+}
+
+/// Starts a world's own setting: a copy of a setting it can already use (to repaint it), or a
+/// sky over the ground.
+pub fn create_setting(
+	world: &World,
+	name: &str,
+	about: &str,
+	from: Option<&str>,
+) -> Result<SettingSummary> {
+	check_slug("setting", name)?;
+	let file = world::under(
+		&world.dir.join("settings"),
+		"setting",
+		format!("{name}.svg"),
+	)?;
+	ensure!(
+		!file.exists(),
+		"{} already has its own `{name}`",
+		world.name
+	);
+	let source = match from {
+		Some(base) => {
+			check_slug("setting", base)?;
+			let own = world::under(
+				&world.dir.join("settings"),
+				"setting",
+				format!("{base}.svg"),
+			)?;
+
+			if own.is_file() {
+				std::fs::read_to_string(&own)?
+			} else {
+				settings::built_in_source(base)
+					.with_context(|| format!("there is no setting `{base}` to start from"))?
+					.to_owned()
+			}
+		}
+		None => {
+			settings::SettingFile {
+				ground: 2060.0,
+				title: about.to_owned(),
+				parts: vec![
+					(
+						"far-sky".into(),
+						r#"<path id="far-sky" d="M-160 -160 L2560 -160 L2560 1660 L-160 1660 Z" fill="sky" data-night="night" data-line="none"/>"#.into(),
+					),
+					(
+						"near-ground".into(),
+						r#"<path id="near-ground" d="M-160 1600 L2560 1600 L2560 2560 L-160 2560 Z" fill="meadow" data-wilt="moss" data-line="none"/>"#.into(),
+					),
+				],
+			}
+			.write()
+		}
+	};
+	let mut setting_file = settings::SettingFile::read(&source)?;
+	about.clone_into(&mut setting_file.title);
+	let text = setting_file.write();
+	Setting::parse(name, &text)?;
+	std::fs::create_dir_all(world.dir.join("settings"))
+		.with_context(|| format!("could not create {}", world.dir.join("settings").display()))?;
+	std::fs::write(&file, text)?;
+
+	Ok(SettingSummary {
+		name: name.to_owned(),
+		about: about.to_owned(),
+		from: "world",
+	})
+}
+
+/// A character's own parts, and where a redraw of them is written.
+struct OwnParts {
+	parts: Parts,
+	/// The style's kit, which the parts are drawn over.
+	kit: Parts,
+	/// The part file: the character's own, or where theirs will be written when they are still
+	/// the style's template.
+	file: PathBuf,
+	/// The sheet title, so rewriting keeps the file's own.
+	title: String,
+	/// Whether the parts are still the style's untouched template.
+	template: bool,
+}
+
+/// A character's own parts, or why they have none to redraw.
+fn own_parts(world: &World, id: &str) -> Result<OwnParts> {
+	check_slug("character", id)?;
+	let cast = world.cast()?;
+	let member = cast
+		.member(id)
+		.with_context(|| format!("`{id}` is not in {}'s cast", world.name))?;
+	let Kind::Figure(look) = &member.kind else {
+		bail!("`{id}` is not a person, so has no parts");
+	};
+	let Some(puppet) = &look.puppet else {
+		bail!(
+			"`{id}` is drawn by the parametric puppet, so has no parts to redraw; give them a \
+			 drawing with `fables puppet template {id}`"
+		)
+	};
+	let file = if puppet.template {
+		world::under(
+			&world.dir,
+			"puppet",
+			Path::new("puppets").join(format!("{id}.svg")),
+		)?
+	} else {
+		puppet.file.clone()
+	};
+	let parts = if puppet.template {
+		puppet.style.template.clone()
+	} else {
+		Parts::load(&puppet.file)?
+	};
+	let title = if puppet.template {
+		format!(
+			"{}: own parts (started from the {} template; redraw each one)",
+			member.name, puppet.style.name
+		)
+	} else {
+		first_title(&puppet.file).unwrap_or_else(|| format!("{id}: own parts"))
+	};
+
+	Ok(OwnParts {
+		parts,
+		kit: puppet.style.kit.clone(),
+		file,
+		title,
+		template: puppet.template,
+	})
+}
+
+/// A character's parts as path data: their own parts, or the named parts from wherever the
+/// character gets them (their file, their style's template or the kit).
+pub fn character_parts(world: &World, id: &str, names: &[String]) -> Result<Vec<PartReport>> {
+	let own = own_parts(world, id)?;
+	let from = if own.template { "template" } else { "own" };
+	let report = |name: &str, shape: &crate::art::shape::Shape, from| {
+		PartReport {
+			name: name.to_owned(),
+			d: shape.path().as_str().to_owned(),
+			from,
+		}
+	};
+
+	if names.is_empty() {
+		return Ok(own
+			.parts
+			.iter()
+			.map(|(name, shape)| report(name, shape, from))
+			.collect());
+	}
+
+	names
+		.iter()
+		.map(|name| {
+			if let Some(shape) = own.parts.get(name) {
+				Ok(report(name, shape, from))
+			} else if let Some(shape) = own.kit.get(name) {
+				Ok(report(name, shape, "kit"))
+			} else {
+				bail!("`{id}` has no part `{name}`")
+			}
+		})
+		.collect()
+}
+
+/// Writes or replaces parts in a character's file and removes others, then checks the figure.
+/// Changes that leave errors are not written; the findings say why. A character drawn from
+/// their style's template is given a file of their own, seeded with the template, and their
+/// cast entry is pointed at it.
+pub fn set_parts(
+	world: &World,
+	id: &str,
+	parts: &[PartData],
+	remove: &[String],
+) -> Result<PartsUpdate> {
+	let own = own_parts(world, id)?;
+	let mut drawings = own.parts;
+	let mut problems = Vec::new();
+
+	for part in parts {
+		match parts::read_part(&part.name, &part.d) {
+			Ok(shape) => drawings.insert(&part.name, shape),
+			Err(error) => problems.push(format!("{error:#}")),
+		}
+	}
+
+	for name in remove {
+		if drawings.remove(name).is_none() {
+			problems.push(format!("`{name}` is not one of `{id}`'s own parts"));
+		}
+	}
+
+	ensure!(
+		problems.is_empty(),
+		"nothing was written:\n  {}",
+		problems.join("\n  ")
+	);
+
+	let findings = drawings.clone().over(own.kit.clone()).check();
+	let written = !findings.iter().any(|finding| finding.level == Level::Error);
+
+	if written {
+		if own.template {
+			ensure!(
+				!own.file.exists(),
+				"{} already exists, but the cast doesn't name it; add `puppet = \
+				 \"puppets/{id}.svg\"` to [{id}] in the cast file, or move the file aside",
+				own.file.display()
+			);
+		}
+
+		std::fs::create_dir_all(own.file.parent().unwrap_or(Path::new("")))
+			.with_context(|| format!("could not create {}", own.file.display()))?;
+		let drawings: Vec<(&str, &crate::art::shape::Shape)> = drawings.iter().collect();
+		std::fs::write(&own.file, parts::write(&own.title, &drawings))
+			.with_context(|| format!("could not write {}", own.file.display()))?;
+
+		if own.template
+			&& let Err(error) = point_cast_at(world, id, &format!("puppets/{id}.svg"))
+		{
+			let _ = std::fs::remove_file(&own.file);
+			return Err(error);
+		}
+	}
+
+	Ok(PartsUpdate {
+		written,
+		own_parts: drawings.iter().count(),
+		findings: findings.iter().map(ToString::to_string).collect(),
+	})
+}
+
+/// Starts a character's own part file (from the style's template, or another cast member's
+/// drawings) and points their cast entry at it. Either order works: add the cast entry first
+/// and run this, or write the file first and name it in the entry.
+pub fn template_puppet(world: &World, id: &str, from: Option<&str>) -> Result<MemberReport> {
+	check_slug("character", id)?;
+	let cast = world.cast()?;
+	let style = world.style()?;
+	let member = cast
+		.member(id)
+		.with_context(|| format!("`{id}` is not in {}'s cast", world.name))?;
+	let Kind::Figure(look) = &member.kind else {
+		bail!("`{id}` is not a person, so has no puppet");
+	};
+
+	if let Some(puppet) = &look.puppet
+		&& !puppet.template
+	{
+		bail!(
+			"`{id}` already has a part file ({}); edit it, or move it aside to start again",
+			puppet.file.display()
+		);
+	}
+
+	let target = world::under(
+		&world.dir,
+		"puppet",
+		Path::new("puppets").join(format!("{id}.svg")),
+	)?;
+	ensure!(
+		!target.exists(),
+		"{} already exists; edit it, or move it aside to start again",
+		target.display()
+	);
+
+	let (parts, origin) = match from {
+		Some(from) => {
+			let source = own_parts(world, from)?;
+			(source.parts, format!("{from}'s drawings"))
+		}
+		None => {
+			(
+				style.template.clone(),
+				format!("the {} template", style.name),
+			)
+		}
+	};
+	let title = format!(
+		"{}: own parts (started from {origin}; redraw each one)",
+		member.name
+	);
+	let drawings: Vec<(&str, &crate::art::shape::Shape)> = parts.iter().collect();
+	std::fs::create_dir_all(world.dir.join("puppets"))
+		.with_context(|| format!("could not create {}", world.dir.join("puppets").display()))?;
+	std::fs::write(&target, parts::write(&title, &drawings))
+		.with_context(|| format!("could not write {}", target.display()))?;
+
+	if let Err(error) = point_cast_at(world, id, &format!("puppets/{id}.svg")) {
+		let _ = std::fs::remove_file(&target);
+		return Err(error);
+	}
+
+	let cast = world.cast()?;
+	let member = cast.member(id).context("the character left the cast")?;
+	Ok(member_report(world, member))
+}
+
+/// Points a cast entry at `file`, relative to the cast file, and puts it back if the cast stops
+/// loading.
+fn point_cast_at(world: &World, id: &str, file: &str) -> Result<()> {
+	let cast_file = world.cast_file();
+	let before = std::fs::read_to_string(&cast_file)?;
+	let after = with_puppet(&before, id, file)
+		.with_context(|| format!("`{id}` has no table in {}", cast_file.display()))?;
+	std::fs::write(&cast_file, &after)
+		.with_context(|| format!("could not write {}", cast_file.display()))?;
+
+	match world.cast() {
+		Ok(_) => Ok(()),
+		Err(error) => {
+			std::fs::write(&cast_file, before)?;
+			Err(error.context(format!("`{id}`'s puppet line was not kept")))
+		}
+	}
+}
+
+/// A cast file with `puppet = "…"` set in `id`'s table, added after its other keys when it has
+/// none. `None` when the file has no such table.
+fn with_puppet(source: &str, id: &str, file: &str) -> Option<String> {
+	let header = format!("[{id}]");
+	let setting = format!("puppet = {}", quoted(file));
+	let mut lines = Vec::new();
+	let mut inside = false;
+	let mut done = false;
+
+	for line in source.lines() {
+		let trimmed = line.trim();
+
+		if trimmed.starts_with('[') {
+			if inside && !done {
+				insert_after_last_line(&mut lines, &setting);
+				done = true;
+			}
+
+			inside = trimmed == header;
+		}
+
+		if inside
+			&& !done && trimmed
+			.strip_prefix("puppet")
+			.is_some_and(|rest| rest.trim_start().starts_with('='))
+		{
+			lines.push(setting.clone());
+			done = true;
+			continue;
+		}
+
+		lines.push(line.to_owned());
+	}
+
+	if inside && !done {
+		insert_after_last_line(&mut lines, &setting);
+		done = true;
+	}
+
+	done.then(|| lines.join("\n") + "\n")
+}
+
+/// Adds a line after the last non-blank one, so a blank line still separates TOML tables.
+fn insert_after_last_line(lines: &mut Vec<String>, line: &str) {
+	let at = lines
+		.iter()
+		.rposition(|line| !line.trim().is_empty())
+		.map_or(lines.len(), |index| index + 1);
+	lines.insert(at, line.to_owned());
 }
 
 /// A character's sheets (the model sheet if `kinds` is empty), no wider than `px`.
@@ -1727,25 +2060,6 @@ pub struct PartsUpdate {
 	pub findings: Vec<String>,
 }
 
-/// A character's part file, or why they have none.
-fn puppet_file(world: &World, id: &str) -> Result<PathBuf> {
-	check_slug("character", id)?;
-	let cast = world.cast()?;
-	let member = cast
-		.member(id)
-		.with_context(|| format!("`{id}` is not in {}'s cast", world.name))?;
-
-	match &member.kind {
-		Kind::Figure(look) => {
-			look.puppet
-				.as_ref()
-				.map(|puppet| puppet.file.clone())
-				.with_context(|| format!("`{id}` has no authored puppet"))
-		}
-		_ => bail!("`{id}` is not a person, so has no puppet"),
-	}
-}
-
 fn summary(world: &World) -> WorldSummary {
 	WorldSummary {
 		folder: world
@@ -1757,22 +2071,32 @@ fn summary(world: &World) -> WorldSummary {
 		name: world.name.clone(),
 		style: world.style.clone(),
 		about: world.about.clone(),
+		author: world.author.clone(),
 	}
 }
 
 fn member_report(world: &World, member: &Member) -> MemberReport {
-	let puppet = match &member.kind {
+	let (puppet, drawn) = match &member.kind {
 		Kind::Figure(look) => {
-			look.puppet.as_ref().map(|puppet| {
-				puppet
-					.file
-					.strip_prefix(&world.dir)
-					.unwrap_or(&puppet.file)
-					.display()
-					.to_string()
-			})
+			match &look.puppet {
+				Some(puppet) if puppet.template => (None, Some("template")),
+				Some(puppet) => {
+					(
+						Some(
+							puppet
+								.file
+								.strip_prefix(&world.dir)
+								.unwrap_or(&puppet.file)
+								.display()
+								.to_string(),
+						),
+						Some("puppet"),
+					)
+				}
+				None => (None, Some("parametric")),
+			}
 		}
-		_ => None,
+		_ => (None, None),
 	};
 
 	MemberReport {
@@ -1782,10 +2106,11 @@ fn member_report(world: &World, member: &Member) -> MemberReport {
 		habit: member.habit.clone(),
 		about: member.about.clone(),
 		puppet,
+		drawn,
 	}
 }
 
-/// A cast table for a new character.
+/// A cast table for a new character, with a `puppet` line only when one was written.
 fn cast_entry(brief: &CharacterBrief) -> String {
 	let mut lines = vec![
 		format!("[{}]", brief.id),
@@ -1802,10 +2127,13 @@ fn cast_entry(brief: &CharacterBrief) -> String {
 	let colours = &brief.colours;
 	let kind = brief.build.kind().to_owned();
 	let puppet = format!("puppets/{}.svg", brief.id);
+	let mut keys: Vec<(&str, &str)> = vec![("kind", &kind)];
+
+	if brief.draw {
+		keys.push(("puppet", &puppet));
+	}
 
 	for (key, value) in [
-		("kind", &kind),
-		("puppet", &puppet),
 		("skin", &colours.skin),
 		("hair-colour", &colours.hair),
 		("top", &colours.top),
@@ -1814,6 +2142,10 @@ fn cast_entry(brief: &CharacterBrief) -> String {
 		("shoes", &colours.shoes),
 		("eyes", &colours.eyes),
 	] {
+		keys.push((key, value));
+	}
+
+	for (key, value) in keys {
 		lines.push(format!("{key} = {}", quoted(value)));
 	}
 
@@ -1827,6 +2159,20 @@ fn cast_entry(brief: &CharacterBrief) -> String {
 	}
 
 	lines.join("\n") + "\n"
+}
+
+/// The commented example a new world's cast starts with: no members, and one written out to
+/// copy.
+fn cast_example(name: &str, style: &str) -> String {
+	format!(
+		"# The folk of {name}. Every table is one character.\n#\n# A person has a `kind` of kid \
+		 or grown-up, and colours from the palette (or #rrggbb).\n# Without a `puppet` line they \
+		 are drawn from the {style} style's template in their own\n# colours. `fables character \
+		 new <id> --name \"…\"` writes this table for you.\n#\n# [pip]\n# name = \"Pip \
+		 Pocket\"\n# kind = \"kid\"\n# skin = \"tangerine\"\n# hair-colour = \"plum\"\n# top = \
+		 \"teal\"\n# trim = \"cream\"\n# bottom = \"night\"\n# shoes = \"ink\"\n# eyes = \
+		 \"cocoa\"\n# pattern = \"plain\"\n"
+	)
 }
 
 /// A cast file with one table (its header line and every line up to the next header) taken out.
@@ -1999,6 +2345,7 @@ mod tests {
 			colours: colours(),
 			pattern: Some("stripes".into()),
 			extras: vec!["freckles".into()],
+			draw: false,
 		}
 	}
 
@@ -2010,6 +2357,7 @@ mod tests {
 				name: "Nibbleton".into(),
 				about: Some("A town of small habits.".into()),
 				style: None,
+				author: Some("A. Writer".into()),
 			})
 			.unwrap();
 		(dir, studio)
@@ -2035,6 +2383,7 @@ mod tests {
 					name: "Nibbleton".into(),
 					about: None,
 					style: None,
+					author: None,
 				})
 				.is_err(),
 			"a world is never overwritten"
@@ -2047,7 +2396,8 @@ mod tests {
 		let member = studio
 			.create_character("nibbleton", &brief("nell"))
 			.unwrap();
-		assert_eq!(member.puppet.as_deref(), Some("puppets/nell.svg"));
+		assert_eq!(member.puppet, None, "no part file is written by default");
+		assert_eq!(member.drawn, Some("template"));
 		assert_eq!(member.kind, "kid");
 
 		let images = studio
@@ -2055,6 +2405,60 @@ mod tests {
 			.unwrap();
 		assert_eq!(images.len(), 1);
 		assert!(images[0].png.starts_with(b"\x89PNG"));
+
+		let drawn = studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					id: "gus".into(),
+					draw: true,
+					..brief("gus")
+				},
+			)
+			.unwrap();
+		assert_eq!(drawn.puppet.as_deref(), Some("puppets/gus.svg"));
+		assert_eq!(drawn.drawn, Some("puppet"));
+	}
+
+	#[test]
+	fn a_drawn_character_and_a_template_character_both_draw_the_same_figure() {
+		let (_dir, studio) = studio();
+		let plain = studio.create_character("nibbleton", &brief("pip")).unwrap();
+		let drawn = studio
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					id: "mum".into(),
+					draw: true,
+					..brief("mum")
+				},
+			)
+			.unwrap();
+		assert_eq!(plain.drawn, Some("template"));
+		assert_eq!(drawn.drawn, Some("puppet"));
+
+		let world = studio.world("nibbleton").unwrap();
+		let cast = world.cast().unwrap();
+		let head = |id: &str| {
+			let Kind::Figure(look) = cast.resolve(id).unwrap() else {
+				panic!("{id} is a person");
+			};
+			let puppet = look.puppet.as_ref().expect("both are drawn from parts");
+			(
+				puppet.template,
+				puppet
+					.parts
+					.get("head.front")
+					.map(crate::art::shape::Shape::exact_data),
+			)
+		};
+		assert!(head("pip").0);
+		assert!(!head("mum").0);
+		assert_eq!(
+			head("pip").1,
+			head("mum").1,
+			"the template and the untouched file draw the same parts"
+		);
 	}
 
 	#[test]
@@ -2083,8 +2487,13 @@ mod tests {
 			.character_parts("nibbleton", "nell", &["ear".into()])
 			.unwrap();
 		assert_eq!(ear[0].from, "kit");
+		let own = studio.character_parts("nibbleton", "nell", &[]).unwrap();
+		assert!(
+			own.iter().all(|part| part.from == "template"),
+			"a character with no file reads their style's template"
+		);
 
-		// A bigger ear of her own.
+		// A bigger ear of her own: writing it gives her a file, and points the cast at it.
 		let update = studio
 			.set_parts(
 				"nibbleton",
@@ -2102,6 +2511,15 @@ mod tests {
 			own.iter()
 				.any(|part| part.name == "ear" && part.from == "own")
 		);
+		let world = studio.world("nibbleton").unwrap();
+		let cast = world.cast().unwrap();
+		let Kind::Figure(look) = cast.resolve("nell").unwrap() else {
+			panic!("nell is a person");
+		};
+		assert!(
+			look.puppet.is_some_and(|puppet| !puppet.template),
+			"the change was written to a file of her own"
+		);
 
 		// Removing her head would leave a figure that can't be drawn.
 		let update = studio
@@ -2117,6 +2535,111 @@ mod tests {
 		studio
 			.character_sheets("nibbleton", "nell", &[SheetKind::Model])
 			.unwrap();
+	}
+
+	#[test]
+	fn the_circular_order_works_from_either_end() {
+		let (dir, studio) = studio();
+
+		// A cast entry first: without a `puppet` line the world loads and draws the template,
+		// then `template_puppet` writes the file and adds the line.
+		std::fs::write(
+			dir.path().join("worlds/nibbleton/cast.toml"),
+			"[pip]\nname = \"Pip\"\nskin = \"teal\"\n",
+		)
+		.unwrap();
+		let report = studio.template_puppet("nibbleton", "pip", None).unwrap();
+		assert_eq!(report.puppet.as_deref(), Some("puppets/pip.svg"));
+		let world = studio.world("nibbleton").unwrap();
+		let file = std::fs::read_to_string(world.cast_file()).unwrap();
+		assert!(file.contains("puppet = \"puppets/pip.svg\""), "{file}");
+
+		// A file first: write the parts beside the cast, name them in the entry, and load.
+		let root = tempfile::tempdir().unwrap();
+		let other = Studio::new(root.path());
+		other
+			.create_world(&WorldBrief {
+				name: "Nibbleton".into(),
+				about: None,
+				style: Some("chibi".into()),
+				author: None,
+			})
+			.unwrap();
+		let world = other.world("nibbleton").unwrap();
+		let style = world.style().unwrap();
+		let drawings: Vec<(&str, &crate::art::shape::Shape)> = style.template.iter().collect();
+		std::fs::create_dir_all(world.dir.join("puppets")).unwrap();
+		std::fs::write(
+			world.dir.join("puppets/rosa.svg"),
+			parts::write("Rosa: own parts", &drawings),
+		)
+		.unwrap();
+		std::fs::write(
+			world.cast_file(),
+			"[rosa]\nname = \"Rosa\"\npuppet = \"puppets/rosa.svg\"\nskin = \"teal\"\n",
+		)
+		.unwrap();
+		other
+			.character_sheets("nibbleton", "rosa", &[SheetKind::Model])
+			.unwrap();
+
+		// `--draw` does both at once.
+		let drawn = other
+			.create_character(
+				"nibbleton",
+				&CharacterBrief {
+					id: "gus".into(),
+					draw: true,
+					..brief("gus")
+				},
+			)
+			.unwrap();
+		assert_eq!(drawn.puppet.as_deref(), Some("puppets/gus.svg"));
+		assert_eq!(drawn.drawn, Some("puppet"));
+	}
+
+	#[test]
+	fn the_parametric_puppet_has_no_parts_to_redraw_but_still_draws() {
+		let (dir, studio) = studio();
+		std::fs::write(
+			dir.path().join("worlds/nibbleton/cast.toml"),
+			"[old]\nname = \"Old\"\npuppet = \"parametric\"\nskin = \"teal\"\ntop = \"tomato\"\n",
+		)
+		.unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let cast = world.cast().unwrap();
+		let Kind::Figure(look) = cast.resolve("old").unwrap() else {
+			panic!("old is a person");
+		};
+		assert!(look.puppet.is_none(), "the old parametric puppet");
+
+		for error in [
+			studio.character_parts("nibbleton", "old", &[]).unwrap_err(),
+			studio
+				.set_parts(
+					"nibbleton",
+					"old",
+					&[PartData {
+						name: "ear".into(),
+						d: "M0 -20 C-16 -32 -36 -20 -34 2 Z".into(),
+					}],
+					&[],
+				)
+				.unwrap_err(),
+		] {
+			assert!(format!("{error:#}").contains("parametric"), "{error:#}");
+		}
+
+		// It still draws: a page with the old puppet renders.
+		studio
+			.write_story(
+				"nibbleton",
+				"old-story",
+				"+++\ntitle = \"Old\"\nauthor = \"A\"\nstar = \"old\"\n+++\n# park\n@old x=0.5 \
+				 grin\nHello.\n",
+			)
+			.unwrap();
+		studio.render_page("nibbleton", "old-story", 4).unwrap();
 	}
 
 	#[test]
@@ -2391,9 +2914,141 @@ mod tests {
 
 	#[test]
 	fn names_outside_the_studio_are_refused() {
+		let (dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		studio
+			.create_setting("nibbleton", "harbour", "The harbour wall", None)
+			.unwrap();
+
+		for name in ["../etc", "/etc/passwd", "..", "a/b", "", "Nell"] {
+			assert!(studio.world(name).is_err(), "world {name:?}");
+			assert!(
+				studio.character_parts("nibbleton", name, &[]).is_err(),
+				"character {name:?}"
+			);
+			assert!(
+				studio.setting_parts("nibbleton", name).is_err(),
+				"setting {name:?}"
+			);
+			assert!(
+				studio.read_story("nibbleton", name).is_err(),
+				"story {name:?}"
+			);
+			assert!(
+				studio
+					.write_story(
+						"nibbleton",
+						name,
+						"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\nHi.\n"
+					)
+					.is_err(),
+				"written story {name:?}"
+			);
+		}
+
+		assert_eq!(studio.worlds().unwrap().len(), 1, "no world was created");
+		assert!(
+			!dir.path().join("etc").exists() && !dir.path().join("worlds/etc").exists(),
+			"nothing was created outside the worlds folder"
+		);
+	}
+
+	#[test]
+	fn a_setting_cannot_start_from_a_path_outside_the_world() {
+		let (dir, studio) = studio();
+		let outside = tempfile::tempdir().unwrap();
+		let decoy = outside.path().join("decoy.svg");
+		let parts = "<svg xmlns=\"http://www.w3.org/2000/svg\" data-ground=\"2000\"><path \
+		             id=\"near-x\" d=\"M0 0 L100 100 Z\" fill=\"moss\"/></svg>";
+		std::fs::write(&decoy, parts).unwrap();
+		// A relative `..` needs the settings folder to exist to walk through.
+		studio
+			.create_setting("nibbleton", "harbour", "The harbour wall", None)
+			.unwrap();
+
+		for from in [
+			// The tool appends `.svg`, so a decoy is named without it, as the report's
+			// reproduction does.
+			decoy.with_extension("").display().to_string(),
+			decoy.display().to_string(),
+			"../../outside/decoy".into(),
+			"../harbour".into(),
+			"..".into(),
+			"/etc/passwd".into(),
+		] {
+			let error = format!(
+				"{:#}",
+				studio
+					.create_setting("nibbleton", "stolen", "Probe", Some(&from))
+					.unwrap_err()
+			);
+
+			assert!(error.contains("setting name"), "{from}: {error}");
+		}
+
+		assert_eq!(std::fs::read_to_string(&decoy).unwrap(), parts, "untouched");
+		assert!(
+			!dir.path()
+				.join("worlds/nibbleton/settings/stolen.svg")
+				.exists(),
+			"nothing was copied into the world"
+		);
+	}
+
+	#[test]
+	fn a_failed_write_leaves_a_folder_it_did_not_create_alone() {
 		let (_dir, studio) = studio();
-		assert!(studio.describe_world("../etc").is_err());
-		assert!(studio.character_parts("nibbleton", "../x", &[]).is_err());
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let folder = world.stories().join("draft");
+		std::fs::create_dir_all(&folder).unwrap();
+		std::fs::write(folder.join("notes.txt"), "keep me").unwrap();
+
+		let bad = "+++\ntitle = \"Who\"\nauthor = \"A\"\n+++\n# park\n@nobody wave\nHello.\n";
+		let error = format!(
+			"{:#}",
+			studio.write_story("nibbleton", "draft", bad).unwrap_err()
+		);
+
+		assert!(error.contains("nobody"), "{error}");
+		assert_eq!(
+			std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
+			"keep me",
+			"the folder's other files survive a refused write"
+		);
+		assert!(
+			!folder.join("story.md").exists(),
+			"the new script is rolled back"
+		);
+	}
+
+	#[test]
+	fn a_story_written_over_the_studio_belongs_to_its_world() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		let script = "+++\ntitle = \"Nell\"\nauthor = \"A\"\nstar = \"nell\"\nworld = \
+		              \"../elsewhere\"\n+++\n# park\n@nell happy\nHi.\n";
+		let error = format!(
+			"{:#}",
+			studio
+				.write_story("nibbleton", "nell-nibbles", script)
+				.unwrap_err()
+		);
+
+		assert!(
+			error.contains("written into") && error.contains("world"),
+			"{error}"
+		);
+		assert!(
+			studio.read_story("nibbleton", "nell-nibbles").is_err(),
+			"nothing is left behind"
+		);
 	}
 
 	#[test]
@@ -2401,6 +3056,36 @@ mod tests {
 		for (name, _) in Studio::styles().unwrap() {
 			let report = Studio::describe_style(&name).unwrap();
 			assert!(report.parts.iter().any(|part| part.name == "head"));
+			assert!(!report.skin.is_empty(), "{name} names its page skin");
 		}
+	}
+
+	#[test]
+	fn a_world_credits_its_author_and_names_its_drawing_and_skin() {
+		let (dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		std::fs::create_dir_all(dir.path().join("worlds/nibbleton/stories/one")).unwrap();
+		std::fs::write(
+			dir.path().join("worlds/nibbleton/stories/one/story.md"),
+			"+++\ntitle = \"One\"\n+++\n# park\n@nell\nHello.\n",
+		)
+		.unwrap();
+		let report = studio.check_story("nibbleton", "one").unwrap();
+		assert_eq!(report.drawing, "cartoon");
+		assert_eq!(report.skin, "riso");
+		assert_eq!(report.title, "One");
+		assert!(
+			report.notes.is_empty(),
+			"nothing is ignored by a template character with no shape fields"
+		);
+
+		let world = studio.world("nibbleton").unwrap();
+		let mut story = Story::load(&world.stories().join("one/story.md")).unwrap();
+		world.furnish(&mut story).unwrap();
+		assert_eq!(story.meta.author, "A. Writer");
+		assert_eq!(story.drawing_style, "cartoon");
+		assert_eq!(story.skin.as_deref(), Some("riso"));
 	}
 }

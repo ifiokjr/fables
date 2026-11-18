@@ -1438,13 +1438,17 @@ mod tests {
 		scene_of(script).1
 	}
 
-	/// The page's scene and puppets, after its stage directions.
+	/// The page's scene and puppets, after its stage directions. The cast asks for the
+	/// parametric puppet, the figure these framing rules were written for; a character with
+	/// no `puppet` line is now drawn from the world's template instead.
 	fn scene_of(script: &str) -> (Scene, Vec<Puppet>) {
 		let source = format!("+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n{script}");
 		let story = story::parse(&source).unwrap();
-		let cast =
-			Cast::parse("[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n")
-				.unwrap();
+		let cast = Cast::parse(
+			"[kid]\nname = \"Kid\"\npuppet = \"parametric\"\n[mum]\nname = \"Mum\"\nkind = \
+			 \"grown-up\"\npuppet = \"parametric\"\n",
+		)
+		.unwrap();
 		let page = &story.pages[0];
 		let mut scene = Scene::for_page(page, &story.settings).unwrap();
 		let mut memory = std::collections::HashMap::new();
