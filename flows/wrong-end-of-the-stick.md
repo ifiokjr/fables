@@ -89,10 +89,9 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 [The truth, up close.]
 
 // Beat 2: The star overhears and misreads. One page, 20–30 words.
-// When your version has it: @{{star}} see= away from the truth, or notice here; today the
-// star's face and the friend's line do it.
+// The star looks away from the truth while the half-sentence goes by.
 # garden day shot=close on={{star}}
-@{{star}} x=0.3 worried
+@{{star}} x=0.3 worried see=away
 @{{friend}} x=0.75 talk
 // 20–30 words: the half-heard sentence, and the star's wrong reading of it.
 "[The half-heard sentence.]"
@@ -118,10 +117,14 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 [Third act.]
 
 // Beat 4: Others are puzzled, and the mistake deepens. Two pages, 25–35 words.
-// When your version has it: a double-take here; today the two closes and the pause do it.
+// A double-take: a glance, a look away, then `notice` plays the second look before the take.
 # garden day shot=close on={{friend}}
-@{{friend}} x=0.7 shocked
 @{{star}} x=0.3 proud
+@{{friend}} x=0.7 see={{star}}
+@pause 0.5
+@{{friend}} see=front
+@pause 0.4
+@{{friend}} notice see={{star}} shocked
 @pause 0.8
 // 25–35 words: the other character's face, and no words to explain it.
 [Puzzled.]

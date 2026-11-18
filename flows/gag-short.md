@@ -107,10 +107,14 @@ note = "Three to eight words, and the iris: end on the image, not the explanatio
 [Gag two, bigger.]
 
 // Beat 5: Gag 3, biggest, fails with a take. One page, 0–10 words.
-// When your version has it: a double-take before the take.
+// A double-take: a glance, a look away, then `notice` plays the second look before the take.
 # street day shot=medium on={{star}}
-@{{star}} x=0.4 shocked
 @bird.a x=0.75 sleepy
+@{{star}} x=0.4 see=bird.a
+@pause 0.5
+@{{star}} see=front
+@pause 0.4
+@{{star}} notice see=bird.a shocked
 @pause 0.8
 // 0–10 words: the third gag fails, and the take carries it.
 [Gag three, the biggest.]
