@@ -513,18 +513,23 @@ fn calls_taking_a_name(name: &str) -> Vec<(&'static str, Value)> {
 /// root is read or written, whichever tool is asked.
 #[test]
 fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
-	let root = tempfile::tempdir().unwrap();
-	let outside = tempfile::tempdir().unwrap();
+	// The root and the decoy are siblings, as in the report's reproduction, so the relative
+	// `..` forms really do leave the root.
+	let base = tempfile::tempdir().unwrap();
+	let root = base.path().join("root");
+	let outside = base.path().join("outside");
+	std::fs::create_dir_all(&root).unwrap();
+	std::fs::create_dir_all(&outside).unwrap();
 
 	// A decoy setting, and a decoy world with a book, both outside the root.
-	let decoy = outside.path().join("decoy.svg");
+	let decoy = outside.join("decoy.svg");
 	std::fs::write(&decoy, DECOY_SETTING).unwrap();
-	let away = outside.path().join("worlds/away");
+	let away = outside.join("worlds/away");
 	std::fs::create_dir_all(away.join("stories/book")).unwrap();
 	std::fs::write(away.join("world.toml"), "name = \"Away\"\n").unwrap();
 	std::fs::write(away.join("stories/book/story.md"), MINIMAL_SCRIPT).unwrap();
 
-	let mut session = Session::start(root.path());
+	let mut session = Session::start(&root);
 	session.json("world_create", &json!({ "name": "Nibbleton" }));
 	session.json(
 		"character_create",
@@ -553,7 +558,7 @@ fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
 		// `setting_create` appends `.svg`, so the reported exploit names the decoy without it.
 		decoy.with_extension("").display().to_string(),
 		decoy.display().to_string(),
-		"../../outside/decoy".into(),
+		"../../../outside/decoy".into(),
 		"../../../../outside/decoy".into(),
 		"../worlds/away".into(),
 		"/etc/passwd".into(),
@@ -604,11 +609,11 @@ fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
 		"{created}"
 	);
 	assert!(
-		!outside.path().join("outside").exists(),
+		!outside.join("outside").exists(),
 		"no world was made outside the root"
 	);
 	assert!(
-		!root.path().join("outside").exists(),
+		!root.join("outside").exists(),
 		"no world was made beside the root"
 	);
 
@@ -619,10 +624,7 @@ fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
 		"the decoy is untouched"
 	);
 	assert!(
-		!root
-			.path()
-			.join("worlds/nibbleton/settings/stolen.svg")
-			.exists(),
+		!root.join("worlds/nibbleton/settings/stolen.svg").exists(),
 		"nothing was copied into the world"
 	);
 }
