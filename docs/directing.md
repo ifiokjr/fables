@@ -72,6 +72,51 @@ outside the range. The band also sets how fast the narrator reads; see `sound`.
 starts a book from. Map your want-obstacle-change onto its beats; they are already in page
 turn order. Do not keep a beat the story does not need — delete pages, do not pad them.
 
+**Story flows.** Nine laid-out shapes are built into fables: `fables flow list` prints them and
+`fables flow show <name>` prints one's beats. Start a book with
+`fables new "<Title>" --star <id> --flow <name>`, and add `--friend <id>` for a flow that
+stages two or a crowd. A world can add its own in `flows/<name>.md`, found before the built-ins.
+A fresh scaffold is full of `[bracketed]` lines; `fables review` says how many are left rather
+than critiquing lines nobody has written.
+
+- **Three Tries.** A want said early, three tries that fail bigger, then a fourth that uses
+  what the failures taught. Choose it when the ending is already visible and the pleasure is
+  the trying. The trap is giving the fourth try a brand-new idea: it must use something the
+  first three showed.
+- **The Pile-Up.** One sound gathers a newcomer a page, each page restates the whole chain,
+  and the noise brings the house down. Choose it for a book a child will ask for again and
+  can join in with. The trap is restaging only the newcomer, so the chain vanishes behind
+  them; repeat the whole line every page, and give the crash a heap to laugh in.
+- **There and Back.** A reason to leave, three places that get stranger, a turn on one face,
+  then a quick way home to a changed star. Choose it when the star has something to find.
+  The trap is a return as long as the journey out: the way home is short, and the last page
+  shows the souvenir rather than explains it.
+- **Round We Go.** One tiny cause, seven consequences that each cause the next, and the
+  opening image again with one thing changed. Choose it for a chain a child can see coming
+  and enjoy predicting. The trap is an "and then" chain where nothing causes anything; every
+  page must hand the cause to the next.
+- **The Odd Couple.** Two opposites meet, are forced together, clash three times, miss each
+  other, and each needs the other's way. Choose it for character comedy and dialogue. The
+  trap is making them merely different: they must be opposite in shape, tempo and volume,
+  and both change only a little.
+- **Wrong End of the Stick.** The reader sees the truth, the star misreads half of it,
+  three helpful acts make it worse, and the page turn reveals it. Choose it when the pictures
+  can carry a joke the words hold back. The trap is letting the words mention the truth, or
+  punishing the star for being wrong; being wrong is funny and costs nothing.
+- **The Goodnight Tour.** A small evening problem settles, the star says goodnight to one
+  place a page, and the last line is a whisper. Choose it for bedtime, a calm ending and a
+  child naming their world. The trap is raising the stakes after dusk or cutting where a
+  dissolve belongs; the word count falls with the light.
+- **The Gag Short.** One want, three gags that fail bigger, a twist with no anticipation, and
+  a button. Choose it for a video-first sixty to ninety seconds where timing is the story.
+  The trap is explaining the joke in the text or easing into the twist: keep one locked camera
+  per gag and cut into the surprise.
+- **The Habit Tale.** The world's rule, the kid, the NOPE, the habit showing, three
+  consequences, a name, a cost, a choice, a magic, and the callback. Choose it when the
+  change is a choice the star makes and the habit can be seen on the outside. The trap is
+  stating the moral, or making the cost cruel; the cost is social, gentle and real, and the
+  last page answers the first refusal.
+
 ## Staging
 
 One clear action per beat.
