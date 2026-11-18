@@ -353,8 +353,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | Gaits | `walk` `run` (cycles on the spot in video) `still` |
 | Actions | `talk` (mouth moves with the next paragraph) `faint` `wake` `fly` `land` `wag` `calm` `hop` `flip` `hide` `show` `notice` `quiet` |
 | Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (for flyers and props), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
-| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=<prop>` (any world or built-in prop, or `nothing`), `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers), `tether=<actor>` (a stage prop's string) |
-| Eyes | `see=<actor>`, `<prop>`, `mine`, `up`, `down`, `left`, `right`, `front` or `away`: it holds until it is changed, `front` releases it, and the eyes lead the head. `notice` plays a small beat first: the eyes flick to the `see=` target (or whoever spoke last), hold for about half a second, and then the rest of the direction lands. |
+| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=<prop>`/`nothing` (any world or built-in prop, or empty hands), `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers), `tether=<actor>` (a stage prop's string) |
+| Eyes | `see=<actor>`/`<prop>`/`mine`/`up`/`down`/`left`/`right`/`front`/`away` (`mine` is what the actor holds): it holds until it is changed, `front` releases it, and the eyes lead the head. `notice` plays a small beat first: the eyes flick to the `see=` target (or whoever spoke last), hold for about half a second, and then the rest of the direction lands. |
 | Entrances | `enter=left`/`right`, `exit=left`/`right` (figures walk on and off in video, critters keep their own entrances; in the book they just appear or vanish) |
 | Scene | `light=golden` or a bare preset (`dusk`), `wilt=1`, `stink=1`, `mint=1`, `tint=sunflower`, `music=calm`, `ambience=birds` (or `none`), `speed=1`, `impact=1` |
 | Directions (no actor) | `@pause 1` `@hold 1.5` `@music calm` `@sfx pop` |

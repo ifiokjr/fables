@@ -71,10 +71,11 @@ fn spans(cell: &str) -> Vec<(String, String)> {
 /// A value the table writes as a placeholder, replaced with one the parser accepts.
 fn value_for(key: &str, value: &str) -> String {
 	match value {
+		"<prop>" => "kite".into(),
 		"" | "…" | "<seconds>" | "<actor>" | "<actor>,<actor>" => {
 			match key {
 				"look" => "0.5,0.5".into(),
-				"on" => "stinky".into(),
+				"on" | "see" | "tether" => "stinky".into(),
 				"shot" => "close".into(),
 				"move" => "push".into(),
 				"over" => "2".into(),
@@ -142,7 +143,7 @@ fn stage_directions() -> Vec<String> {
 				key = Some(name.to_owned());
 			} else if gap.trim() == "/" {
 				if let Some(name) = &key {
-					tokens.push(format!("{name}={span}"));
+					tokens.push(format!("{name}={}", value_for(name, &span)));
 				}
 			} else if words && !span.chars().all(|ch| ch.is_ascii_digit() || ch == '.') {
 				// A bare number is a range's upper bound (`shake=0`–`1`), not a word.
@@ -228,15 +229,15 @@ fn every_documented_stage_direction_word_key_and_value_parses() {
 		let mut failures = Vec::new();
 		let mut accepted = false;
 
-		// A direction is written on an actor, `@scene` or `@camera`; a documented token needs
-		// only one of them to understand it.
-		for actor in ["stinky", "scene", "camera"] {
-			match parses(&format!("# park\n@{actor} {token}\n")) {
+		// A direction is written on an actor, `@scene`, `@camera` or a prop standing on the
+		// stage beside Stinky; a documented token needs only one of them to understand it.
+		for lines in ["@stinky", "@scene", "@camera", "@stinky\n@kite"] {
+			match parses(&format!("# park\n{lines} {token}\n")) {
 				Ok(()) => {
 					accepted = true;
 					break;
 				}
-				Err(error) => failures.push(format!("@{actor}: {error}")),
+				Err(error) => failures.push(format!("{lines}: {error}")),
 			}
 		}
 
