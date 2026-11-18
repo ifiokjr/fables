@@ -104,6 +104,20 @@ pub fn assemble(story: &Story, cast: &Cast) -> Result<Vec<BookPage>> {
 	Ok(pages)
 }
 
+/// The plain endpapers [`assemble`] pads a book of `story_pages` story pages with: the pages
+/// a story could grow into without the printed book growing.
+pub fn blank_pages(story_pages: usize) -> usize {
+	// The title, the copyright page and "Meet the folk", then the activity page.
+	let mut pages = story_pages + 3;
+
+	if pages < MIN_PAGES || pages % 2 == 1 {
+		pages += 1;
+	}
+
+	let printed = pages.max(MIN_PAGES).next_multiple_of(2);
+	printed - pages
+}
+
 fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 	let page = &story.pages[rehearsal.page];
 	let scene = rehearsal.finale().clone();
@@ -871,6 +885,22 @@ mod tests {
 		assert_eq!(pages.len() % 2, 0);
 		assert_eq!(pages[0].label, "title");
 		assert_eq!(pages[1].label, "copyright");
+	}
+
+	#[test]
+	fn blank_pages_counts_the_padding_assemble_adds() {
+		let (story, cast) = sample();
+		let pages = assemble(&story, &cast).unwrap();
+		let blanks = pages
+			.iter()
+			.filter(|page| page.decor == Decor::Blank)
+			.count();
+		let story_pages = story.pages.iter().filter(|page| page.in_book()).count();
+
+		assert_eq!(blank_pages(story_pages), blanks);
+		assert_eq!(blank_pages(8), 12);
+		assert_eq!(blank_pages(20), 0);
+		assert_eq!(blank_pages(30), 0);
 	}
 
 	#[test]

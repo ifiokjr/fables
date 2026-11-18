@@ -279,8 +279,8 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables new "<Title>" --star <id> [--friend <id>] [--flow <name>]` | A new book in the world's `stories/<title>/story.md`, laid out from the named flow, else the world's `recipe.md`, else `three-tries`, with the star already staged. |
 | `fables flow list` | The story flows: each one's about, what it is good for, how many characters it needs and its length. |
 | `fables flow show <name>` | One flow's beats as a table, with its page and word budgets and its craft notes. |
-| `fables check <story>` | Validates the script and reports the drawing style and page skin, page and word counts, and any cast fields a drawn character ignores. Errors give line numbers and list valid options. |
-| `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, mood arcs, pacing, light and shots. Advice, never a refusal; ends with a count of findings. |
+| `fables check <story>` | Validates the script and reports the drawing style and page skin, page and word counts, any cast fields a drawn character ignores, and the blank pages a short book is padded with. Errors give line numbers and list valid options. |
+| `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, words the picture never shows, mood arcs, pacing, light, shots and the shape a book's `flow` promises. Advice, never a refusal; ends with a count of findings. |
 | `fables puppet parts <id> [part…]` | A character's parts as SVG path data: their own (or their style's template) and the kit's, each marked. |
 | `fables puppet set <id> <part> --d "…"` / `--file <svg>` | Writes parts through the same checked operation as MCP `character_set_parts`; a change that would break the figure is refused with the findings. |
 | `fables puppet template <id> [--from <id>]` | Starts the part file from the template (or another member's drawings) and adds the `puppet = …` line. |
