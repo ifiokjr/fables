@@ -658,7 +658,9 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "List the props a world's books can use, built-in and its own, with how each is held: its hands, its grip and its carry (hand, up, front, string or head)."
+		description = "List the props a world's books can use, built-in and its own, with how \
+		               each is held: its hands, its grip and its carry (hand, up, front, string \
+		               or head)."
 	)]
 	fn prop_list(&self, Parameters(params): Parameters<WorldParams>) -> CallToolResult {
 		json(self.studio.props(&params.world))

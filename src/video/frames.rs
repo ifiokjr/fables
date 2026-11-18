@@ -1305,10 +1305,9 @@ fn jumps(scene: &Scene, id: &str) -> bool {
 /// holding something and another, who was not holding it, starts.
 fn gives(old: &Scene, new: &Scene) -> Vec<(String, String, Arc<Prop>)> {
 	let holds = |scene: &Scene, id: &str, name: &str| {
-		scene
-			.actors
-			.iter()
-			.any(|actor| actor.id == id && actor.prop.as_ref().is_some_and(|prop| prop.name == name))
+		scene.actors.iter().any(|actor| {
+			actor.id == id && actor.prop.as_ref().is_some_and(|prop| prop.name == name)
+		})
 	};
 
 	old.actors

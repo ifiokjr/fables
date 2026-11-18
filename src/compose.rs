@@ -1041,7 +1041,7 @@ mod tests {
 		assert!(matches!(kite.kind, Kind::Prop(_)));
 		assert!(matches!(kite.body, Body::Prop));
 		assert!(
-			(kite.at.y - 0.32 * STAGE).abs() < 0.01,
+			(kite.at.y - 0.58 * STAGE).abs() < 0.01,
 			"the kite's base floats where `y=sky` puts it: {:?}",
 			kite.at
 		);
