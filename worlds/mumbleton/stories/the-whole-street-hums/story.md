@@ -26,8 +26,8 @@ cast-voices = true
 In Mumbleton the wind steals every word, so Mo Mumble hums instead. He hums to the gate, the kettle and the cat, and one note floats away, soft as a feather.
 
 # street day
-@mo x=0.11 happy
-@nan x=0.39 enter=right grin
+@mo x=0.11 happy see=nan
+@nan x=0.39 enter=right grin see=mo
 Nan, next door, hung out the washing and hummed it right back. Two notes now, warm in the windy street, and the pegs tapped time.
 
 # street day
@@ -37,15 +37,15 @@ Nan, next door, hung out the washing and hummed it right back. Two notes now, wa
 Mo hummed louder. Nan hummed louder. The sheets danced on the line, and the whole street leaned in to listen.
 
 # street day
-@mo x=0.11 grin
-@nan x=0.39 grin
+@mo x=0.11 grin see=bird.a
+@nan x=0.39 grin see=bird.a
 @bird.a x=0.25 z=3 size=1.2 enter=right happy
 @camera move=push over=3
 A bird on the postbox heard the tune and hummed it too, high and thin. Mo hummed, Nan hummed, the bird hummed, and the postbox rang.
 
 # street day
-@mo x=0.11 grin
-@nan x=0.39 grin
+@mo x=0.11 grin see=dog
+@nan x=0.39 grin see=dog
 @bird.a x=0.25 z=3 size=1.2 happy
 @dog x=0.67 enter=right wag
 @camera move=push over=3
@@ -82,8 +82,8 @@ A worm popped up and hummed the bottom note, so low that the puddles shivered. T
 Even the sunflower leaned out of its window box and hummed with its leaves. The street was one song, so loud the bunting snapped its string.
 
 # street storm impact=1
-@mo x=0.11 shocked size=0.9
-@nan x=0.39 shocked size=0.9
+@mo x=0.11 notice see=up shocked size=0.9
+@nan x=0.39 notice see=up shocked size=0.9
 @bird.a x=0.25 z=3 size=1.2 shocked
 @dog x=0.67 shocked size=0.9
 @bird.b x=0.53 z=3 size=1.2 shocked
@@ -104,7 +104,7 @@ Even the sunflower leaned out of its window box and hummed with its leaves. The 
 For a moment there was no sound at all. Then everybody laughed, and the sheets came down too.
 
 # street day
-@mo x=0.11 proud
-@nan x=0.39 happy
+@mo x=0.11 proud notice see=bird.c
+@nan x=0.39 happy see=bird.c
 @bird.c x=0.86 z=3 size=1.2 enter=right happy
 Mo hummed one note. At the edge of the street, a tiny bird hummed it back. The whole street would have to start again.

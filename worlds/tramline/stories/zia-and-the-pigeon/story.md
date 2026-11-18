@@ -21,17 +21,17 @@ cast-voices = true
 // here yet.
 
 # square day shot=full
-@zia x=0.4 happy
+@zia x=0.4 happy notice see=bird.a
 @bird.a x=0.78 sleepy
 A pigeon sat on the tram line, right in the middle of the square.
 
 # square day shot=close on=bird.a
-@zia x=0.3 worried
+@zia x=0.3 worried hold holds=bell see=bird.a
 @bird.a x=0.78 sleepy
 Zia rang her bicycle bell. The pigeon did not move.
 
 # square day shot=full
-@zia x=0.4 grin
+@zia x=0.4 grin hold holds=bell see=bird.a
 @bird.a x=0.78 sleepy
 @hold 0.6
 @sfx pop
@@ -39,14 +39,14 @@ Ding! Nothing.
 @pause 0.5
 
 # square day shot=full
-@zia x=0.4 cross
+@zia x=0.4 cross hold holds=bell see=bird.a
 @bird.a x=0.78 sleepy
 @sfx boing
 Ding ding! Still nothing.
 @pause 0.5
 
 # square day shot=medium on=zia
-@zia x=0.44 shocked
+@zia x=0.44 notice see=bird.a shocked holds=drum
 @bird.b x=0.12 cheer
 @dog x=0.28 wag
 @bird.a x=0.78 sleepy
@@ -54,7 +54,7 @@ Ding ding! Still nothing.
 Zia fetched the whole brass band. The pigeon yawned.
 
 # square day transition=cut shot=wide
-@zia x=0.44 happy
+@zia x=0.44 happy holds=nothing see=bird.a
 @bird.b x=0.12 cheer
 @dog x=0.28 wag
 @bird.a x=0.78 cheer
@@ -62,7 +62,7 @@ The tram came without a sound and stopped beside them. The pigeon hopped aboard.
 @pause 0.5
 
 # square day transition=iris shot=close on=zia
-@zia x=0.4 grin
+@zia x=0.4 grin hold holds=bell see=mine
 @bird.a x=0.78 happy
 @sfx ding
 The tram dinged its own bell, and left.
