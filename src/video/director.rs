@@ -744,8 +744,9 @@ fn plan(shot: &Shot, events: &[Event], portrait: bool, explicit: bool) -> Result
 	}
 
 	// Open on an establishing shot, unless the heading names its own framing.
-	let opening = framing_of(&shot.scene_at(shot.start).camera)
-		.unwrap_or_else(|| framing_on(establishing_size(portrait), Vec::new()));
+	let heading = framing_of(&shot.scene_at(shot.start).camera);
+	let headed = heading.is_some();
+	let opening = heading.unwrap_or_else(|| framing_on(establishing_size(portrait), Vec::new()));
 	let mut setups = vec![Setup {
 		time: shot.start,
 		anchor: shot.start,
@@ -765,6 +766,17 @@ fn plan(shot: &Shot, events: &[Event], portrait: bool, explicit: bool) -> Result
 		};
 
 		if setups.last().is_some_and(|setup| setup.framing == want) {
+			continue;
+		}
+
+		// A heading that already frames the speaker keeps the size the script asked for: the
+		// director never cuts from it to its own size on the same subject a moment into
+		// their line.
+		if headed
+			&& setups.len() == 1
+			&& matches!(event.kind, EventKind::Speech { .. })
+			&& same_subjects(&setups[0].framing, &want)
+		{
 			continue;
 		}
 
@@ -789,6 +801,16 @@ fn plan(shot: &Shot, events: &[Event], portrait: bool, explicit: bool) -> Result
 
 	slow_pushes(&mut setups, shot);
 	validate(&setups, shot)
+}
+
+/// Whether two framings name the same subjects (and name somebody), whatever their sizes.
+fn same_subjects(a: &Framing, b: &Framing) -> bool {
+	match (a, b) {
+		(Framing::Shot { on: a, .. }, Framing::Shot { on: b, .. }) => {
+			!a.is_empty() && a.len() == b.len() && a.iter().all(|id| b.contains(id))
+		}
+		_ => false,
+	}
 }
 
 /// The size that opens a page: wide in landscape, head-to-toe in portrait.
@@ -1213,6 +1235,30 @@ mod tests {
 
 	const EXCHANGE: &str = "# park\n@kid x=0.3 talk\nHello there today my friend.\n@mum talk\nWhy \
 	                        hello to you too.\n@kid talk\nWhat shall we play now?\n";
+	#[test]
+	fn a_heading_that_frames_the_speaker_is_not_recut_on_their_line() {
+		// The heading asks for a close on the kid, who then speaks: one shot, at that size.
+		let setups = page_setups(
+			"# park shot=close on=kid\n@kid x=0.3 talk\nHello there today my friend.\n",
+		);
+		let cuts: Vec<&Setup> = setups
+			.iter()
+			.filter(|setup| setup.travel == Travel::Cut)
+			.collect();
+		assert_eq!(cuts.len(), 1, "{setups:#?}");
+		assert!(
+			matches!(&cuts[0].framing, Framing::Shot { size: ShotSize::Close, on } if on == &["kid"]),
+			"{setups:#?}"
+		);
+
+		// Somebody else speaking still gets the reverse shot, and the kid's reply the cut back.
+		let framed = subjects(&page_setups(
+			"# park shot=close on=kid\n@kid x=0.3\n@mum x=0.7 talk\nWhy hello to you my \
+			 dear.\n@kid talk\nWhat shall we play now?\n",
+		));
+		assert_eq!(framed[..3], ["kid", "mum", "kid"], "{framed:?}");
+	}
+
 	#[test]
 	fn an_exchange_produces_shot_and_reverse() {
 		let framed = subjects(&page_setups(EXCHANGE));
