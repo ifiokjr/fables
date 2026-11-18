@@ -43,6 +43,8 @@ use crate::art::parts::Level;
 use crate::art::parts::Need;
 use crate::art::parts::Parts;
 use crate::art::parts::Views;
+use crate::art::props;
+use crate::art::props::PropFile;
 use crate::art::puppet::Physique;
 use crate::art::settings;
 use crate::art::settings::Setting;
@@ -582,6 +584,45 @@ pub struct SettingWeather {
 	/// 0 to 1.
 	#[serde(default)]
 	pub wilt: f32,
+}
+
+/// A world's prop in brief.
+#[derive(Clone, Debug, Serialize)]
+pub struct PropSummary {
+	pub name: String,
+	pub about: String,
+	/// The point that sits in the fist, in the prop's own units.
+	pub grip: [f32; 2],
+	/// `one` or `two`.
+	pub hands: String,
+	/// How somebody standing at ease carries it (`data-carry`): `hand`, `up`, `front`,
+	/// `string` or `head`.
+	pub carry: &'static str,
+	/// `world` for the world's own, `built-in` for fables' own.
+	pub from: &'static str,
+}
+
+impl PropSummary {
+	fn of(prop: &props::Prop, from: &'static str) -> PropSummary {
+		PropSummary {
+			name: prop.name.clone(),
+			about: prop.about.clone(),
+			grip: [prop.grip.x, prop.grip.y],
+			hands: prop.hands.name().to_owned(),
+			carry: prop.carry.name(),
+			from,
+		}
+	}
+}
+
+/// One part of a prop, as SVG markup.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct PropPart {
+	/// The part's id, its name.
+	pub id: String,
+	/// One SVG element with that id, e.g. `<path id="body" d="…" fill="teal"
+	/// data-shade="1"/>`.
+	pub markup: String,
 }
 
 /// A light preset, and a sentence on what it feels like.
@@ -1505,6 +1546,117 @@ impl Studio {
 		})
 	}
 
+	/// The props a world's books can use.
+	pub fn props(&self, folder: &str) -> Result<Vec<PropSummary>> {
+		list_props(&self.world(folder)?)
+	}
+
+	/// Starts a world's own prop: a copy of a prop it can use (to redraw it), or a plain shape
+	/// with its grip at the fist.
+	pub fn create_prop(
+		&self,
+		folder: &str,
+		name: &str,
+		about: &str,
+		from: Option<&str>,
+	) -> Result<PropSummary> {
+		create_prop(&self.world(folder)?, name, about, from)
+	}
+
+	/// A prop's parts as markup.
+	pub fn prop_parts(&self, folder: &str, name: &str) -> Result<Vec<PropPart>> {
+		let world = self.world(folder)?;
+		Ok(PropFile::read(&prop_source(&world, name)?)?
+			.parts
+			.into_iter()
+			.map(|(id, markup)| PropPart { id, markup })
+			.collect())
+	}
+
+	/// Writes or replaces parts of a world's own prop (new parts go on top) and removes others.
+	/// A file that wouldn't read is not written.
+	pub fn set_prop_parts(
+		&self,
+		folder: &str,
+		name: &str,
+		parts: &[PropPart],
+		remove: &[String],
+	) -> Result<PropSummary> {
+		let world = self.world(folder)?;
+		let file = own_prop(&world, name)?;
+		ensure!(
+			file.is_file(),
+			"{} has no prop `{name}` of its own; prop_create it first (from a built-in to redraw \
+			 one)",
+			world.name
+		);
+		let mut edited = PropFile::read(&std::fs::read_to_string(&file)?)?;
+		let current = &mut edited.parts;
+
+		for id in remove {
+			let before = current.len();
+			current.retain(|(part, _)| part != id);
+			ensure!(current.len() < before, "`{name}` has no part `{id}`");
+		}
+
+		for part in parts {
+			ensure!(
+				part.markup.contains(&format!("id=\"{}\"", part.id)),
+				"`{}`'s markup must carry id=\"{}\"",
+				part.id,
+				part.id
+			);
+
+			if let Some(slot) = current.iter_mut().find(|(id, _)| *id == part.id) {
+				slot.1.clone_from(&part.markup);
+			} else {
+				current.push((part.id.clone(), part.markup.clone()));
+			}
+		}
+
+		let text = edited.write();
+		let prop =
+			props::Prop::parse(name, &text, &world.style()?).context("nothing was written")?;
+		std::fs::write(&file, text)?;
+
+		Ok(PropSummary::of(&prop, "world"))
+	}
+
+	/// A prop as an image: alone, fitted to the sheet, with the name and grip.
+	pub fn render_prop(&self, folder: &str, name: &str) -> Result<Image> {
+		let world = self.world(folder)?;
+		check_slug("prop", name)?;
+		let prop = world.props()?.find(name)?;
+		let stage = crate::art::STAGE;
+		let mut svg = crate::art::Svg::new();
+		svg.fill(
+			&crate::art::Path::rect(-stage * 0.25, -stage * 0.25, stage * 1.5, stage * 1.5),
+			crate::art::palette::PAPER,
+		);
+		let (lo, hi) = prop.bounds();
+		let (w, h) = ((hi.x - lo.x).max(1.0), (hi.y - lo.y).max(1.0));
+		let fit = (stage * 0.7 / w).min(stage * 0.7 / h);
+		let centre = crate::art::pt(f32::midpoint(lo.x, hi.x), f32::midpoint(lo.y, hi.y));
+		prop.draw(
+			&mut svg,
+			crate::art::pt(stage * 0.5, stage * 0.5) - centre * fit,
+			fit,
+		);
+		let pixmap = raster::render(&svg.finish(
+			(-stage * 0.25, -stage * 0.25, stage * 1.5, stage * 1.5),
+			SHEET_PX,
+			SHEET_PX,
+		))?;
+
+		Ok(Image {
+			label: format!(
+				"{name}: {} (grip {:.0}, {:.0})",
+				prop.about, prop.grip.x, prop.grip.y
+			),
+			png: raster::png(&pixmap)?,
+		})
+	}
+
 	/// The light presets, with a sentence on each.
 	pub fn lights() -> Vec<LightLine> {
 		Preset::ALL
@@ -1836,6 +1988,85 @@ pub fn create_setting(
 		about: about.to_owned(),
 		from: "world",
 	})
+}
+
+/// The props a world's books can use: the built-in ones and its own.
+pub fn list_props(world: &World) -> Result<Vec<PropSummary>> {
+	world
+		.props()?
+		.props()
+		.map(|prop| {
+			// A name read from the folder's file names: prove the file it names stays in the
+			// world before asking whether it is there.
+			let from = if own_prop(world, &prop.name)?.is_file() {
+				"world"
+			} else {
+				"built-in"
+			};
+			Ok(PropSummary::of(prop, from))
+		})
+		.collect()
+}
+
+/// Starts a world's own prop: a copy of a prop it can use (to redraw it), or a plain shape with
+/// its grip at the fist.
+pub fn create_prop(
+	world: &World,
+	name: &str,
+	about: &str,
+	from: Option<&str>,
+) -> Result<PropSummary> {
+	let file = own_prop(world, name)?;
+	ensure!(
+		!file.exists(),
+		"{} already has its own `{name}`",
+		world.name
+	);
+	let source = match from {
+		Some(base) => prop_source(world, base)?,
+		None => {
+			PropFile {
+				about: about.to_owned(),
+				parts: vec![
+					(
+						"body".into(),
+						r#"<path id="body" d="M-30 -60 C-10 -66 10 -66 30 -60 C36 -40 36 -20 30 0 C10 6 -10 6 -30 0 C-36 -20 -36 -40 -30 -60 Z" fill="teal" data-shade="1"/>"#
+							.into(),
+					),
+				],
+				..PropFile::default()
+			}
+			.write()
+		}
+	};
+	let mut prop_file = PropFile::read(&source)?;
+	about.clone_into(&mut prop_file.about);
+	let text = prop_file.write();
+	let prop = props::Prop::parse(name, &text, &world.style()?)?;
+	std::fs::create_dir_all(world.dir.join("props"))
+		.with_context(|| format!("could not create {}", world.dir.join("props").display()))?;
+	std::fs::write(&file, text)?;
+
+	Ok(PropSummary::of(&prop, "world"))
+}
+
+/// Where a world's own prop file is, or would be: always inside its `props/`.
+fn own_prop(world: &World, name: &str) -> Result<PathBuf> {
+	check_slug("prop", name)?;
+	world::under(&world.dir.join("props"), "prop", format!("{name}.svg"))
+}
+
+/// A prop's file text: the world's own, else the built-in one of that name.
+fn prop_source(world: &World, name: &str) -> Result<String> {
+	let own = own_prop(world, name)?;
+
+	if own.is_file() {
+		return Ok(std::fs::read_to_string(&own)?);
+	}
+
+	Ok(props::built_in_source(name)
+		.with_context(|| format!("there is no prop `{name}`"))?
+		.to_owned())
 }
 
 /// A character's own parts, and where a redraw of them is written.
@@ -3411,6 +3642,88 @@ mod tests {
 			rendered.files
 		);
 		assert!(dir.path().join(&rendered.files[0]).is_dir());
+	}
+
+	#[test]
+	fn a_prop_is_started_redrawn_and_rendered() {
+		let (_dir, studio) = studio();
+		let blank = studio
+			.create_prop("nibbleton", "kite-spool", "A spool of kite string", None)
+			.unwrap();
+		assert_eq!(blank.from, "world");
+		assert_eq!(blank.hands, "one");
+		assert_eq!(
+			studio.prop_parts("nibbleton", "kite-spool").unwrap().len(),
+			1
+		);
+
+		studio
+			.set_prop_parts(
+				"nibbleton",
+				"kite-spool",
+				&[PropPart {
+					id: "winding".into(),
+					markup: r#"<path id="winding" d="M-20 -50 L20 -50 L20 -30 L-20 -30 Z" fill="cream" data-line="detail"/>"#.into(),
+				}],
+				&[],
+			)
+			.unwrap();
+		let parts = studio.prop_parts("nibbleton", "kite-spool").unwrap();
+		assert_eq!(
+			parts
+				.iter()
+				.map(|part| part.id.as_str())
+				.collect::<Vec<_>>(),
+			["body", "winding"]
+		);
+		let image = studio.render_prop("nibbleton", "kite-spool").unwrap();
+		assert!(image.png.starts_with(b"\x89PNG"));
+		assert!(image.label.starts_with("kite-spool:"));
+
+		// A redraw starts from a built-in; a broken part is refused and the file is kept.
+		studio
+			.create_prop("nibbleton", "kite", "Our kite", Some("kite"))
+			.unwrap();
+		let before = std::fs::read_to_string(
+			Path::new(&studio.root).join("worlds/nibbleton/props/kite.svg"),
+		)
+		.unwrap();
+		let error = studio
+			.set_prop_parts(
+				"nibbleton",
+				"kite",
+				&[PropPart {
+					id: "sail".into(),
+					markup: r#"<path id="sail" d="M0 0 C1 1 2 2 3 3 Z" fill="chartreuse"/>"#.into(),
+				}],
+				&[],
+			)
+			.unwrap_err();
+		assert!(format!("{error:#}").contains("chartreuse"), "{error:#}");
+		assert_eq!(
+			std::fs::read_to_string(
+				Path::new(&studio.root).join("worlds/nibbleton/props/kite.svg")
+			)
+			.unwrap(),
+			before,
+			"nothing was written"
+		);
+	}
+
+	#[test]
+	fn prop_tools_refuse_names_that_are_not_slugs() {
+		let (_dir, studio) = studio();
+
+		for bad in ["../escape", "Kite", "kite spool", ""] {
+			let error = format!(
+				"{:#}",
+				studio.create_prop("nibbleton", bad, "x", None).unwrap_err()
+			);
+			assert!(error.contains("not a prop name"), "{bad}: {error}");
+
+			let error = format!("{:#}", studio.prop_parts("nibbleton", bad).unwrap_err());
+			assert!(error.contains("not a prop name"), "{bad}: {error}");
+		}
 	}
 
 	#[test]

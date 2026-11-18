@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-48 -124 96 128" data-grip="0 0" data-hands="one" data-carry="string" data-about="A pink balloon on a string, floating above the hand that holds it.">
+  <title>A balloon</title>
+  <path id="balloon" d="M0 -120 C26 -120 44 -99 44 -72 C44 -45 24 -24 5 -16 L-5 -16 C-24 -24 -44 -45 -44 -72 C-44 -99 -26 -120 0 -120 Z" fill="bubblegum" data-shade="1"/>
+  <path id="knot" d="M-7 -1 L-3 -17 L3 -17 L7 -1 C3 1 -3 1 -7 -1 Z" fill="bubblegum" data-line="detail"/>
+  <path id="shine" d="M-26 -84 C-25 -97 -16 -106 -5 -109" fill="none" stroke="#ffffff" stroke-width="7" data-opacity="0.7"/>
+  <path id="glint" d="M-29 -66 C-29 -64 -28 -62 -27 -60" fill="none" stroke="#ffffff" stroke-width="6" data-opacity="0.55"/>
+</svg>

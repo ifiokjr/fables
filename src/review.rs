@@ -185,7 +185,7 @@ fn same_stage(a: &Scene, b: &Scene) -> bool {
 					&& (x - y).abs() <= SAME_X
 					&& other.pose == actor.pose
 					&& other.stance == actor.stance
-					&& other.prop == actor.prop
+					&& other.prop.as_ref().map(|p| &p.name) == actor.prop.as_ref().map(|p| &p.name)
 					&& other.y == actor.y
 					&& (other.size - actor.size).abs() < 1e-3
 					&& (other.knocked > 0.5) == (actor.knocked > 0.5)

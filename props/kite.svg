@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-56 -66 112 268" data-grip="0 0" data-hands="one" data-carry="string" data-held-scale="0.8" data-about="A two-colour diamond kite with cross spars and a tail of bows.">
+  <title>A kite</title>
+  <path id="tail" d="M0 88 C-14 108 14 128 0 148 C-12 166 10 180 0 198" fill="none" stroke="#5e6a84" stroke-width="3"/>
+  <path id="bow-1" d="M-14 114 L0 122 L14 114 L14 130 L0 122 L-14 130 Z" fill="teal" data-line="detail"/>
+  <path id="bow-2" d="M-14 162 L0 170 L14 162 L14 178 L0 170 L-14 178 Z" fill="bubblegum" data-line="detail"/>
+  <path id="sail-left" d="M0 -62 C-16 -42 -34 -18 -52 0 C-34 28 -16 58 0 90 Z" fill="sunflower" data-shade="1"/>
+  <path id="sail-right" d="M0 -62 C16 -42 34 -18 52 0 C34 28 16 58 0 90 Z" fill="tomato" data-shade="1"/>
+  <path id="spar-down" d="M0 -60 L0 88" fill="none" stroke="#8a5a44" stroke-width="4"/>
+  <path id="spar-across" d="M-50 0 L50 0" fill="none" stroke="#8a5a44" stroke-width="4"/>
+  <path id="shine" d="M-6 -44 C-14 -34 -24 -20 -34 -8" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.5"/>
+</svg>

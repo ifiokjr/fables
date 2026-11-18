@@ -28,6 +28,7 @@ use crate::art::pack::Picks;
 use crate::art::pack::StylePack;
 use crate::art::palette;
 use crate::art::parts::Feature;
+use crate::art::props;
 use crate::art::puppet::Authored;
 use crate::art::puppet::Physique;
 use crate::art::seed_of;
@@ -43,6 +44,8 @@ pub enum Kind {
 	Flower(FlowerKind, Color),
 	Tree(Color),
 	Toothbrush(Color),
+	/// A prop standing on the stage as an actor, from a world's `props/`.
+	Prop(Arc<props::Prop>),
 }
 
 impl Kind {
@@ -65,6 +68,7 @@ impl Kind {
 			Kind::Flower(..) => "flower",
 			Kind::Tree(_) => "tree",
 			Kind::Toothbrush(_) => "toothbrush",
+			Kind::Prop(_) => "prop",
 		}
 	}
 }

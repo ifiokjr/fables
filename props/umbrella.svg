@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-90 -168 180 188" data-grip="0 -10" data-hands="one" data-carry="up" data-about="An open red-and-cream umbrella with a scalloped edge and a crook handle.">
+  <title>An umbrella</title>
+  <path id="shaft" d="M0 -92 L0 0" fill="none" stroke="#8a5a44" stroke-width="5"/>
+  <path id="crook" d="M0 0 C0 16 -18 18 -20 4" fill="none" stroke="#8a5a44" stroke-width="7"/>
+  <path id="canopy" d="M-86 -86 C-80 -130 -40 -152 0 -152 C40 -152 80 -130 86 -86 C72 -96 58 -96 44 -84 C30 -96 14 -96 0 -86 C-14 -96 -30 -96 -44 -84 C-58 -96 -72 -96 -86 -86 Z" fill="tomato" data-shade="1"/>
+  <path id="panel-1" d="M0 -151 C-14 -140 -36 -118 -44 -84 C-30 -96 -14 -96 0 -86 Z" fill="cream" data-line="detail"/>
+  <path id="panel-2" d="M2 -151 C40 -150 80 -130 86 -86 C72 -96 58 -96 44 -84 C40 -116 22 -142 2 -151 Z" fill="cream" data-line="detail"/>
+  <path id="tip" d="M0 -152 L0 -164" fill="none" stroke="#8a5a44" stroke-width="5"/>
+  <path id="shine" d="M-58 -116 C-48 -132 -34 -142 -20 -146" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.5"/>
+</svg>

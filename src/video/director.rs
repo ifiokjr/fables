@@ -28,6 +28,7 @@ use crate::compose::Extents;
 use crate::compose::Puppet;
 use crate::stage::Camera;
 use crate::stage::Scene;
+use crate::stage::See;
 use crate::stage::ShotSize;
 use crate::stage::Travel;
 use crate::story::Direction;
@@ -345,12 +346,59 @@ fn clear_band(clear: Bounds) -> (f32, f32) {
 	)
 }
 
+/// What a shot of `size` frames, given the puppets it is on: a wide or full shot also takes in
+/// any stage prop one of them looks at (`see=`), so the kite stays in the picture with whoever
+/// watches it; a medium or closer shot stays on the actors, leaving out a prop it names unless
+/// there is nobody else.
+pub(crate) fn framed<'p>(
+	scene: &Scene,
+	puppets: &'p [Puppet],
+	named: Vec<&'p Puppet>,
+	size: ShotSize,
+) -> Vec<&'p Puppet> {
+	let is_prop = |puppet: &Puppet| matches!(puppet.kind, Kind::Prop(_));
+
+	if matches!(size, ShotSize::Wide | ShotSize::Full) {
+		let mut framed = named;
+
+		for actor in &scene.actors {
+			let Some(See::Actor(target)) = &actor.eyes.see else {
+				continue;
+			};
+
+			if !framed.iter().any(|puppet| puppet.id == actor.id)
+				|| framed.iter().any(|puppet| &puppet.id == target)
+			{
+				continue;
+			}
+
+			if let Some(prop) = puppets
+				.iter()
+				.find(|puppet| &puppet.id == target && is_prop(puppet))
+			{
+				framed.push(prop);
+			}
+		}
+
+		return framed;
+	}
+
+	let actors: Vec<&Puppet> = named
+		.iter()
+		.copied()
+		.filter(|puppet| !is_prop(puppet))
+		.collect();
+
+	if actors.is_empty() { named } else { actors }
+}
+
 /// Whether every subject's measured head sits inside the clear area: the framing's headroom
 /// above it, [`SIDE_MARGIN`] of the page width either side, and no part of it off the page.
 /// An extreme close-up may crop hair above the brow, as in video, so for it the brow line
 /// stands in for the top of the head. A wide or full shot's head is small enough to clear
 /// the card's far edge whole, and must; a tighter shot's head fills the frame, so there the
-/// line above the card is the one that must hold.
+/// line above the card is the one that must hold. A stage prop has no head, and the page puts
+/// one in the sky clear of the card itself (see `book::keep_clear`).
 fn heads_are_clear(view: View, subjects: &[&Puppet], clear: Bounds, size: ShotSize) -> bool {
 	let scale = STAGE / view.height;
 	let to_page = |x: f32, y: f32| {
@@ -364,21 +412,24 @@ fn heads_are_clear(view: View, subjects: &[&Puppet], clear: Bounds, size: ShotSi
 	let margin = (clear.2 - clear.0) * SIDE_MARGIN;
 	let chin_clears = matches!(size, ShotSize::Wide | ShotSize::Full);
 
-	subjects.iter().all(|puppet| {
-		let (head_l, head_t, head_r, head_b) = puppet.extents().head;
-		let (left_at, mut top_at) = to_page(head_l, head_t);
-		let (right_at, bottom_at) = to_page(head_r, head_b);
+	subjects
+		.iter()
+		.filter(|puppet| !matches!(puppet.kind, Kind::Prop(_)))
+		.all(|puppet| {
+			let (head_l, head_t, head_r, head_b) = puppet.extents().head;
+			let (left_at, mut top_at) = to_page(head_l, head_t);
+			let (right_at, bottom_at) = to_page(head_r, head_b);
 
-		if size == ShotSize::ExtremeClose {
-			let (centre, radius) = puppet.head();
-			top_at = to_page(centre.x, centre.y - radius * 0.85).1;
-		}
+			if size == ShotSize::ExtremeClose {
+				let (centre, radius) = puppet.head();
+				top_at = to_page(centre.x, centre.y - radius * 0.85).1;
+			}
 
-		top_at >= top + headroom - 0.5
-			&& (!chin_clears || bottom_at <= bottom + 0.5)
-			&& left_at >= margin - 0.5
-			&& right_at <= clear.2 - margin + 0.5
-	})
+			top_at >= top + headroom - 0.5
+				&& (!chin_clears || bottom_at <= bottom + 0.5)
+				&& left_at >= margin - 0.5
+				&& right_at <= clear.2 - margin + 0.5
+		})
 }
 
 /// The sizes tighter than the one the page asked for, widest first: the order a still falls
@@ -409,7 +460,7 @@ pub fn still_view(
 	on: &[String],
 	card: Option<Bounds>,
 ) -> Option<View> {
-	let subjects: Vec<&Puppet> = if on.is_empty() {
+	let named: Vec<&Puppet> = if on.is_empty() {
 		// A close still finds whoever spoke on the page; everyone else shares the frame.
 		let speaking: Vec<&str> = scene
 			.actors
@@ -435,6 +486,7 @@ pub fn still_view(
 			.filter(|puppet| on.contains(&puppet.id))
 			.collect()
 	};
+	let subjects = framed(scene, puppets, named, size);
 
 	let ground = scene.setting.ground();
 	let clear = clear_area(scene.text, card);
@@ -496,6 +548,11 @@ pub(crate) fn rough_extent(puppet: &Puppet) -> Bounds {
 		Kind::Tree(_) => (x - 400.0 * s, y - 1050.0 * s, x + 400.0 * s, y),
 		Kind::Flower(..) => (x - 110.0 * s, y - 520.0 * s, x + 110.0 * s, y),
 		Kind::Worm => (x - 40.0 * s, y - 120.0 * s, x + 40.0 * s, y),
+		Kind::Prop(prop) => {
+			let (lo, hi) = prop.bounds();
+			let (half, height) = ((hi.x - lo.x) * s / 2.0, (hi.y - lo.y) * s);
+			(x - half, y - height - 20.0, x + half, y + 20.0)
+		}
 	}
 }
 
@@ -1450,7 +1507,7 @@ mod tests {
 		)
 		.unwrap();
 		let page = &story.pages[0];
-		let mut scene = Scene::for_page(page, &story.settings).unwrap();
+		let mut scene = Scene::for_page(page, &story.settings, &story.props).unwrap();
 		let mut memory = std::collections::HashMap::new();
 
 		for beat in &page.beats {
@@ -1793,7 +1850,7 @@ mod tests {
 		let story = story::parse(source).unwrap();
 		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
 		let page = &story.pages[0];
-		let mut scene = Scene::for_page(page, &story.settings).unwrap();
+		let mut scene = Scene::for_page(page, &story.settings, &story.props).unwrap();
 		let mut memory = std::collections::HashMap::new();
 
 		for beat in &page.beats {

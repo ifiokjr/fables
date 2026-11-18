@@ -43,8 +43,8 @@ Pip jumped. **SPLASH!** The puddle was only a puddle.
 
 # garden
 @mum x=0.72 happy
-@pip x=0.35 proud
-"Again!" said Pip.
+@pip x=0.35 proud hold holds=bucket
+"Again!" said Pip, and held up a bucket of puddle.
 @scene dusk
 The sun went down on a very wet, very happy Pip.
 EOF
@@ -52,6 +52,7 @@ EOF
 
 The story has no `author`; the world's `author = "Your Name"` credits it. Bare `golden` and
 `dusk` are lights: `# garden golden` is `# garden light=golden`, and `@scene dusk` ends the day.
+`holds=bucket` puts a prop in Pip's hand; `fables prop list` names every one a world can use.
 
 ```bash
 fables check worlds/teacup-lane/stories/pip-and-the-puddle/story.md

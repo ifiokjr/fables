@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -50 86 108" data-grip="0 46" data-hands="one" data-about="A round wooden reel wound with kite string, held by its handle.">
+  <title>A kite reel</title>
+  <path id="handle" d="M-6 26 L6 26 L6 52 C6 57 -6 57 -6 52 Z" fill="toffee" data-shade="1"/>
+  <path id="rim" d="M-34 0 C-34 -18.8 -18.8 -34 0 -34 C18.8 -34 34 -18.8 34 0 C34 18.8 18.8 34 0 34 C-18.8 34 -34 18.8 -34 0 Z" fill="toffee" data-shade="1"/>
+  <path id="string" d="M-26 0 C-26 -14.4 -14.4 -26 0 -26 C14.4 -26 26 -14.4 26 0 C26 14.4 14.4 26 0 26 C-14.4 26 -26 14.4 -26 0 Z" fill="cream" data-shade="1"/>
+  <path id="wound-outer" d="M-20 0 C-20 -11 -11 -20 0 -20 C11 -20 20 -11 20 0 C20 11 11 20 0 20 C-11 20 -20 11 -20 0 Z" fill="none" stroke="#c9865a" stroke-width="2"/>
+  <path id="wound-inner" d="M-14 0 C-14 -7.7 -7.7 -14 0 -14 C7.7 -14 14 -7.7 14 0 C14 7.7 7.7 14 0 14 C-7.7 14 -14 7.7 -14 0 Z" fill="none" stroke="#c9865a" stroke-width="2"/>
+  <path id="hub" d="M-7 0 C-7 -3.9 -3.9 -7 0 -7 C3.9 -7 7 -3.9 7 0 C7 3.9 3.9 7 0 7 C-3.9 7 -7 3.9 -7 0 Z" fill="cocoa" data-shade="1"/>
+  <path id="loose" d="M18 -18 C28 -28 34 -36 42 -46" fill="none" stroke="#c9865a" stroke-width="2"/>
+</svg>

@@ -53,6 +53,7 @@ worlds/kerfuffle/
   world.toml      the series' name, its drawing style, its narrator, and the words in every book's front and back matter
   cast.toml       who lives there and what they look like
   puppets/        authored puppets' part files
+  props/          the world's own props, as part files (optional)
   recipe.md       the 12-beat recipe `fables new` starts a book from
   flows/          its own story flows, found before the built-in ones
   stories/        one folder per book, each with a story.md
@@ -150,7 +151,7 @@ A drawing style is a folder in `styles/` that characters are drawn from, so a ne
 ```text
 styles/cartoon/
   style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page that suits the look (`[page]`: its skin, text card and page turn)
-  kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
+  kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes
   template.svg    a plain kid's own parts, which new kids are drawn from
   template-grown-up.svg
                   a plain grown-up's own parts, cut for the grown-up body, which new grown-ups are drawn from
@@ -237,6 +238,43 @@ The fifteen built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bat
 
 **Composing for the stage.** Every page puts a text card and actors on top of a setting, so give each landmark a home neither covers (`fables sheets --zones` outlines these zones on every setting). In stage units, measured from the top: the built-in grounds sit at y 2060–2100; a typical top card covers x 150–2250 down to y ≈ 880 (a short line stops near 375, a long page near 970), and with `text=bottom` it covers y ≈ 1520–2280 (1470 for a long page). Heads reach 1000–1170 above the ground for a kid and 1160–1270 for a grown-up across the drawing styles, so they top out at y ≈ 800–1100. Actors without an `x=` stand at ½ alone, at ⅓ and ⅔ as a pair (x 800 and 1600, each covering about 480 across) and at ¼, ½ and ¾ as three; `x=far-left`, `left`, `center`, `right` and `far-right` are 0.12, 0.28, 0.5, 0.72 and 0.88. That leaves the wings (x below about 540 and above about 1860) from y 880 down to the ground for landmarks, a sun or a moon low in a wing at y ≈ 950–1120, the gutter between a pair (x 1040–1360) for something a lone actor may hide, and the card band for detail a story can lose. Keep the band behind the actors calm and mid-toned, with no straight edge across the heads.
 
+## Props
+
+A prop is a thing the story is about: a kite, a jar, a parcel. Each one is an SVG part file in [`props/`](props), found by name the way a setting is: the world's `props/<name>.svg` first, then the built-in one. `holds=<name>` puts one in a character's hand; `@kite x=0.7 y=sky` stands one on the stage as an actor.
+
+A prop is drawn in its own coordinate space, and its root `<svg>` says how a hand holds it:
+
+| Attribute | Meaning |
+| --- | --- |
+| `data-grip="x y"` | The point that sits in the fist. |
+| `data-hands` | `one`, or `two` to bring both hands to the grip (a crate, a parcel). |
+| `data-angle` | Degrees the prop leans in a relaxed hand. |
+| `data-carry` | How somebody standing at ease carries it: `hand` (in the fist at the side, the default), `up` (held up beside the head, clear of the face: a torch, a flower), `front` (in both hands before the chest: a cake, a drum), `string` (the grip is a string's end and the prop floats above: a balloon) or `head` (worn: a hat). A pose that uses the hands (`hold`, `reach-out`, `wave`…) overrides it. |
+| `data-held-scale` | A factor on the held-scale rule, for a prop that should be bigger or smaller in a hand than the rule makes it. |
+| `data-about` | A sentence on what it is. |
+| `data-use="brush"` | A toothbrush's behaviour: it points at the mouth when it comes near it, and scrubs it with foam. |
+
+Each part is a `<path>` whose `id` is its name, drawn in file order. `fill` is a palette name or hex code; `data-shade="1"` gives the part the style's cel shadow, `data-line="detail"` or `"none"` changes its outline, and a line part has `fill="none"` with a `stroke`, a `stroke-width` and optionally `data-opacity`. Parts take the scene's light and the style's line like everything else. A prop grows with the hand that holds it, so a grown-up holds the same ball bigger than a kid, and it sits in the fist under the fingers at the grip. Small things are drawn larger than life in a hand, the way picture books draw them: the held-scale rule grows a key, a letter or a pebble towards the size of the hand that holds it, so a four-year-old sees what it is, and leaves things already that big as they are. However big a style draws its hands, a held thing's longest side is at least 1.7 times the fist's, so a rubber-hose glove never swallows a pebble.
+
+The thirty-five built-in props are `apple`, `ball`, `balloon`, `basket`, `bell`, `book`, `box`, `bucket`, `cake`, `cup`, `drum`, `flower`, `hat`, `jam`, `jar`, `key`, `kite`, `kite-spool`, `ladder`, `lantern`, `leaf`, `letter`, `map`, `paintbrush`, `parcel`, `pebble`, `ruler`, `sandwich`, `spoon`, `star`, `teddy`, `telescope`, `toothbrush`, `torch` and `umbrella`. `fables sheets` writes `<world>-props.png` with each one alone and in the hand of the world's first figure. Over MCP, `prop_list`, `prop_create`, `prop_parts`, `prop_set_parts` and `prop_render` do the same as the setting tools.
+
+A prop can stand on the stage as an actor, with `size=`, `z=`, `hide`/`show` and `enter=`/`exit=` like anyone:
+
+```text
+@kite x=0.7 y=sky tether=hana
+```
+
+At `size=1` a prop on the stage is the size a kid's hand holds it at, so a kite let go of is the kite that was held; `size=` scales from there. `y=sky` flies it over the cast's heads, low enough that a wide landscape shot, which keeps the ground in view, still shows it whole; on a book page one the card would cover moves beside the card, or below it, never under it and never over a face. In video the full landscape frame shows little sky above the heads, so stand a sky prop in the gap between the actors (or in a wing), not straight above one of them. A number (`y=0.3`, the prop's base that far down the stage) is never moved. A flyer (a bird) placed `y=sky`, or flying with no height given, keeps clear of the card the same way, and `land` puts it on the ground out from under the card.
+
+`tether=<actor>` draws a string from the prop to that actor's hand, in the style's line, which hangs like string: it bows down from the straight line, more the longer and more level it runs (a string straight up hardly bows), and swings gently in video; `tether=nothing` lets it go. Giving and taking are two directions written together:
+
+```text
+@hana holds=nothing
+@mo holds=kite-spool
+```
+
+In video a give plays as one: the two reach towards each other, the hands meet at the smaller one's chest, and the thing passes there. Two who stand too far apart for their hands to meet (a pair at ⅓ and ⅔ do) toss it: it flies underarm in a low arc from the giver's hand into the taker's. A string that changes hands is tied to the new hand when it gets there, so `@mo jump catch` with `@kite tether=mo` reads as a leap and a catch: the catching hand reaches up and out on the side of what it catches, clear of the face, and the string is caught at the top of the leap. Eyes on a stage prop (`see=kite`) go to the thing itself, a little above its middle, not to its tail or string.
+
 ## Designing characters with an agent (MCP)
 
 `fables mcp` serves the studio over the Model Context Protocol on stdio, so an agent can design characters the way every Kerfuffle character was drawn: start from the style's template, redraw parts as SVG path data, look at the model sheet, fix, repeat. Sheets come back as images, so the model sees what it drew. Register it with any MCP client, for example:
@@ -266,6 +304,8 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `video_render` | The narrated, lip-synced MP4, 9:16 or 16:9, or a quick preview. |
 | `setting_list`, `setting_create` | A world's settings, built-in and its own; start one, blank or from a setting to repaint. |
 | `setting_parts`, `setting_set_parts`, `setting_render` | Read and redraw a setting's parts as SVG elements, and see it by day or night, wilted or not. |
+| `prop_list`, `prop_create` | A world's props, built-in and its own; start one, blank or from a prop to redraw. |
+| `prop_parts`, `prop_set_parts`, `prop_render` | Read and redraw a prop's parts, its grip and its behaviour, and see the prop as an image. |
 
 Worlds, books, settings and characters are named by slugs, never paths, so the server only reads and writes under its root: a name that is absolute or steps out with `..` is refused before any file is touched. A book written over MCP belongs to the world it is written into, so `story_write` refuses a script whose front matter names a `world`; at the command line, name one with `--world` or a relative `world =`. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
 
@@ -279,6 +319,8 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables new "<Title>" --star <id> [--friend <id>] [--flow <name>]` | A new book in the world's `stories/<title>/story.md`, laid out from the named flow, else the world's `recipe.md`, else `three-tries`, with the star already staged. |
 | `fables flow list` | The story flows: each one's about, what it is good for, how many characters it needs and its length. |
 | `fables flow show <name>` | One flow's beats as a table, with its page and word budgets and its craft notes. |
+| `fables prop list` | Every prop the world can use, with its source, hands, grip and a sentence on it. |
+| `fables prop new <name> [--from <prop>]` | A world's own `props/<name>.svg`, blank or copied from a prop it can use. |
 | `fables check <story>` | Validates the script and reports the drawing style and page skin, page and word counts, any cast fields a drawn character ignores, and the blank pages a short book is padded with. Errors give line numbers and list valid options. |
 | `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, words the picture never shows, mood arcs, pacing, light, shots and the shape a book's `flow` promises. Advice, never a refusal; ends with a count of findings. |
 | `fables puppet parts <id> [part…]` | A character's parts as SVG path data: their own (or their style's template) and the kit's, each marked. |
@@ -293,7 +335,7 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables animatic <story> [--format landscape\|portrait] [--silent]` | `out/<book>/<skin>/animatic/<book>-animatic.mp4`: each storyboard panel held for its real duration over the soundtrack, captioned with its number, page, line, start, length and first words, under a progress bar that marks each cut, so timing reads in seconds; a push or pan moves by cropping one wide plate. Half size at 24 fps, with `soundtrack.wav` beside it, mixed exactly as the video's. A line whose voice cannot speak here (no `say`, no API key, no command) is silent and timed by its estimate while music, effects and ambience play, and the output says how many; `--silent` does that for every line and records nothing. `fables video` never falls back: it stops with the voice's error. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
-| `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
+| `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's props (`<world>-props.png`: each prop alone and in the first figure's hand), the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
 | `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every page skin, side by side. |
 | `fables rig <id>` | `out/rig/<skin>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character), a motion-test video, and an acting-test video (the ten acting rules, in order, on two characters). |
 
@@ -388,18 +430,18 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, `music=…`, `ambience=…`, and friends; the video eases the change over about a second), and `@camera …` the framing. `@music <cue>` changes the cue from that line on, and `@hold <seconds>` is a dead stop (below).
-
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`), or a prop's name, which stands that prop on the stage (`@kite`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, `music=…`, `ambience=…`, and friends; the video eases the change over about a second), and `@camera …` the framing. `@music <cue>` changes the cue from that line on, and `@hold <seconds>` is a dead stop (below).
 
 | Kind | Values |
 | --- | --- |
 | Moods | `happy` `grin` `laugh` `sad` `grumpy` `cross` `defiant` `shocked` `disgusted` `fainted` `dizzy` `sleepy` `dreamy` `worried` `proud` |
-| Poses | `idle` `wave` `point` `arms-crossed` `hips` `cheer` `hold-nose` `cover-mouth` `brush` `shrug` `droop` `hold` `think` `reach-out` `pick` |
-| Stances (legs and spine) | `stand` `crouch` `sit` `kneel` `jump` `bow` `tiptoe` |
+| Poses | `idle` `wave` `point` `arms-crossed` `hips` `cheer` `hold-nose` `cover-mouth` `brush` `shrug` `droop` `hold` `think` `reach-out` `pick` `catch` |
+| Stances (legs and spine) | `stand` `crouch` `sit` `kneel` `jump` `bow` `tiptoe` (in video a `jump` is a leap that lands) |
 | Gaits | `walk` `run` (cycles on the spot in video) `still` |
-| Actions | `talk` (mouth moves with the next paragraph) `faint` `wake` `fly` `land` `wag` `calm` `hop` `flip` `hide` `show` `quiet` |
-| Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (for flyers), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
-| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=toothbrush`/`parcel`/`jam`/`nothing`, `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers) |
+| Actions | `talk` (mouth moves with the next paragraph) `faint` `wake` `fly` `land` `wag` `calm` `hop` `flip` `hide` `show` `notice` `quiet` |
+| Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (a flyer high over the cast, a prop flying over their heads; on a book page, clear of the text card), `y=0.3` (a bird's body, or a prop's base, that far down the stage: 0 is the top, 1 the bottom; a number is never moved), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
+| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=<prop>`/`nothing` (any world or built-in prop, or empty hands), `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers), `tether=<actor>`/`nothing` (a stage prop's string, or letting it go) |
+| Eyes | `see=<actor>`/`<prop>`/`mine`/`up`/`down`/`left`/`right`/`front`/`away` (`mine` is what the actor holds): it holds until it is changed, `front` releases it, and the eyes lead the head. `notice` plays a small beat first: the eyes flick to the `see=` target (or whoever spoke last), hold for about half a second, and then the rest of the direction lands. |
 | Entrances | `enter=left`/`right`, `exit=left`/`right` (figures walk on and off in video, critters keep their own entrances; in the book they just appear or vanish) |
 | Scene | `light=golden` or a bare preset (`dusk`), `wilt=1`, `stink=1`, `mint=1`, `tint=sunflower`, `music=calm`, `ambience=birds` (or `none`), `speed=1`, `impact=1` |
 | Directions (no actor) | `@pause 1` `@hold 1.5` `@music calm` `@sfx pop` |
@@ -573,7 +615,7 @@ Run `fables rig <id>` for the rig sheet, the motion test and the acting test.
 
 Add `drop-tags = true` to skip short tags like "said Mum.", which makes the video play like a show.
 
-The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, and `**shouted**` words are shouted. Mouths lip-sync to whoever is speaking, and everyone else looks at them.
+The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, and `**shouted**` words are shouted. Mouths lip-sync to whoever is speaking; everyone else looks at them unless a `see=` holds their eyes, and a `notice` makes them look before they react.
 
 | `provider` | Needs | Acting | Lip-sync |
 | --- | --- | --- | --- |
@@ -649,6 +691,7 @@ src/
   video/          voices (TTS providers), lip-sync, timeline, the director's camera setups, frame renderer, soundtrack, ffmpeg
 worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe, flows and books
 settings/         the built-in settings, as part files
+props/            the built-in props, as part files
 styles/           drawing styles: style.toml, kit and template per look
 flows/            the built-in story flows, one laid-out recipe per shape
 docs/             the five-minute guide, voices and turning the books into a show

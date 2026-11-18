@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-36 -102 72 108" data-grip="0 -2" data-hands="one" data-held-scale="1.1" data-about="A heart-shaped green leaf with its veins, on a curled stalk.">
+  <title>A leaf</title>
+  <path id="stalk" d="M2 4 C-2 -8 2 -16 0 -26" fill="none" stroke="#8a5a44" stroke-width="4"/>
+  <path id="leaf" d="M0 -24 C-22 -22 -36 -44 -32 -62 C-28 -80 -10 -90 0 -100 C10 -90 28 -80 32 -62 C36 -44 22 -22 0 -24 Z" fill="leaf" data-shade="1"/>
+  <path id="midrib" d="M0 -27 C0 -50 0 -74 0 -94" fill="none" stroke="#3f8f4a" stroke-width="3"/>
+  <path id="vein-1" d="M0 -42 C-8 -46 -16 -52 -22 -60" fill="none" stroke="#3f8f4a" stroke-width="2"/>
+  <path id="vein-2" d="M0 -42 C8 -46 16 -52 22 -60" fill="none" stroke="#3f8f4a" stroke-width="2"/>
+  <path id="vein-3" d="M0 -62 C-6 -66 -12 -72 -16 -78" fill="none" stroke="#3f8f4a" stroke-width="2"/>
+  <path id="vein-4" d="M0 -62 C6 -66 12 -72 16 -78" fill="none" stroke="#3f8f4a" stroke-width="2"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -76 24 146" data-grip="0 34" data-hands="one" data-angle="25" data-about="A long blue paintbrush with red paint on its bristles.">
+  <title>A paintbrush</title>
+  <path id="handle" d="M-4 -14 C-5 20 -6 50 -4 64 C-3 68 3 68 4 64 C6 50 5 20 4 -14 Z" fill="cornflower" data-shade="1"/>
+  <path id="ferrule" d="M-5 -36 L5 -36 C6.1 -36 7 -35.1 7 -34 L7 -14 C7 -12.9 6.1 -12 5 -12 L-5 -12 C-6.1 -12 -7 -12.9 -7 -14 L-7 -34 C-7 -35.1 -6.1 -36 -5 -36 Z" fill="slate" data-shade="1"/>
+  <path id="bristles" d="M-7 -36 C-9 -48 -6 -60 0 -72 C6 -60 9 -48 7 -36 Z" fill="toffee" data-line="detail"/>
+  <path id="paint" d="M-8 -50 C-7 -58 -4 -66 0 -72 C4 -66 7 -58 8 -50 C4 -46 -4 -46 -8 -50 Z" fill="tomato" data-line="detail"/>
+  <path id="crimp" d="M-7 -28 L7 -28" fill="none" stroke="#2e2f6b" stroke-width="2"/>
+  <path id="shine" d="M-1 -6 L-2 56" fill="none" stroke="#ffffff" stroke-width="2.5" data-opacity="0.6"/>
+</svg>
