@@ -7,6 +7,7 @@
 pub mod acting;
 pub mod audio;
 pub mod director;
+pub mod ffmpeg;
 pub mod frames;
 pub mod lipsync;
 pub mod motion;
@@ -160,33 +161,32 @@ pub struct Clip<'a> {
 }
 
 impl Clip<'_> {
-	/// Renders every frame with `render` (RGBA bytes) and encodes an H.264 MP4 at `path`.
-	pub fn encode(
-		&self,
-		path: &Path,
-		render: impl Fn(usize) -> Result<Vec<u8>> + Sync,
-	) -> Result<()> {
-		let (width, height, frames) = (self.width, self.height, self.frames);
-		let mut command = Command::new("ffmpeg");
-		command
-			.args([
-				"-y",
-				"-loglevel",
-				"error",
-				"-f",
-				"rawvideo",
-				"-pix_fmt",
-				"rgba",
-				"-s",
-			])
-			.arg(format!("{width}x{height}"))
-			.args(["-r", &self.fps.to_string(), "-i", "-"]);
+	/// The ffmpeg arguments that encode raw RGBA frames from stdin, and the soundtrack if any,
+	/// into an H.264 MP4 at `path`.
+	fn args(&self, path: &Path) -> Vec<std::ffi::OsString> {
+		let mut args: Vec<std::ffi::OsString> = Vec::new();
+		let mut push = |values: &[&str]| args.extend(values.iter().map(Into::into));
+
+		push(&[
+			"-y",
+			"-loglevel",
+			"error",
+			"-f",
+			"rawvideo",
+			"-pix_fmt",
+			"rgba",
+			"-s",
+		]);
+		push(&[&format!("{}x{}", self.width, self.height)]);
+		push(&["-r", &self.fps.to_string(), "-i", "-"]);
 
 		if let Some(audio) = self.audio {
-			command.arg("-i").arg(audio);
+			push(&["-i"]);
+			args.push(audio.into());
 		}
 
-		command.args([
+		let mut push = |values: &[&str]| args.extend(values.iter().map(Into::into));
+		push(&[
 			"-c:v",
 			"libx264",
 			"-preset",
@@ -206,7 +206,7 @@ impl Clip<'_> {
 		]);
 
 		if self.audio.is_some() {
-			command.args([
+			push(&[
 				"-af",
 				"loudnorm=I=-16:TP=-1.5:LRA=11",
 				"-c:a",
@@ -219,9 +219,25 @@ impl Clip<'_> {
 			]);
 		}
 
-		let mut ffmpeg = command
-			.args(["-movflags", "+faststart"])
-			.arg(path)
+		push(&["-movflags", "+faststart"]);
+		args.push(path.into());
+
+		args
+	}
+
+	/// Renders every frame with `render` (RGBA bytes) and encodes an H.264 MP4 at `path`.
+	pub fn encode(
+		&self,
+		path: &Path,
+		render: impl Fn(usize) -> Result<Vec<u8>> + Sync,
+	) -> Result<()> {
+		let (width, height, frames) = (self.width, self.height, self.frames);
+		let args = self.args(path);
+
+		ffmpeg::require(&args)?;
+
+		let mut ffmpeg = Command::new("ffmpeg")
+			.args(&args)
 			.stdin(Stdio::piped())
 			// Never on our stdout: under `fables mcp` that is the protocol's channel.
 			.stdout(Stdio::null())
@@ -349,6 +365,9 @@ fn stamp(seconds: f32) -> String {
 /// soundtrack, so timing can be judged before a full render. One plate is drawn per shot and
 /// ffmpeg holds it, cropping a push or pan across the plate rather than rendering every frame.
 /// The soundtrack is written beside it as `soundtrack.wav`, mixed exactly as the video's.
+///
+/// Every caption is drawn by fables and laid over its shot, and a progress bar runs along the
+/// top, so the graph needs only filters every ffmpeg build has (see [`ANIMATIC_FILTERS`]).
 pub fn animatic(
 	story: &Story,
 	cast: &Cast,
@@ -356,6 +375,56 @@ pub fn animatic(
 	format: Format,
 	dir: &Path,
 ) -> Result<PathBuf> {
+	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
+	let scratch = Scratch::new()?;
+	let soundtrack = dir.join("soundtrack.wav");
+	let path = dir.join(format!("{}-animatic.mp4", story.slug));
+	let args = animatic_args(
+		story,
+		cast,
+		timeline,
+		format,
+		&soundtrack,
+		&scratch.path,
+		&path,
+	)?;
+
+	ffmpeg::require(&args)?;
+	audio::write(timeline, &soundtrack)?;
+
+	let status = Command::new("ffmpeg")
+		.args(&args)
+		// Never on our stdout: under `fables mcp` that is the protocol's channel.
+		.stdout(Stdio::null())
+		.status()
+		.context("could not run ffmpeg; install it to make videos")?;
+
+	anyhow::ensure!(
+		status.success(),
+		"ffmpeg failed while writing {}",
+		path.display()
+	);
+
+	Ok(path)
+}
+
+/// The filters an animatic's graph is built from. Each is part of libavfilter itself, with no
+/// external library behind it, so every ffmpeg build has them; `drawtext`, which needs
+/// freetype, is deliberately not among them.
+pub const ANIMATIC_FILTERS: &[&str] =
+	&["zoompan", "setsar", "format", "overlay", "concat", "color"];
+
+/// Draws the animatic's plates, captions and progress rail into `scratch` and returns the
+/// ffmpeg arguments that cut them over `soundtrack` into `path`.
+fn animatic_args(
+	story: &Story,
+	cast: &Cast,
+	timeline: &Timeline,
+	format: Format,
+	soundtrack: &Path,
+	scratch: &Path,
+	path: &Path,
+) -> Result<Vec<std::ffi::OsString>> {
 	let portrait = format == Format::Portrait;
 	let (width, height) = if portrait { (540, 960) } else { (960, 540) };
 	let fps = 24;
@@ -365,20 +434,12 @@ pub fn animatic(
 
 	let views = storyboard::views(story, timeline, &rows, portrait);
 	let bounds = storyboard::frame_bounds(&rows, fps);
-	let scratch = Scratch::new()?;
-	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
-	let soundtrack = dir.join("soundtrack.wav");
-	audio::write(timeline, &soundtrack)?;
-
-	// The fonts are embedded in the binary, so ffmpeg draws the same faces anywhere.
-	let body_font = scratch.path.join("body.ttf");
-	std::fs::write(&body_font, crate::raster::BODY_FONT)?;
-	let display_font = scratch.path.join("display.ttf");
-	std::fs::write(&display_font, crate::raster::DISPLAY_FONT)?;
-
+	let total = bounds.last().map_or(1, |(_, last)| (*last).max(1));
+	let count = rows.len();
+	let mut plates = Vec::new();
+	let mut captions = Vec::new();
 	let mut filters = Vec::new();
-	let mut inputs = Vec::new();
-	let mut parts = Vec::new();
+	let mut parts = String::new();
 
 	for (index, ((row, (start, end)), (first, last))) in
 		rows.iter().zip(&views).zip(&bounds).enumerate()
@@ -392,9 +453,14 @@ pub fn animatic(
 		let renderer =
 			Renderer::new(timeline, story, format, plate_w, plate_h).with_aspect(plate_aspect);
 		let plate = renderer.render_view(row.start + row.hold * 0.5, 0, union)?;
-		let plate_path = scratch.path.join(format!("plate-{index}.png"));
+		let plate_path = scratch.join(format!("plate-{index}.png"));
 		std::fs::write(&plate_path, crate::raster::png(&plate)?)?;
-		inputs.push(plate_path);
+		plates.push(plate_path);
+
+		let caption = storyboard::animatic_caption(row, width, portrait)?;
+		let caption_path = scratch.join(format!("caption-{index}.png"));
+		std::fs::write(&caption_path, crate::raster::png(&caption)?)?;
+		captions.push(caption_path);
 
 		let frame = Plate {
 			union,
@@ -404,87 +470,112 @@ pub fn animatic(
 		};
 		let crop = crop(row, *start, *end, &frame, *first, *last, fps);
 		let frames = last - first;
-		let label = label(row, portrait);
-		let label_path = scratch.path.join(format!("label-{index}.txt"));
-		std::fs::write(&label_path, label)?;
-		let font_size = if portrait { 17 } else { 20 };
-		let label_y = if portrait { height - 56 } else { height - 38 };
 
+		// The caption is laid over the cropped frame, not the plate, so it stays still while
+		// the camera moves.
 		filters.push(format!(
 			"[{index}:v]zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={fps},\
-			 format=yuv420p,setsar=1,drawtext=fontfile='{}':textfile='{}':fontcolor=white:\
-			 fontsize={font_size}:box=1:boxcolor=0x2a2238@0.75:boxborderw=6:x=16:\
-			 y={label_y}[v{index}]",
-			path_text(&body_font),
-			path_text(&label_path),
+			 setsar=1[z{index}];[z{index}][{caption}:v]overlay=x=0:y=H-h,format=yuv420p[v{index}]",
 			z = crop.z,
 			x = crop.x,
 			y = crop.y,
+			caption = count + index,
 		));
-		parts.push(format!("[v{index}]"));
+		let _ = write!(parts, "[v{index}]");
 	}
 
-	let audio_index = rows.len();
-	let timecode_y = if portrait { 26 } else { 20 };
-	let count = rows.len();
+	let rail = scratch.join("rail.png");
+	std::fs::write(
+		&rail,
+		crate::raster::png(&progress_rail(&bounds, total, width)?)?,
+	)?;
+
+	let seconds = total as f32 / fps as f32;
+	let rail_index = count * 2;
+	let audio_index = rail_index + 1;
+	// The bar slides in from the left as the cut plays: at the end it spans the frame. It runs
+	// a second past the cut so `shortest` ends on the cut's last frame, never the bar's.
 	let graph = format!(
-		"{};{}concat=n={count}:v=1:a=0[cut];[cut]drawtext=fontfile='{}':text='%{{pts\\:hms}}':\
-		 fontcolor=white:fontsize={}:box=1:boxcolor=0x2a2238@0.7:boxborderw=6:x=w-tw-16:\
-		 y={timecode_y}[out]",
+		"{};{parts}concat=n={count}:v=1:a=0[cut];[cut][{rail_index}:v]overlay=x=0:y=0[railed];\
+		 color=c=0xffc93c:s={width}x{BAR}:r={fps}:d={bar}[bar];[railed][bar]overlay=x='-w+w*t/\
+		 {length}':y=0:eval=frame:shortest=1,format=yuv420p[out]",
 		filters.join(";"),
-		parts.join(""),
-		path_text(&display_font),
-		if portrait { 18 } else { 22 },
+		bar = decimal(seconds + 1.0),
+		length = decimal(seconds),
 	);
 
-	let path = dir.join(format!("{}-animatic.mp4", story.slug));
-	let mut command = Command::new("ffmpeg");
-	command.args(["-y", "-loglevel", "error"]);
+	let mut args: Vec<std::ffi::OsString> = ["-y", "-loglevel", "error"]
+		.into_iter()
+		.map(Into::into)
+		.collect();
 
-	for input in &inputs {
-		command.arg("-i").arg(input);
+	for input in plates.iter().chain(&captions).chain([&rail]) {
+		args.push("-i".into());
+		args.push(input.into());
 	}
 
-	command.arg("-i").arg(&soundtrack);
-	command.args([
-		"-filter_complex",
-		&graph,
-		"-map",
-		"[out]",
-		"-map",
-		&format!("{audio_index}:a"),
-		"-c:v",
-		"libx264",
-		"-preset",
-		"veryfast",
-		"-crf",
-		"20",
-		"-pix_fmt",
-		"yuv420p",
-		"-c:a",
-		"aac",
-		"-b:a",
-		"192k",
-		"-ar",
-		"48000",
-		"-shortest",
-		"-movflags",
-		"+faststart",
-	]);
-	let status = command
-		.arg(&path)
-		// Never on our stdout: under `fables mcp` that is the protocol's channel.
-		.stdout(Stdio::null())
-		.status()
-		.context("could not run ffmpeg; install it to make videos")?;
+	args.push("-i".into());
+	args.push(soundtrack.into());
+	args.extend(
+		[
+			"-filter_complex",
+			&graph,
+			"-map",
+			"[out]",
+			"-map",
+			&format!("{audio_index}:a"),
+			"-c:v",
+			"libx264",
+			"-preset",
+			"veryfast",
+			"-crf",
+			"20",
+			"-pix_fmt",
+			"yuv420p",
+			"-c:a",
+			"aac",
+			"-b:a",
+			"192k",
+			"-ar",
+			"48000",
+			"-shortest",
+			"-movflags",
+			"+faststart",
+		]
+		.into_iter()
+		.map(Into::into),
+	);
+	args.push(path.into());
 
-	anyhow::ensure!(
-		status.success(),
-		"ffmpeg failed while writing {}",
-		path.display()
+	Ok(args)
+}
+
+/// The progress bar's height, in pixels.
+const BAR: u32 = 6;
+
+/// The track the progress bar runs along: a dark rail with a tick where each shot begins, so
+/// the bar shows where the cut is among its shots.
+fn progress_rail(
+	bounds: &[(usize, usize)],
+	total: usize,
+	width: u32,
+) -> Result<resvg::tiny_skia::Pixmap> {
+	let mut svg = format!(
+		r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{BAR}"><rect width="{width}" height="{BAR}" fill="#2a2238" fill-opacity="0.6"/>"##
 	);
 
-	Ok(path)
+	for (first, _) in bounds.iter().skip(1) {
+		let x = *first as f32 / total as f32 * width as f32;
+		let _ = write!(
+			svg,
+			r##"<rect x="{:.1}" width="2" height="{BAR}" fill="#f4ede1" fill-opacity="0.85"/>"##,
+			x - 1.0
+		);
+	}
+
+	svg.push_str("</svg>");
+
+	crate::raster::render(&svg)
 }
 
 /// One shot's crop of its plate: the zoom and the top-left corner, as ffmpeg expressions in
@@ -624,34 +715,6 @@ fn decimal(value: f32) -> String {
 	format!("{value:.4}")
 }
 
-/// A path as a filter option value.
-fn path_text(path: &Path) -> String {
-	path.display().to_string().replace('\\', "/")
-}
-
-/// The panel's caption, cut to fit the frame.
-fn label(row: &storyboard::Row, portrait: bool) -> String {
-	let mut label = row.label();
-
-	if label.chars().count() > if portrait { 44 } else { 78 } {
-		label = label
-			.chars()
-			.take(if portrait { 43 } else { 77 })
-			.collect::<String>();
-		label.push('…');
-	}
-
-	format!(
-		"#{}{} · {label}",
-		row.number,
-		if row.line == 0 {
-			String::new()
-		} else {
-			format!(" · line {}", row.line)
-		}
-	)
-}
-
 /// A directory under the system temp folder, removed when the animatic is done.
 struct Scratch {
 	path: PathBuf,
@@ -708,6 +771,100 @@ mod tests {
 		.unwrap();
 
 		(story, timeline)
+	}
+
+	/// The filters fables may use when it cuts video: all of them part of libavfilter itself,
+	/// with no external library, so every ffmpeg build has them. `drawtext` (freetype) and the
+	/// like are not here on purpose: Homebrew's ffmpeg, for one, ships without them.
+	const ALWAYS_BUILT: &[&str] = &[
+		"zoompan", "setsar", "format", "overlay", "concat", "color", "loudnorm",
+	];
+
+	fn assert_always_built(args: &[std::ffi::OsString], what: &str) {
+		let used = ffmpeg::filters_in(args);
+
+		assert!(!used.is_empty(), "{what} names its filters");
+
+		for filter in &used {
+			assert!(
+				ALWAYS_BUILT.contains(&filter.as_str()),
+				"{what} uses `{filter}`, which not every ffmpeg has: {used:?}"
+			);
+		}
+
+		assert_eq!(
+			ffmpeg::encoders_in(args),
+			["libx264", "aac"],
+			"{what} encodes with libx264 and aac only"
+		);
+	}
+
+	#[test]
+	fn the_animatic_uses_only_filters_every_ffmpeg_has() {
+		assert!(
+			ANIMATIC_FILTERS
+				.iter()
+				.all(|filter| ALWAYS_BUILT.contains(filter))
+		);
+
+		// A slow push, so the graph carries a moving crop as well as still ones.
+		let story = crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park\n@kid x=0.3\nand \
+			 then they sat there quietly for a very long while indeed until the sun went down.\n# \
+			 park\nThe end.\n",
+		)
+		.unwrap();
+		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
+		let rehearsals = rehearse(&story, &cast).unwrap();
+		let timeline = timeline::build(&story, &cast, &rehearsals, |line| {
+			Ok(voice::silent(line, 4.0))
+		})
+		.unwrap();
+		let scratch = tempfile::tempdir().unwrap();
+
+		for format in [Format::Landscape, Format::Portrait] {
+			let args = animatic_args(
+				&story,
+				&cast,
+				&timeline,
+				format,
+				&scratch.path().join("soundtrack.wav"),
+				scratch.path(),
+				&scratch.path().join("animatic.mp4"),
+			)
+			.unwrap();
+			let used = ffmpeg::filters_in(&args);
+
+			assert!(used.iter().any(|filter| filter == "zoompan"));
+			assert!(
+				!args
+					.iter()
+					.any(|arg| arg.to_string_lossy().contains("drawtext")),
+				"no drawtext anywhere"
+			);
+			assert!(
+				ANIMATIC_FILTERS
+					.iter()
+					.all(|filter| used.iter().any(|used| used == filter)),
+				"ANIMATIC_FILTERS is the list the graph uses: {used:?}"
+			);
+			assert_always_built(&args, "the animatic");
+		}
+	}
+
+	#[test]
+	fn the_video_encode_uses_only_filters_every_ffmpeg_has() {
+		let soundtrack = Path::new("soundtrack.wav");
+		let clip = Clip {
+			width: 1920,
+			height: 1080,
+			fps: 30,
+			frames: 30,
+			audio: Some(soundtrack),
+			label: "16x9",
+		};
+
+		assert_always_built(&clip.args(Path::new("out.mp4")), "the video");
 	}
 
 	#[test]

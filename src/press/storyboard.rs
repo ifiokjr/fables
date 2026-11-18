@@ -1229,6 +1229,88 @@ fn label_stamp(row: &Row, width: u32) -> Result<Pixmap> {
 	raster::render(&stamp)
 }
 
+/// The caption an animatic burns under each shot: a transparent strip `width` wide with a dark
+/// band holding the panel and line number, page and start (`at 0:04.2`), then the framing,
+/// length, entry and move, then the first words spoken over it, each cut to one line. Drawn by
+/// fables' own text layout, so ffmpeg only lays it over the shot.
+pub fn animatic_caption(row: &Row, width: u32, portrait: bool) -> Result<Pixmap> {
+	let (title_size, detail_size, spoken_size): (f32, f32, f32) = if portrait {
+		(19.0, 16.0, 15.0)
+	} else {
+		(21.0, 17.0, 16.0)
+	};
+	let height = (title_size + detail_size + spoken_size + 36.0).round() as u32;
+	let fit = width as f32 - 28.0;
+	let mut title = format!("#{} · {}", row.number, row.page_text());
+
+	if row.line > 0 {
+		let _ = write!(title, " · line {}", row.line);
+	}
+
+	let _ = write!(title, " · at {}", clock(row.start));
+	let mut detail = format!(
+		"{} · {:.1}s · {}",
+		row.framing(),
+		row.hold,
+		row.entry.text()
+	);
+
+	if let Some(travel) = row.movement {
+		let _ = write!(detail, " · {}", travel.name());
+	}
+
+	if row.short {
+		detail.push_str(" · short");
+	}
+
+	let spoken = row
+		.spoken
+		.first()
+		.map_or(String::new(), |line| one_line(line, fit, spoken_size));
+	let title_y = 8.0 + title_size;
+	let detail_y = title_y + 6.0 + detail_size;
+	let spoken_y = detail_y + 6.0 + spoken_size;
+
+	raster::render(&format!(
+		r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">
+			<rect width="{width}" height="{height}" fill="#2a2238" fill-opacity="0.78"/>
+			<text x="14" y="{title_y:.0}" font-family="{DISPLAY_FAMILY}" font-size="{title_size}" fill="#ffc93c">{}</text>
+			<text x="14" y="{detail_y:.0}" font-family="{BODY_FAMILY}" font-size="{detail_size}" fill="#f4ede1">{}</text>
+			<text x="14" y="{spoken_y:.0}" font-family="{BODY_FAMILY}" font-size="{spoken_size}" fill="#cfc3b4">{}</text>
+		</svg>"##,
+		escape_text(&one_line(&title, fit, title_size)),
+		escape_text(&one_line(&detail, fit, detail_size)),
+		escape_text(&spoken),
+	))
+}
+
+/// A start time to a tenth of a second, `0:04.2`.
+fn clock(seconds: f32) -> String {
+	let tenths = (seconds.max(0.0) * 10.0).round() as u32;
+
+	format!("{}:{:02}.{}", tenths / 600, tenths / 10 % 60, tenths % 10)
+}
+
+/// Text cut to one line that fits `width`, ending in `…` when anything was cut.
+fn one_line(text: &str, width: f32, size: f32) -> String {
+	let lines = wrap(text, width, size, 2);
+	let Some(first) = lines.first() else {
+		return String::new();
+	};
+
+	if lines.len() == 1 || first.ends_with('…') {
+		return first.clone();
+	}
+
+	let mut line = first.clone();
+
+	while display_width(&format!("{line}…"), size) > width && !line.is_empty() {
+		line.pop();
+	}
+
+	format!("{}…", line.trim_end())
+}
+
 /// Wraps a caption into at most `limit` lines that fit `width`, cutting the last with `…`.
 fn wrap(text: &str, width: f32, size: f32, limit: usize) -> Vec<String> {
 	let mut lines: Vec<String> = Vec::new();
@@ -1430,6 +1512,19 @@ mod tests {
 			Some(page.framing().as_str())
 		);
 		assert!(page.label().contains(" in"), "{}", page.label());
+	}
+
+	#[test]
+	fn an_animatic_caption_cuts_each_line_to_the_frame() {
+		assert_eq!(clock(0.0), "0:00.0");
+		assert_eq!(clock(64.27), "1:04.3");
+
+		let long = "and then they sat there quietly for a very long while indeed until the sun \
+		            went down behind the hills and the stars came out one by one";
+		let cut = one_line(long, 300.0, 16.0);
+		assert!(cut.ends_with('…'), "{cut}");
+		assert!(display_width(&cut, 16.0) <= 300.0, "{cut}");
+		assert_eq!(one_line("short", 300.0, 16.0), "short");
 	}
 
 	#[test]
