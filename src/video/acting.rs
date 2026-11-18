@@ -45,6 +45,7 @@ use crate::art::seed_of;
 use crate::cast::Kind;
 use crate::compose::Body;
 use crate::compose::Puppet;
+use crate::stage::See;
 use crate::stage::Side;
 use crate::video::lipsync::Track;
 use crate::video::voice::ENVELOPE_RATE;
@@ -61,6 +62,9 @@ const BLINK_TURN: f32 = 0.12;
 const EYES: f32 = 2.0 / 24.0;
 /// The head turn starts this long after the eyes; the torso and arms the same again later.
 const HEAD_DELAY: f32 = 0.08;
+/// A notice beat: the eyes flick to what has been noticed and hold this long before the
+/// head starts to follow.
+pub const NOTICE_HOLD: f32 = 0.5;
 /// Two poses whose hands are closer than this travel in a straight line, not on an arc.
 const ARC_MIN: f32 = 30.0;
 /// Stage distances shorter than this stay a slide; walking one step would take longer than
@@ -122,6 +126,53 @@ fn bell(t: f32, centre: f32, width: f32) -> f32 {
 /// travelling walk, whose constant slope is what lets a planted foot hold still.
 fn tri(psi: f32) -> f32 {
 	FRAC_2_PI * psi.sin().asin()
+}
+
+/// Where a `see=` target puts the eyes and the head.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aim {
+	/// Eyes across: -1 (left) to 1 (right).
+	pub gaze: f32,
+	/// Eyes up (-1) or down (1).
+	pub gaze_y: f32,
+	/// The head and body turn the look leads into: -1 (left) to 1 (right).
+	pub turn: f32,
+}
+
+/// The look towards a target at `to`, seen from `from`: eyes lead by taking the direction
+/// whole, the head turns by a softer share of it.
+pub fn aim(from: Pt, to: Pt) -> Aim {
+	let d = to - from;
+	let len = d.len().max(1.0);
+	let across = d.x / len;
+	let down = d.y / len;
+
+	Aim {
+		gaze: (across * 1.25).clamp(-1.0, 1.0),
+		gaze_y: (down * 1.25).clamp(-1.0, 1.0),
+		turn: (across * 0.9).clamp(-1.0, 1.0),
+	}
+}
+
+/// The look a `see=` word asks for: a held prop (`mine` is handled by the caller), up, down
+/// and the rest. `heading` is the way the figure faces, so `away` looks off the page's middle.
+pub fn word_aim(word: &See, heading: f32) -> Aim {
+	let look = |gaze, gaze_y, turn| Aim { gaze, gaze_y, turn };
+
+	match word {
+		See::Up => look(0.0, -1.0, 0.0),
+		See::Down => look(0.0, 1.0, 0.0),
+		See::Left => look(-1.0, 0.0, -0.8),
+		See::Right => look(1.0, 0.0, 0.8),
+		See::Away => look(-heading, 0.0, -heading * 0.6),
+		See::Front | See::Mine | See::Actor(_) => look(0.0, 0.0, 0.0),
+	}
+}
+
+/// How long a notice holds the eyes before the head starts following: half a second, or as
+/// much of it as a short move can spare.
+pub fn notice_hold(span: f32) -> f32 {
+	NOTICE_HOLD.min(span * 0.55)
 }
 
 /// Everything the rules need to know about the moment they are animating.
@@ -227,6 +278,9 @@ pub struct Speaker {
 	pub heading: f32,
 	/// They are pointing or reaching out, so listeners glance where they point.
 	pub pointing: bool,
+	/// What the speaker's own `see=` is looking at, in stage units: a listener follows a
+	/// pointed finger to the thing itself.
+	pub looking: Option<Pt>,
 }
 
 /// Whether a figure is pointing, or reaching out with both hands.
@@ -257,6 +311,7 @@ pub fn tween(
 	since: f32,
 	progress: f32,
 	knocked_down: bool,
+	notice: bool,
 	cx: &Cx,
 ) -> Puppet {
 	if !cx.on {
@@ -275,7 +330,7 @@ pub fn tween(
 	let plan = plan_between(old, new, cx);
 	let span = plan.as_ref().map_or(TWEEN, |plan| plan.duration);
 	let size = change_size(old, new);
-	let mut moved = blend_ruled(old, new, since, span, size, cx);
+	let mut moved = blend_ruled(old, new, since, span, size, notice, cx);
 	follow_through(&mut moved, old, since, cx.motion.follow_through);
 	moved.smear = smear(old, new, progress, cx.motion.smears);
 
@@ -316,7 +371,7 @@ struct Windows {
 }
 
 impl Windows {
-	fn build(old: &Puppet, new: &Puppet, span: f32, cx: &Cx) -> Windows {
+	fn build(old: &Puppet, new: &Puppet, span: f32, notice: bool, cx: &Cx) -> Windows {
 		let whole = (0.0, span);
 		let (Body::Figure(o), Body::Figure(n)) = (&old.body, &new.body) else {
 			return Windows {
@@ -330,13 +385,19 @@ impl Windows {
 		let m = cx.motion;
 
 		// Start offsets come from lead: the eyes go first, the head follows, the body follows.
+		// A notice beat holds the eyes on what was noticed before any of the rest starts.
+		let hold = if notice && m.lead > 0.0 {
+			notice_hold(span)
+		} else {
+			0.0
+		};
 		let head_start = if m.lead > 0.0 {
-			HEAD_DELAY.min(span * 0.25)
+			(HEAD_DELAY.min(span * 0.25) + hold).min(span * 0.7)
 		} else {
 			0.0
 		};
 		let body_start = if m.lead > 0.0 {
-			(HEAD_DELAY * 2.0).min(span * 0.4)
+			((HEAD_DELAY * 2.0).min(span * 0.4) + hold).min(span * 0.85)
 		} else {
 			0.0
 		};
@@ -396,7 +457,15 @@ fn window(start: f32, end: f32, span: f32) -> (f32, f32) {
 
 /// Blends two figure puppets with the rules: lead, overlap and arcs decide when each part
 /// moves and on what path; everything else rides the body's window.
-fn blend_ruled(old: &Puppet, new: &Puppet, since: f32, span: f32, size: f32, cx: &Cx) -> Puppet {
+fn blend_ruled(
+	old: &Puppet,
+	new: &Puppet,
+	since: f32,
+	span: f32,
+	size: f32,
+	notice: bool,
+	cx: &Cx,
+) -> Puppet {
 	let m = cx.motion;
 
 	let (Body::Figure(o), Body::Figure(n)) = (&old.body, &new.body) else {
@@ -406,7 +475,7 @@ fn blend_ruled(old: &Puppet, new: &Puppet, since: f32, span: f32, size: f32, cx:
 		return crate::compose::blend(old, new, t);
 	};
 
-	let windows = Windows::build(old, new, span, cx);
+	let windows = Windows::build(old, new, span, notice, cx);
 	let body_t = Windows::t(windows.body, since, &m, size);
 	let mut moved = crate::compose::blend(old, new, body_t);
 	let Body::Figure(state) = &mut moved.body else {
@@ -422,6 +491,19 @@ fn blend_ruled(old: &Puppet, new: &Puppet, since: f32, span: f32, size: f32, cx:
 		)
 	} else {
 		lerp(o.gaze, n.gaze, Windows::t(windows.body, since, &m, size))
+	};
+	state.gaze_y = if m.lead > 0.0 {
+		lerp(
+			o.gaze_y,
+			n.gaze_y,
+			smoothstep((since / EYES.min(span * 0.4)).clamp(0.0, 1.0)),
+		)
+	} else {
+		lerp(
+			o.gaze_y,
+			n.gaze_y,
+			Windows::t(windows.body, since, &m, size),
+		)
 	};
 
 	// The head starts after the eyes and settles after the body.
@@ -465,7 +547,7 @@ fn blend_ruled(old: &Puppet, new: &Puppet, since: f32, span: f32, size: f32, cx:
 	state.sway = lerp(o.sway, n.sway, Windows::t(windows.sway, since, &m, size));
 
 	// A blink covers any head turn of more than a few degrees and any big gaze shift.
-	let gaze_shift = (n.gaze - o.gaze).abs();
+	let gaze_shift = (n.gaze - o.gaze).abs() + (n.gaze_y - o.gaze_y).abs();
 
 	if m.lead > 0.0 && (turn.abs() > BLINK_TURN || gaze_shift > BLINK_GAZE) {
 		state.blink = state.blink.max(m.lead * bell(since, 0.09, 0.07));
@@ -1036,15 +1118,25 @@ pub fn animate(puppet: &mut Puppet, cx: &Cx, time: f32, speaking: Option<&Speake
 			time < end + 0.5
 		}) {
 		// Between sentences the speaker's gaze flicks away and back.
-		let w = (time - spoken.start - spoken.duration) / 0.5;
-		state.gaze += -puppet.heading * 0.45 * (PI * w).sin() * cx.motion.gesture;
+		if !state.gaze_locked {
+			let w = (time - spoken.start - spoken.duration) / 0.5;
+			state.gaze += -puppet.heading * 0.45 * (PI * w).sin() * cx.motion.gesture;
+		}
 	} else if let Some(speaker) = speaking.filter(|speaker| speaker.id != puppet.id)
 		&& state.lie < 0.5
 	{
-		// Everyone else turns their eyes to whoever is talking, with a small listening tilt.
-		let towards = (speaker.x - puppet.at.x).signum();
-		state.gaze = towards * 0.9;
-		state.head_tilt += towards * 3.0;
+		// Everyone else turns their eyes to whoever is talking, with a small listening tilt —
+		// unless a `see=` holds their look. A speaker who points and has a `see=` sends the
+		// look to the thing itself.
+		let towards = match (speaker.pointing, speaker.looking) {
+			(true, Some(focus)) => (focus.x - puppet.at.x).signum(),
+			_ => (speaker.x - puppet.at.x).signum(),
+		};
+
+		if !state.gaze_locked {
+			state.gaze = towards * 0.9;
+			state.head_tilt += towards * 3.0;
+		}
 
 		if cx.on {
 			listening(state, cx, time, speaker, towards);
@@ -1153,8 +1245,8 @@ fn listening(state: &mut FigureState, cx: &Cx, time: f32, speaker: &Speaker, tow
 			state.head_tilt += (t / spoken.duration * nods * PI).sin() * 2.4 * dial * towards;
 		}
 
-		// Glance at whatever the speaker points at.
-		if speaker.pointing && t > 0.35 {
+		// Glance at whatever the speaker points at, when the speaker has no `see=` of their own.
+		if speaker.pointing && t > 0.35 && !state.gaze_locked && speaker.looking.is_none() {
 			state.gaze = speaker.heading * 0.9;
 		}
 
@@ -1253,7 +1345,9 @@ fn business(heading: f32, seed: u64, state: &mut FigureState, cx: &Cx, time: f32
 	match kind {
 		// Look around.
 		0 => {
-			state.gaze += (w * 3.0 * PI).sin() * 0.55 * dial;
+			if !state.gaze_locked {
+				state.gaze += (w * 3.0 * PI).sin() * 0.55 * dial;
+			}
 			state.head_tilt += (w * 2.0 * PI).sin() * 2.5 * dial;
 		}
 		// Scratch.
@@ -1387,7 +1481,7 @@ mod tests {
 		let new = kid(1200.0, Pose::Idle, Mood::Happy, 0.5, 0.8);
 
 		// Two frames in, the eyes have arrived while the head has not started.
-		let mid = tween(&old, &new, 0.09, 0.15, false, &cx);
+		let mid = tween(&old, &new, 0.09, 0.15, false, false, &cx);
 		let Body::Figure(state) = &mid.body else {
 			panic!("kid is a figure");
 		};
@@ -1411,7 +1505,7 @@ mod tests {
 		);
 
 		// Before the eyes are done, the head has not moved at all.
-		let early = tween(&old, &new, 0.075, 0.125, false, &cx);
+		let early = tween(&old, &new, 0.075, 0.125, false, false, &cx);
 		let Body::Figure(early) = &early.body else {
 			panic!("kid is a figure");
 		};
@@ -1442,7 +1536,7 @@ mod tests {
 			"the right hand travels further: {d0} vs {d1}"
 		);
 
-		let mid = tween(&old, &new, 0.4, 0.66, false, &cx);
+		let mid = tween(&old, &new, 0.4, 0.66, false, false, &cx);
 		let Body::Figure(state) = &mid.body else {
 			panic!("kid is a figure");
 		};
@@ -1483,7 +1577,7 @@ mod tests {
 		new_body_mut(&mut old).hands.1 = shoulder + angle(20.0) * reach;
 		new_body_mut(&mut new).hands.1 = shoulder + angle(100.0) * reach;
 
-		let acted = tween(&old, &new, 0.3, 0.5, false, &cx);
+		let acted = tween(&old, &new, 0.3, 0.5, false, false, &cx);
 		let Body::Figure(state) = &acted.body else {
 			panic!("kid is a figure");
 		};
@@ -1517,8 +1611,8 @@ mod tests {
 		let old = kid(1200.0, Pose::Idle, Mood::Happy, 0.35, 0.4);
 		let new = kid(1200.0, Pose::Idle, Mood::Shocked, 0.35, 0.4);
 
-		let down = tween(&old, &new, 0.06, 0.1, false, &cx);
-		let up = tween(&old, &new, 0.24, 0.4, false, &cx);
+		let down = tween(&old, &new, 0.06, 0.1, false, false, &cx);
+		let up = tween(&old, &new, 0.24, 0.4, false, false, &cx);
 		let Body::Figure(down) = &down.body else {
 			panic!("kid is a figure");
 		};
@@ -1544,10 +1638,10 @@ mod tests {
 		let old = kid(1200.0, Pose::Idle, Mood::Happy, 0.35, 0.4);
 
 		let laugh = kid(1200.0, Pose::Idle, Mood::Laugh, 0.35, 0.4);
-		let bounced = tween(&old, &laugh, 0.15, 0.25, false, &cx);
+		let bounced = tween(&old, &laugh, 0.15, 0.25, false, false, &cx);
 		let sad = kid(1200.0, Pose::Idle, Mood::Sad, 0.35, 0.4);
-		let sunk = tween(&old, &sad, 0.5, 0.83, false, &cx);
-		let late = tween(&old, &sad, 1.4, 1.0, false, &cx);
+		let sunk = tween(&old, &sad, 0.5, 0.83, false, false, &cx);
+		let late = tween(&old, &sad, 1.4, 1.0, false, false, &cx);
 		let Body::Figure(bounced) = &bounced.body else {
 			panic!("kid is a figure");
 		};
@@ -1665,7 +1759,7 @@ mod tests {
 
 		for step in 0..13 {
 			let since = step as f32 / 12.0 * TWEEN;
-			let acted = tween(&old, &new, since, since / TWEEN, false, &cx);
+			let acted = tween(&old, &new, since, since / TWEEN, false, false, &cx);
 			let plain = crate::compose::blend(&old, &new, cx.motion.ease(since / TWEEN));
 			let Body::Figure(a) = &acted.body else {
 				panic!("kid is a figure");
@@ -1694,7 +1788,7 @@ mod tests {
 			"slide does not walk"
 		);
 
-		let acted = tween(&old, &new, 0.3, 0.5, false, &cx);
+		let acted = tween(&old, &new, 0.3, 0.5, false, false, &cx);
 		assert!(
 			(acted.at.x - lerp(900.0, 1900.0, 0.5)).abs() < 1e-3,
 			"a slide covers half the distance halfway"
@@ -1763,6 +1857,7 @@ mod tests {
 			x: 1600.0,
 			heading: 1.0,
 			pointing: true,
+			looking: None,
 		};
 
 		let mut listener = kid(800.0, Pose::Idle, Mood::Happy, 0.35, 0.4);
@@ -1885,13 +1980,53 @@ mod tests {
 	}
 
 	#[test]
+	fn a_pointing_speaker_with_a_see_sends_listeners_to_the_thing_itself() {
+		let quiet = [0.2; 220];
+		let speakers = vec!["mum".to_owned()];
+		let track = Track::default();
+		let line = spoken(0.0, 3.6, &speakers, "Look there.", &quiet, &track);
+		let mut cx = cx();
+		cx.lines = vec![line];
+
+		// The speaker stands to the listener's right and points on to the right, but their
+		// `see=` is on a thing to the left: the listener follows the eyes, not the finger.
+		let speaker = Speaker {
+			id: "mum".into(),
+			x: 1600.0,
+			heading: 1.0,
+			pointing: true,
+			looking: Some(pt(200.0, 500.0)),
+		};
+		let mut listener = kid(1000.0, Pose::Idle, Mood::Happy, 0.35, 0.4);
+		animate(&mut listener, &cx, 2.0, Some(&speaker));
+		assert!(
+			new_body(&listener).gaze < -0.8,
+			"the listener follows the finger to the thing: {}",
+			new_body(&listener).gaze
+		);
+
+		// With no `see=` the listener follows the pointing hand instead.
+		let speaker = Speaker {
+			looking: None,
+			..speaker
+		};
+		let mut plain = kid(1000.0, Pose::Idle, Mood::Happy, 0.35, 0.4);
+		animate(&mut plain, &cx, 2.0, Some(&speaker));
+		assert!(
+			new_body(&plain).gaze > 0.8,
+			"without one they follow the finger: {}",
+			new_body(&plain).gaze
+		);
+	}
+
+	#[test]
 	fn a_held_pose_settles_with_an_after_beat() {
 		let old = kid(1200.0, Pose::Idle, Mood::Happy, 0.35, 0.4);
 		let new = kid(1200.0, Pose::Point, Mood::Cross, 0.35, 0.4);
 		let cx = cx();
 
-		let mid = tween(&old, &new, 0.3, 0.5, false, &cx);
-		let after = tween(&old, &new, 0.9, 1.0, false, &cx);
+		let mid = tween(&old, &new, 0.3, 0.5, false, false, &cx);
+		let after = tween(&old, &new, 0.9, 1.0, false, false, &cx);
 		let Body::Figure(mid) = &mid.body else {
 			panic!("kid is a figure");
 		};
@@ -1906,6 +2041,102 @@ mod tests {
 		assert!(
 			(after.squash - 1.0).abs() > 0.0,
 			"a held pose settles with a small after-beat"
+		);
+	}
+
+	#[test]
+	fn a_see_target_gives_the_eyes_the_whole_direction_and_the_head_less() {
+		let right_up = aim(pt(1200.0, 400.0), pt(1500.0, 200.0));
+		assert!(right_up.gaze > 0.7, "eyes right: {right_up:?}");
+		assert!(right_up.gaze_y < -0.4, "eyes up: {right_up:?}");
+		assert!(right_up.turn > 0.4, "the head follows: {right_up:?}");
+		assert!(right_up.turn < right_up.gaze, "the eyes lead: {right_up:?}");
+
+		let left = aim(pt(1200.0, 400.0), pt(700.0, 400.0));
+		assert!(left.gaze < -0.9 && left.turn < -0.6, "{left:?}");
+		assert_eq!(left.gaze_y, 0.0);
+
+		// The words: up and down, and away off the page's middle.
+		assert!(word_aim(&See::Up, 1.0).gaze_y < -0.9);
+		assert!(word_aim(&See::Down, 1.0).gaze_y > 0.9);
+		assert!(word_aim(&See::Left, 1.0).gaze < -0.9);
+		assert!(word_aim(&See::Right, 1.0).gaze > 0.9);
+		assert_eq!(
+			word_aim(&See::Front, 1.0),
+			Aim {
+				gaze: 0.0,
+				gaze_y: 0.0,
+				turn: 0.0
+			}
+		);
+		assert!(word_aim(&See::Away, 1.0).gaze < -0.9);
+		assert!(word_aim(&See::Away, -1.0).gaze > 0.9);
+	}
+
+	#[test]
+	fn a_see_at_a_prop_tracks_it_as_the_prop_moves() {
+		let head = pt(1200.0, 600.0);
+		let near = aim(head, pt(1500.0, 760.0));
+		let far = aim(head, pt(900.0, 200.0));
+
+		assert!(
+			near.gaze > 0.9 && near.gaze_y > 0.5,
+			"looking down and right at it: {near:?}"
+		);
+		assert!(
+			far.gaze < -0.7 && far.gaze_y < -0.9,
+			"then up and left as it flies: {far:?}"
+		);
+		assert!(far.gaze < near.gaze - 1.0, "the eyes swing across");
+	}
+
+	#[test]
+	fn a_notice_holds_the_eyes_before_the_head_reacts() {
+		let cx = cx();
+		let old = kid(1200.0, Pose::Idle, Mood::Happy, -0.5, -0.8);
+		let new = kid(1200.0, Pose::Idle, Mood::Happy, 0.5, 0.8);
+
+		// A notice holds for half a second, or as much as the move can spare.
+		assert!((notice_hold(1.2) - NOTICE_HOLD).abs() < f32::EPSILON);
+		assert!(notice_hold(0.6) < NOTICE_HOLD);
+
+		// A third of the way in, the eyes have flicked to the target and the head has not
+		// started: the notice holds it.
+		let noticed = tween(&old, &new, 0.3, 0.5, false, true, &cx);
+		let plain = tween(&old, &new, 0.3, 0.5, false, false, &cx);
+		let Body::Figure(noticed) = &noticed.body else {
+			panic!("kid is a figure");
+		};
+		let Body::Figure(plain) = &plain.body else {
+			panic!("kid is a figure");
+		};
+
+		assert!(
+			(noticed.gaze - 0.8).abs() < 0.05,
+			"the eyes have gone: {}",
+			noticed.gaze
+		);
+		assert!(
+			(noticed.facing - (-0.5)).abs() < 0.02,
+			"the head still waits: {}",
+			noticed.facing
+		);
+		assert!(
+			plain.facing > noticed.facing + 0.3,
+			"without the notice the head is already going: plain {} against noticed {}",
+			plain.facing,
+			noticed.facing
+		);
+
+		// Once the hold is done the reaction lands.
+		let reacted = tween(&old, &new, 0.55, 0.92, false, true, &cx);
+		let Body::Figure(reacted) = &reacted.body else {
+			panic!("kid is a figure");
+		};
+		assert!(
+			reacted.facing > 0.2,
+			"the head arrives after the hold: {}",
+			reacted.facing
 		);
 	}
 }

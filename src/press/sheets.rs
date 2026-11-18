@@ -2,6 +2,8 @@
 //! every mood, and every setting. They are the model sheets an illustrator would pin above the desk, kept
 //! in sync with the cast file automatically.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use resvg::tiny_skia::Pixmap;
 
@@ -26,6 +28,8 @@ use crate::art::parts::Need;
 use crate::art::parts::Parts;
 use crate::art::parts::Turn;
 use crate::art::parts::Views;
+use crate::art::props;
+use crate::art::props::Prop;
 use crate::art::pt;
 use crate::art::rig::Stance;
 use crate::art::settings;
@@ -107,6 +111,7 @@ fn main_colour(member: &Member) -> Color {
 		| Kind::Toothbrush(color)
 		| Kind::Flower(_, color) => *color,
 		Kind::Worm => palette::FLAMINGO,
+		Kind::Prop(_) => palette::TOFFEE,
 	}
 }
 
@@ -215,6 +220,7 @@ fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 		}
 		Kind::Worm => (Body::Critter(CritterState::default()), 3.0, 0.0),
 		Kind::Toothbrush(_) => (Body::Critter(CritterState::default()), 0.9, 0.0),
+		Kind::Prop(_) => (Body::Prop, 1.0, 0.0),
 		Kind::Flower(..) | Kind::Tree(_) => (Body::Critter(CritterState::default()), 0.6, 0.0),
 	};
 
@@ -234,6 +240,111 @@ fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 		smear: 0.0,
 		exerted: 0.0,
 	}
+}
+
+/// Every prop in `props`, each alone and held in the hand of the world's first figure, with
+/// its name, how many hands it needs and its grip — the sheet a designer signs off.
+pub fn props_sheet(
+	props: &props::Library,
+	cast: &Cast,
+	world: &str,
+	style: Style,
+) -> Result<Pixmap> {
+	let cell = 640.0;
+	let columns = 4;
+	let list: Vec<&Arc<Prop>> = props.props().collect();
+	let rows = list.len().div_ceil(columns);
+	let width = cell * columns as f32;
+	let height = 160.0 + (cell + 120.0) * rows as f32;
+	let mut svg = Svg::styled(style);
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::INK);
+
+	let heading = text::layout(
+		&[format!("**The props of {world}**").as_str()],
+		Area {
+			x: 0.0,
+			y: 40.0,
+			w: width,
+			h: 110.0,
+		},
+		74.0,
+		Anchor::Top,
+	);
+	svg.raw(&text::svg(
+		&heading,
+		Ink {
+			body: palette::PAPER,
+			shout: palette::SUNFLOWER,
+		},
+	));
+
+	let holder = cast.members.values().find(|member| member.kind.is_figure());
+
+	for (index, prop) in list.iter().enumerate() {
+		let x = (index % columns) as f32 * cell;
+		let y = 160.0 + (index / columns) as f32 * (cell + 120.0);
+		svg.fill(
+			&Path::rect(x + 10.0, y + 10.0, cell - 20.0, cell - 20.0),
+			palette::PAPER,
+		);
+
+		// The prop alone, fitted to the left half of its card.
+		let (lo, hi) = prop.bounds();
+		let (w, h) = ((hi.x - lo.x).max(1.0), (hi.y - lo.y).max(1.0));
+		let fit = (cell * 0.42 / w).min(cell * 0.42 / h);
+		let centre = pt(f32::midpoint(lo.x, hi.x), f32::midpoint(lo.y, hi.y));
+		let middle = pt(x + cell * 0.27, y + cell * 0.5);
+		prop.draw(&mut svg, middle - centre * fit, fit);
+
+		// In the hand of the world's first figure, at the size the stage gives them.
+		if let Some(member) = holder {
+			let mut puppet = sheet_puppet(member, pt(x + cell * 0.74, y + cell * 0.9));
+
+			if let (Kind::Figure(look), Body::Figure(state)) = (&puppet.kind, &mut puppet.body) {
+				let frame = look.frame();
+				let facing = 0.2;
+				state.hands = frame.hands(Pose::Hold, facing);
+				state.hand_shapes = Pose::Hold.hand_shapes();
+				state.facing = facing;
+				state.prop = Some(Arc::clone(prop));
+				puppet.scale = (cell * 0.55 / frame.height()).min(0.75);
+			}
+
+			compose::draw_puppet(&mut svg, &puppet);
+		}
+
+		let hands = match prop.hands {
+			props::Hands::One => "one hand",
+			props::Hands::Two => "two hands",
+		};
+		let label = text::layout(
+			&[
+				format!("**{}**", prop.name).as_str(),
+				format!("{hands} · grip {:.0}, {:.0}", prop.grip.x, prop.grip.y).as_str(),
+			],
+			Area {
+				x: x + 10.0,
+				y: y + cell - 10.0,
+				w: cell - 20.0,
+				h: 110.0,
+			},
+			36.0,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(
+			&label,
+			Ink {
+				body: palette::INK,
+				shout: palette::TOMATO,
+			},
+		));
+	}
+
+	let doc = svg.finish((0.0, 0.0, width, height), width as u32, height as u32);
+	let mut pixmap = raster::render(&doc)?;
+	raster::finish(&mut pixmap, &style, 0.05, 0);
+
+	Ok(pixmap)
 }
 
 /// One character in every mood, for checking expressions stay on-model.

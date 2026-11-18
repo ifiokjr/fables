@@ -215,21 +215,6 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("mouth-bleh", Space::Feature).kit(),
 	part("mouth-bleh-tongue", Space::Feature).kit(),
 	part("mouth-bleh-groove", Space::Feature).optional().kit(),
-	// Things to hold.
-	part("prop-jam", Space::Prop).kit(),
-	part("prop-jam-lid", Space::Prop).kit(),
-	part("prop-jam-label", Space::Prop).kit(),
-	part("prop-jam-shine", Space::Prop).optional().kit(),
-	part("prop-toothbrush", Space::Prop).kit(),
-	part("prop-toothbrush-bristles", Space::Prop).kit(),
-	part("prop-toothbrush-bristle-line", Space::Prop)
-		.numbered()
-		.kit(),
-	part("prop-toothpaste", Space::Prop).optional().kit(),
-	part("prop-parcel", Space::Prop).kit(),
-	part("prop-parcel-top", Space::Prop).optional().kit(),
-	part("prop-parcel-side", Space::Prop).optional().kit(),
-	part("prop-parcel-string", Space::Prop).numbered().kit(),
 	// Extras, drawn when the cast file lists them for a character.
 	part("glasses-lens", Space::Feature).kit(),
 	part("glasses-bridge", Space::Head).kit(),

@@ -581,6 +581,7 @@ fn acting_stage(
 			x: ACTING_X[1],
 			heading: -1.0,
 			pointing,
+			looking: None,
 		});
 	let mut puppets = Vec::new();
 
@@ -591,7 +592,7 @@ fn acting_stage(
 		let mut puppet = if index > 0 && since < span {
 			let old = actor(look, id, ACTING_X[slot], previous);
 			// A change of x walks there on its own feet; everything else is acted too.
-			acting::tween(&old, &now, since, since / 0.6, false, &cx)
+			acting::tween(&old, &now, since, since / 0.6, false, false, &cx)
 		} else {
 			now
 		};

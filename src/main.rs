@@ -165,6 +165,11 @@ enum Command {
 		#[command(subcommand)]
 		action: PuppetAction,
 	},
+	/// Work with props (the world's `props/`): what a character can hold or stand on stage.
+	Prop {
+		#[command(subcommand)]
+		action: PropAction,
+	},
 	/// Serve the studio to an agent over MCP (stdio): worlds, styles and characters, with
 	/// model sheets returned as images.
 	Mcp,
@@ -344,6 +349,23 @@ enum PuppetAction {
 		id: String,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
+	},
+}
+
+#[derive(Subcommand)]
+enum PropAction {
+	/// Every prop the world can use, with where it comes from, its hands and its grip.
+	List,
+	/// Start a world's own prop to redraw, from a built-in or another prop.
+	New {
+		/// The prop's name: lowercase words joined by hyphens.
+		name: String,
+		/// A prop to start from (to redraw it); leave it out for a plain shape.
+		#[arg(long)]
+		from: Option<String>,
+		/// A line on what the thing is.
+		#[arg(long, default_value = "")]
+		about: String,
 	},
 }
 
@@ -547,6 +569,14 @@ fn run(cli: Cli) -> Result<()> {
 					)
 				}
 				PuppetAction::Sheet { id, out } => puppet_sheet(&world()?, &id, &out),
+			}
+		}
+		Command::Prop { action } => {
+			match action {
+				PropAction::List => prop_list(&world()?),
+				PropAction::New { name, from, about } => {
+					prop_new(&world()?, &name, from.as_deref(), &about)
+				}
 			}
 		}
 		Command::Mcp => fables::mcp::serve(&root),
@@ -1129,6 +1159,19 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	)?;
 	done(&path, started)?;
 
+	// Every prop the world can use: each alone and in the first figure's hand.
+	let path = out.join(format!("{slug}-props.png"));
+	std::fs::write(
+		&path,
+		raster::png(&press::sheets::props_sheet(
+			&*world.props()?,
+			&cast,
+			&world.name,
+			style,
+		)?)?,
+	)?;
+	done(&path, started)?;
+
 	// One setting with one cast member, drawn under every light: the world's colour script.
 	let settings = world.settings()?;
 	let own = settings
@@ -1224,6 +1267,39 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 	)?;
 	done(&acting, started)?;
 
+	Ok(())
+}
+
+/// Every prop the world can use: its name, source, hands, grip and what it is.
+fn prop_list(world: &World) -> Result<()> {
+	for prop in fables::studio::list_props(world)? {
+		say!(
+			"{:<12} {:<9} {:<4} grip {:.0},{:.0}  {}",
+			prop.name,
+			prop.from,
+			prop.hands,
+			prop.grip[0],
+			prop.grip[1],
+			prop.about
+		)?;
+	}
+
+	Ok(())
+}
+
+/// Starts a world's own prop file, a copy of one it can use or a plain shape.
+fn prop_new(world: &World, name: &str, from: Option<&str>, about: &str) -> Result<()> {
+	let prop = fables::studio::create_prop(world, name, about, from)?;
+	say!(
+		"✓ created `{}` in {} ({} hand{}, grip {:.0},{:.0})",
+		prop.name,
+		world.dir.join("props").join(format!("{name}.svg")).display(),
+		prop.hands,
+		if prop.hands == "one" { "" } else { "s" },
+		prop.grip[0],
+		prop.grip[1]
+	)?;
+	say!("  next: redraw its parts with the prop tools over MCP, then `holds={name}` or `@{name}`")?;
 	Ok(())
 }
 

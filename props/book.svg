@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -100 120 120" data-grip="0 0" data-hands="one" data-about="A closed book with a spine and a title band.">
+  <title>A book</title>
+  <path id="pages" d="M-40 -70 L32 -76 L34 -6 L-38 0 Z" fill="cream"/>
+  <path id="cover" d="M-46 -78 L24 -84 L26 -10 L-42 -4 Z" fill="cornflower" data-shade="1"/>
+  <path id="spine" d="M-46 -78 L-36 -79 L-34 -4 L-42 -3 Z" fill="night" data-line="detail"/>
+  <path id="title" d="M-22 -60 L14 -64 L15 -50 L-21 -46 Z" fill="sunflower" data-line="none"/>
+</svg>

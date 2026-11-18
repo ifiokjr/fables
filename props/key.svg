@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -140 100 160" data-grip="0 0" data-hands="one" data-about="An old key with a ring and two teeth.">
+  <title>A key</title>
+  <path id="ring" d="M22 -96 C22 -83.8 12.2 -74 0 -74 C-12.2 -74 -22 -83.8 -22 -96 C-22 -108.2 -12.2 -118 0 -118 C12.2 -118 22 -108.2 22 -96 Z" fill="mustard" data-shade="1"/>
+  <path id="hole" d="M9 -96 C9 -91 5 -87 0 -87 C-5 -87 -9 -91 -9 -96 C-9 -101 -5 -105 0 -105 C5 -105 9 -101 9 -96 Z" fill="#8a5a44" data-line="none"/>
+  <path id="shaft" d="M-6 -76 L6 -76 L6 0 L-6 0 Z" fill="mustard" data-shade="1"/>
+  <path id="tooth-1" d="M6 -20 L24 -20 L24 -10 L6 -10 Z" fill="mustard"/>
+  <path id="tooth-2" d="M6 -40 L20 -40 L20 -32 L6 -32 Z" fill="mustard"/>
+</svg>

@@ -84,8 +84,15 @@ One clear action per beat.
   separate their levels (`size=`, `sit`, `stand`), and let facing tell the story: `face=`
   towards whoever matters.
 - **Eyelines.** Everyone looks at whoever matters — the engine aims listeners at the speaker
-  for you. Break it deliberately: the one character looking away is the one hiding
-  something. `face=left`/`right`/`front` and where they look is the only tell a still has.
+  for you. When it is something else, say so: `see=kite`, `see=up`, `see=mine`. A held `see=`
+  survives until it is changed; `see=front` lets the room pull the eyes again. Break the
+  default deliberately: the one character looking away is the one hiding something.
+  `face=left`/`right`/`front` and where they look is the only tell a still has.
+- **Show what the words say.** The pictures should agree with the text. If a sentence names a
+  thing — a kite, a jar, a letter — put it on stage (`@kite x=0.7 y=sky`) or in a hand
+  (`@hana holds=kite-spool`); if it names an action, direct it (`@hana hold`, `@mo
+  reach-out`). A story about a kite that never shows a kite is a script the pictures have not
+  read, and a reader will feel the gap before they can name it.
 - **Entrances and exits are story beats.** `enter=left` walks somebody on in the video and
   pops them into the still; give the arrival a beat to land (a reaction, a line) before the
   page's business starts. Exits (`exit=right`) say goodbye the same way.
@@ -190,6 +197,13 @@ a line, at the moment it happens.
 - **Checking.** If a moment reads wrong, render once with `[video] acting = "plain"`:
   whatever still reads wrong is yours to stage differently. `docs/animation.md` has the ten
   rules and their dials.
+
+**Let them notice before they react.** A reaction reads best when the audience sees it being
+decided. Put `notice` on the direction that starts the reaction — `@hana notice see=kite
+shocked` — and the eyes flick to the thing first, hold for about half a second, and only then
+do the mood and the pose land. In a still, the look itself is the picture: a character turned
+towards what frightens them says more than one already recoiling, because the reader gets to
+see the moment they understand it.
 
 ## Mixing
 

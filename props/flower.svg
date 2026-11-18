@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -170 100 190" data-grip="0 0" data-hands="one" data-about="A picked flower with a stem, a leaf and six petals.">
+  <title>A flower</title>
+  <path id="stem" d="M0 0 C4 -30 -4 -60 0 -104" fill="none" stroke="leaf" stroke-width="5"/>
+  <path id="leaf" d="M0 -46 C14 -60 28 -48 18 -34 C8 -24 -4 -32 0 -46 Z" fill="leaf" data-shade="1"/>
+  <path id="petal-1" d="M36 -118 C36 -110.3 29.7 -104 22 -104 C14.3 -104 8 -110.3 8 -118 C8 -125.7 14.3 -132 22 -132 C29.7 -132 36 -125.7 36 -118 Z" fill="bubblegum"/>
+  <path id="petal-2" d="M25 -99 C25 -91.3 18.7 -85 11 -85 C3.3 -85 -3 -91.3 -3 -99 C-3 -106.7 3.3 -113 11 -113 C18.7 -113 25 -106.7 25 -99 Z" fill="bubblegum"/>
+  <path id="petal-3" d="M3 -99 C3 -91.3 -3.3 -85 -11 -85 C-18.7 -85 -25 -91.3 -25 -99 C-25 -106.7 -18.7 -113 -11 -113 C-3.3 -113 3 -106.7 3 -99 Z" fill="bubblegum"/>
+  <path id="petal-4" d="M-8 -118 C-8 -110.3 -14.3 -104 -22 -104 C-29.7 -104 -36 -110.3 -36 -118 C-36 -125.7 -29.7 -132 -22 -132 C-14.3 -132 -8 -125.7 -8 -118 Z" fill="bubblegum"/>
+  <path id="petal-5" d="M3 -137 C3 -129.3 -3.3 -123 -11 -123 C-18.7 -123 -25 -129.3 -25 -137 C-25 -144.7 -18.7 -151 -11 -151 C-3.3 -151 3 -144.7 3 -137 Z" fill="bubblegum"/>
+  <path id="petal-6" d="M25 -137 C25 -129.3 18.7 -123 11 -123 C3.3 -123 -3 -129.3 -3 -137 C-3 -144.7 3.3 -151 11 -151 C18.7 -151 25 -144.7 25 -137 Z" fill="bubblegum"/>
+  <path id="centre" d="M12 -118 C12 -111.4 6.6 -106 0 -106 C-6.6 -106 -12 -111.4 -12 -118 C-12 -124.6 -6.6 -130 0 -130 C6.6 -130 12 -124.6 12 -118 Z" fill="sunflower" data-line="detail"/>
+</svg>

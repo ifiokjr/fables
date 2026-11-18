@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -120 80 140" data-grip="0 0" data-hands="one" data-about="A spoon, bowl up.">
+  <title>A spoon</title>
+  <path id="handle" d="M0 0 L0 -64" fill="none" stroke="#1fb5ac" stroke-width="8"/>
+  <path id="bowl" d="M16 -80 C16 -67.8 8.8 -58 0 -58 C-8.8 -58 -16 -67.8 -16 -80 C-16 -92.2 -8.8 -102 0 -102 C8.8 -102 16 -92.2 16 -80 Z" fill="#1fb5ac" data-shade="1"/>
+  <path id="shine" d="M-5 -90 C-7 -85 -7 -79 -5 -75" fill="none" stroke="#ffffff" stroke-width="3" data-opacity="0.7"/>
+</svg>

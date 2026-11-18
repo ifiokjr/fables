@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -90 120 140" data-grip="0 0" data-hands="one" data-about="A jar of jam, held upright in one fist.">
+  <title>A jar of jam</title>
+  <path id="jar" d="M-26 -40 C-28 -20 -30 0 -28 14 C-27 22 -20 26 0 26 C20 26 27 22 28 14 C30 0 28 -20 26 -40 C16 -44 -16 -44 -26 -40 Z" fill="#b8323a" data-shade="1"/>
+  <path id="label" d="M-20 -22 C-10 -26 10 -26 20 -22 C21 -14 21 -4 20 4 C10 8 -10 8 -20 4 C-21 -4 -21 -14 -20 -22 Z" fill="#f6eacf" data-line="detail"/>
+  <path id="shine" d="M-19 -33 C-21 -25 -22 -17 -21 -9" fill="none" stroke="#ffffff" stroke-width="4" data-opacity="0.7"/>
+  <path id="lid" d="M-29 -40 C-29 -46 -28 -52 -26 -54 C-14 -57 14 -57 26 -54 C28 -52 29 -46 29 -40 C16 -37 -16 -37 -29 -40 Z" fill="#f6eacf" data-shade="1"/>
+</svg>

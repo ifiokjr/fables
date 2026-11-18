@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -80 100 100" data-grip="0 0" data-hands="one" data-about="A plain glass jar with a lid and a label.">
+  <title>A jar</title>
+  <path id="glass" d="M-28 -58 L28 -58 L26 0 L-26 0 Z" fill="ice" data-shade="1"/>
+  <path id="label" d="M-18 -40 L18 -40 L18 -14 L-18 -14 Z" fill="cream" data-line="none"/>
+  <path id="lid" d="M-30 -64 L30 -64 L30 -56 L-30 -56 Z" fill="teal"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -90 120 100" data-grip="0 0" data-hands="one" data-about="A gift box tied with a ribbon and a bow.">
+  <title>A box</title>
+  <path id="base" d="M-44 -52 L44 -52 L40 0 L-40 0 Z" fill="teal" data-shade="1"/>
+  <path id="lid" d="M-48 -60 L48 -60 L46 -46 L-46 -46 Z" fill="mint"/>
+  <path id="ribbon-v" d="M-8 -60 L8 -60 L8 0 L-8 0 Z" fill="tomato" data-line="none"/>
+  <path id="ribbon-h" d="M-48 -38 L48 -38 L47 -30 L-47 -30 Z" fill="tomato" data-line="none"/>
+  <path id="bow-left" d="M-10 -72 C-22 -70 -24 -58 -12 -60 C-2 -62 -4 -70 -10 -72 Z" fill="tomato"/>
+  <path id="bow-right" d="M10 -72 C22 -70 24 -58 12 -60 C2 -62 4 -70 10 -72 Z" fill="tomato"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-40 -120 80 140" data-grip="0 0" data-hands="one" data-about="A green leaf with a vein and four side veins.">
+  <title>A leaf</title>
+  <path id="leaf" d="M0 0 C-26 -30 -22 -70 0 -100 C22 -70 26 -30 0 0 Z" fill="leaf" data-shade="1"/>
+  <path id="vein" d="M0 -4 L0 -90" fill="none" stroke="bog" stroke-width="3"/>
+  <path id="vein-1" d="M0 -24 L-14 -34" fill="none" stroke="bog" stroke-width="2"/>
+  <path id="vein-2" d="M0 -44 L14 -54" fill="none" stroke="bog" stroke-width="2"/>
+  <path id="vein-3" d="M0 -64 L-12 -72" fill="none" stroke="bog" stroke-width="2"/>
+  <path id="vein-4" d="M0 -64 L12 -72" fill="none" stroke="bog" stroke-width="2"/>
+</svg>
