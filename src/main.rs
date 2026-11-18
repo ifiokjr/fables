@@ -147,6 +147,10 @@ enum Command {
 		/// Also draw every mood for this cast member.
 		#[arg(long)]
 		moods: Option<String>,
+		/// Outline, on every setting of the places sheet, where a typical text card and the
+		/// actors sit.
+		#[arg(long)]
+		zones: bool,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -191,7 +195,7 @@ enum Command {
 		#[arg(long)]
 		preview: bool,
 	},
-	/// Draw the video's camera plan as a comic strip: one labelled panel per camera setup.
+	/// Draw the video's camera plan as a comic strip and write its shot list.
 	Storyboard {
 		story: PathBuf,
 		#[arg(long, default_value = "out")]
@@ -199,6 +203,27 @@ enum Command {
 		/// Which shape's camera plan to draw.
 		#[arg(long, value_enum, default_value = "landscape")]
 		format: Shape,
+		/// Write the director's shots into the script as editable `@camera` directions, in the
+		/// `--format` shape's plan. Name pages to pin only them: `--pin page=3,5`.
+		#[arg(long, num_args = 0..=1, default_missing_value = "all")]
+		pin: Option<String>,
+		/// Remove the directions a previous `--pin` wrote.
+		#[arg(long)]
+		unpin: bool,
+	},
+	/// Hold the storyboard's shots for their real durations over the soundtrack: an animatic
+	/// that judges timing in seconds rather than rendering every frame.
+	Animatic {
+		story: PathBuf,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+		/// Which shape to cut.
+		#[arg(long, value_enum, default_value = "landscape")]
+		format: Shape,
+		/// Leave every line silent, timed by its estimate: nothing is recorded, so it needs no
+		/// voice at all. Without it, a line whose voice cannot record here is silent anyway.
+		#[arg(long)]
+		silent: bool,
 	},
 	/// Build the book and both videos.
 	All {
@@ -515,14 +540,20 @@ fn run(cli: Cli) -> Result<()> {
 				}
 			}
 		}
-		Command::Sheets { moods, out } => {
+		Command::Sheets { moods, zones, out } => {
 			let choices = style_choices(style.as_deref())?;
 			let world = world()?;
+			let zones = if zones {
+				Some(press::sheets::Zones::measure(&world.style()?)?)
+			} else {
+				None
+			};
 
 			for style in sheet_styles(&choices) {
 				sheets(
 					&world,
 					moods.as_deref(),
+					zones.as_ref(),
 					&out.join("sheets").join(style.name.name()),
 					style,
 				)?;
@@ -665,15 +696,50 @@ fn run(cli: Cli) -> Result<()> {
 				video(story, cast, &out, &format.formats(), preview)
 			})
 		}
-		Command::Storyboard { story, out, format } => {
+		Command::Storyboard {
+			story,
+			out,
+			format,
+			pin,
+			unpin,
+		} => {
 			anyhow::ensure!(
 				format != Shape::Both,
 				"storyboard draws one shape; use --format landscape or portrait"
 			);
+			anyhow::ensure!(
+				!(pin.is_some() && unpin),
+				"--pin writes camera directions and --unpin removes them; use one"
+			);
 			let choices = style_choices(style.as_deref())?;
+
+			if pin.is_some() || unpin {
+				each(&story, |path| {
+					match &pin {
+						Some(spec) => pin_story(path, flag, spec, &out, format == Shape::Portrait),
+						None => unpin_story(path),
+					}
+				})?;
+			}
 
 			each_style(&story, &choices, flag, |story, cast, _| {
 				storyboard(story, cast, &out, format == Shape::Portrait)
+			})
+		}
+		Command::Animatic {
+			story,
+			out,
+			format,
+			silent,
+		} => {
+			anyhow::ensure!(
+				format != Shape::Both,
+				"animatic cuts one shape; use --format landscape or portrait"
+			);
+			let choices = style_choices(style.as_deref())?;
+
+			each_style(&story, &choices, flag, |story, cast, _| {
+				animatic(story, cast, &out, format == Shape::Portrait, silent)
 			})
 		}
 		Command::All { story, out } => {
@@ -803,6 +869,37 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	Ok(())
 }
 
+/// The age band every new book is read aloud to until its author says otherwise.
+const NEW_BOOK_AGE: &str = "3-5";
+
+/// Gives a new book the default `age` in its front matter. Every new book's text passes here,
+/// whether it came from the world's `recipe.md` or from the built-in flow that starts a book
+/// in a world without one, so both paths get the band; a recipe that names its own `age`
+/// keeps it.
+fn with_default_age(script: String) -> String {
+	let front = script.split("\n+++").next().unwrap_or(&script);
+	let names_age = front.lines().skip(1).any(|line| {
+		line.trim()
+			.strip_prefix("age")
+			.is_some_and(|rest| rest.trim_start().starts_with('='))
+	});
+
+	if names_age {
+		return script;
+	}
+
+	match script.find("\n+++") {
+		Some(end) => {
+			format!(
+				"{}\nage = \"{NEW_BOOK_AGE}\"{}",
+				&script[..end],
+				&script[end..]
+			)
+		}
+		None => script,
+	}
+}
+
 /// Starts a book from the world's recipe, filled in with a title, a star and an author.
 fn new_story(
 	world: &World,
@@ -843,11 +940,13 @@ fn new_story(
 		+ std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
 			.map_or(0, |elapsed| elapsed.as_secs() / 31_556_952);
-	let script = recipe
-		.replace("{{title}}", title)
-		.replace("{{star}}", star)
-		.replace("{{author}}", author)
-		.replace("{{year}}", &year.to_string());
+	let script = with_default_age(
+		recipe
+			.replace("{{title}}", title)
+			.replace("{{star}}", star)
+			.replace("{{author}}", author)
+			.replace("{{year}}", &year.to_string()),
+	);
 
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
@@ -1048,6 +1147,13 @@ fn check(story: &Story, cast: &Cast, notes: bool) -> Result<()> {
 		}
 	}
 
+	if story.age.is_none() {
+		println!(
+			"· no `age` in the front matter, so the narrator keeps the older pace; add `age = \
+			 \"3-5\"` (or `under-3`, `5-7`) to pace the read-aloud."
+		);
+	}
+
 	Ok(())
 }
 
@@ -1109,7 +1215,13 @@ fn print(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	Ok(())
 }
 
-fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Result<()> {
+fn sheets(
+	world: &World,
+	moods: Option<&str>,
+	zones: Option<&press::sheets::Zones>,
+	out: &Path,
+	style: Style,
+) -> Result<()> {
 	let started = Instant::now();
 	let cast = world.cast()?;
 	let slug = fables::story::slugify(&world.name);
@@ -1125,7 +1237,11 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	let path = out.join(format!("{slug}-places.png"));
 	std::fs::write(
 		&path,
-		raster::png(&press::sheets::places_sheet(&*world.settings()?, style)?)?,
+		raster::png(&press::sheets::places_sheet(
+			&*world.settings()?,
+			style,
+			zones,
+		)?)?,
 	)?;
 	done(&path, started)?;
 
@@ -1503,14 +1619,112 @@ fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bo
 	Ok(())
 }
 
-fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
-	let started = Instant::now();
+/// Writes the director's shots into the script at `path` as `@camera` directions.
+fn pin_story(
+	path: &Path,
+	world: Option<&Path>,
+	spec: &str,
+	out: &Path,
+	portrait: bool,
+) -> Result<()> {
+	let (story, cast, _) = load(path, None, world)?;
+	let pages = pages_spec(spec, story.pages.len())?;
+	let timeline = publish::estimated_timeline(&story, &cast, out)?;
+	let source = std::fs::read_to_string(path)
+		.with_context(|| format!("could not read {}", path.display()))?;
+	let pinned = press::storyboard::pin(&source, &story, &timeline, pages.as_deref(), portrait)?;
+	std::fs::write(path, &pinned.script)
+		.with_context(|| format!("could not write {}", path.display()))?;
 
-	for path in publish::storyboard(story, cast, out, portrait)? {
-		done(&path, started)?;
+	for note in &pinned.notes {
+		say!("  {note}")?;
 	}
 
-	Ok(())
+	let list = pinned
+		.pages
+		.iter()
+		.map(usize::to_string)
+		.collect::<Vec<_>>()
+		.join(", ");
+	say!(
+		"✓ pinned {} camera directions into {} (pages {list})",
+		pinned.count,
+		path.display()
+	)
+}
+
+/// Removes the camera directions a previous `--pin` wrote.
+fn unpin_story(path: &Path) -> Result<()> {
+	let source = std::fs::read_to_string(path)
+		.with_context(|| format!("could not read {}", path.display()))?;
+	let (restored, removed) = press::storyboard::unpin(&source);
+	std::fs::write(path, &restored)
+		.with_context(|| format!("could not write {}", path.display()))?;
+	say!(
+		"✓ removed {removed} pinned camera directions from {}",
+		path.display()
+	)
+}
+
+/// The pages named by `--pin`: `all`, or `page=3,5`.
+fn pages_spec(spec: &str, count: usize) -> Result<Option<Vec<usize>>> {
+	let spec = spec.trim();
+
+	if spec.is_empty() || spec == "all" {
+		return Ok(None);
+	}
+
+	let list = spec.strip_prefix("page=").unwrap_or(spec);
+	let mut pages = Vec::new();
+
+	for part in list.split(',') {
+		let part = part.trim();
+		let page: usize = part.parse().map_err(|_| {
+			anyhow::anyhow!("`{part}` is not a page number; name pages like `--pin page=3,5`")
+		})?;
+		anyhow::ensure!(
+			(1..=count).contains(&page),
+			"page {page} is not in the book, which has {count} pages"
+		);
+		pages.push(page);
+	}
+
+	anyhow::ensure!(!pages.is_empty(), "name pages like `--pin page=3,5`");
+	Ok(Some(pages))
+}
+
+fn animatic(story: &Story, cast: &Cast, out: &Path, portrait: bool, silent: bool) -> Result<()> {
+	let started = Instant::now();
+	let format = if portrait {
+		Format::Portrait
+	} else {
+		Format::Landscape
+	};
+	let narration = if silent {
+		publish::Narration::Silent
+	} else {
+		publish::Narration::Voiced
+	};
+	let cut = publish::animatic(story, cast, out, format, narration)?;
+
+	if let Some(note) = &cut.note {
+		say!("  {note}")?;
+	}
+
+	done(&cut.path, started)
+}
+
+fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
+	let started = Instant::now();
+	let board = publish::storyboard(story, cast, out, portrait)?;
+
+	say!("{}", board.text)?;
+
+	for path in &board.images {
+		done(path, started)?;
+	}
+
+	done(&board.list, started)
 }
 
 fn done(path: &Path, started: Instant) -> Result<()> {
@@ -1575,5 +1789,22 @@ mod tests {
 			error.contains("--author") && error.contains("world.toml"),
 			"{error}"
 		);
+	}
+
+	#[test]
+	fn a_new_book_starts_at_the_default_age() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("age = \"3-5\""), "{script}");
+		assert_eq!(script.matches("\nage").count(), 1, "{script}");
+	}
+
+	#[test]
+	fn a_recipe_that_names_its_own_age_keeps_it() {
+		let own = "+++\ntitle = \"T\"\nage = \"5-7\"\n+++\n\n# park\nHi.\n";
+		assert_eq!(with_default_age(own.to_owned()), own);
+		let tight = "+++\ntitle = \"T\"\nage=\"under-3\"\n+++\n";
+		assert_eq!(with_default_age(tight.to_owned()), tight);
 	}
 }

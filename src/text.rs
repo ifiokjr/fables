@@ -298,10 +298,16 @@ impl Default for Ink {
 	}
 }
 
+/// The advance width of `text` set in `style`'s face at `size`, for callers that lay labels
+/// out over rendered frames rather than through [`layout`].
+pub fn width(text: &str, style: RunStyle, size: f32) -> f32 {
+	metrics(style).width(text, size)
+}
+
 /// The advance width of `text` set in the display face at `size`, for callers that lay
 /// labels out over rendered frames (the rig videos' titles) rather than through [`layout`].
 pub fn display_width(text: &str, size: f32) -> f32 {
-	metrics(RunStyle::Shout).width(text, size)
+	width(text, RunStyle::Shout, size)
 }
 
 /// Font family, weight and colour for a style.

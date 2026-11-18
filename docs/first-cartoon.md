@@ -64,6 +64,11 @@ Open `out/pip-and-the-puddle/riso/proofs/contact-sheet.png` for every page at on
 `out/pip-and-the-puddle/riso/storyboard/storyboard.png` for the video's camera plan. The
 preview video is in `out/pip-and-the-puddle/riso/video/`: half size at 15 fps.
 
+The storyboard also prints its shot list (and writes it beside the board as `storyboard.md`):
+read it for each shot's page, script line, size and timing. To change a page's camera, pin it
+with `--pin page=2`, edit the `@camera … // pinned` lines it writes into the script, and run
+`fables animatic` to judge the timing in seconds; `--unpin` takes the pinned lines out again.
+
 Next: `fables style describe chibi` lists every part a figure is drawn with; `fables setting
 new harbour --from park` gives the world a place of its own; and `fables book <story>` makes
 the ePub and print files when the book looks right.

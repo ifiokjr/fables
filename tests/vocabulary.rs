@@ -115,6 +115,22 @@ fn stage_directions() -> Vec<String> {
 	let mut tokens = Vec::new();
 
 	for (kind, values) in table("### Stage directions") {
+		// A row of whole directions (a `@pause`, `@hold`, `@music` or `@sfx`) or of `@sfx`
+		// names, fed to the parser exactly as the readme writes them.
+		if kind.starts_with("Directions") {
+			tokens.extend(spans(&values).into_iter().map(|(_, span)| span));
+			continue;
+		}
+
+		if kind == "Effects" {
+			tokens.extend(
+				spans(&values)
+					.into_iter()
+					.map(|(_, name)| format!("@sfx {name}")),
+			);
+			continue;
+		}
+
 		let words = matches!(kind.as_str(), "Moods" | "Poses" | "Gaits" | "Actions")
 			|| kind.starts_with("Stances")
 			|| kind == "Camera";
@@ -201,6 +217,13 @@ fn every_documented_stage_direction_word_key_and_value_parses() {
 	);
 
 	for token in &tokens {
+		// A whole direction parses as written, with no actor in front of it.
+		if token.starts_with('@') {
+			parses(&format!("# park\n{token}\n"))
+				.unwrap_or_else(|error| panic!("{token}: {error}"));
+			continue;
+		}
+
 		let mut failures = Vec::new();
 		let mut accepted = false;
 
@@ -221,5 +244,32 @@ fn every_documented_stage_direction_word_key_and_value_parses() {
 			"`{token}` is documented but refused:\n  {}",
 			failures.join("\n  ")
 		);
+	}
+}
+
+/// The comment row's examples: a comment on its own line, and a direction that ends in one, as
+/// a pinned camera line does.
+#[test]
+fn every_documented_comment_form_parses() {
+	let (_, meaning) = table("### Text")
+		.into_iter()
+		.find(|(form, _)| form.contains("//"))
+		.expect("the text table documents comments");
+	let directions: Vec<String> = spans(&meaning)
+		.into_iter()
+		.map(|(_, span)| span)
+		.filter(|span| span.starts_with('@') && span.contains("//"))
+		.collect();
+
+	assert!(
+		!directions.is_empty(),
+		"the comment row shows a direction that ends in a comment: {meaning}"
+	);
+
+	parses("# park\n// note\n@stinky\n").unwrap_or_else(|error| panic!("// note: {error}"));
+
+	for direction in &directions {
+		parses(&format!("# park\n{direction}\n"))
+			.unwrap_or_else(|error| panic!("{direction}: {error}"));
 	}
 }
