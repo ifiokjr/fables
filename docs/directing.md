@@ -66,7 +66,12 @@ review can vary its figures by band without a second copy:
 | `5-7` | 25 to 60 | 400 to 1400 |
 
 `fables check` reports the word count; `fables review` flags pages over the limit and books
-outside the range. The band also sets how fast the narrator reads; see `sound`.
+outside the range.
+
+**Fill the book, or mean the blanks.** A printed book has at least 24 pages, and a short story
+leaves the rest blank. `fables check` and `fables review` say so: "8 story pages leave 12
+blank pages; a 24-page book has room for 12 more pages". Give a rushed beat its own page, or
+keep the blanks as endpapers on purpose. The band also sets how fast the narrator reads; see `sound`.
 
 **The world's recipe.** `worlds/<world>/recipe.md` is a twelve-beat outline `fables new`
 starts a book from. Map your want-obstacle-change onto its beats; they are already in page
@@ -111,6 +116,15 @@ than critiquing lines nobody has written.
   a button. Choose it for a video-first sixty to ninety seconds where timing is the story.
   The trap is explaining the joke in the text or easing into the twist: keep one locked camera
   per gag and cut into the surprise.
+What `fables review` checks for a book whose `flow = "…"` names one of these shapes:
+
+| Rule | Flows | What it asks |
+| --- | --- | --- |
+| `refrain` | `three-tries`, `pile-up` | One line (a phrase between commas or full stops) comes back word for word at least three times, and changes once after it first appears. |
+| `goal-early` | `three-tries`, `there-and-back`, `gag-short` | The star speaks (`talk`), `point`s or `reach-out`s on page 1 or 2: the want is on the page early. |
+| `return-image` | `round-we-go`, `there-and-back` | The last page is in the same setting as the first. |
+| `wind-down` | `goodnight-tour` | Over the last third the words a page fall, the light never brightens (`candle` counts as dim as `moonlit`), the star never livens up, and nobody new arrives in the last three pages. |
+
 - **The Habit Tale.** The world's rule, the kid, the NOPE, the habit showing, three
   consequences, a name, a cost, a choice, a magic, and the callback. Choose it when the
   change is a choice the star makes and the habit can be seen on the outside. The trap is
@@ -128,23 +142,42 @@ One clear action per beat.
   who only stands there is a distraction; `fables review` calls them an idle arrival. Give
   them a reaction (`@dog shocked`, `@mum laugh`) or take them off.
 - **Silhouettes.** A reader should recognise who does what from shape alone at proof size.
-  Space people apart (`x=0.3`, `x=0.7`; less than 0.15 apart and they read as one shape),
+  Space people apart (`x=0.3`, `x=0.7`); `fables review` measures the drawn figures, raised
+  arms and held props included, and flags two whose shapes overlap by more than a quarter of
+  the smaller one, since they read as one shape,
   separate their levels (`size=`, `sit`, `stand`), and let facing tell the story: `face=`
   towards whoever matters.
 - **Eyelines.** Everyone looks at whoever matters — the engine aims listeners at the speaker
   for you. Break it deliberately: the one character looking away is the one hiding
   something. `face=left`/`right`/`front` and where they look is the only tell a still has.
+- **Say only what the picture shows.** If the words say Mo jumped, the picture shows a jump
+  (`jump` or `hop`); if they say Nan sat, `sit`. `fables review` reads each page's narration
+  (not its quoted speech) for a small set of action words — jumped, waved, ran, hid, pointed,
+  sat, laughed, cried, slept, held, hugged, caught, cheered, fainted, shrugged — in a sentence
+  about a character, and for the cast, creatures (dog, bird, worm, flower) and held props it
+  names, and flags a page whose directions and stage never show them. Direct the action, or
+  leave it to the words of another page.
+- **Hold the line.** Two people who stand left and right on one page stay that way on the
+  next page in the same place, unless somebody walks across (`@mo x=0.7` after a line) or
+  enters. A swap with no walk is a jump the reader has to work out; `fables review` flags it.
 - **Entrances and exits are story beats.** `enter=left` walks somebody on in the video and
   pops them into the still; give the arrival a beat to land (a reaction, a line) before the
   page's business starts. Exits (`exit=right`) say goodbye the same way.
+- **Cause, then reaction.** Nobody gasps at what hasn't happened yet. A `shocked`,
+  `disgusted` or `fainted` directed above the paragraph before an entrance, a shout, a faint, a
+  hop or an `@sfx` that causes it plays the reaction first; move the take below the cause.
+  Directions in the same block as their paragraph land together, so a take beside its cause is
+  fine.
 - **Let a reaction land.** After a big line, the listener's face is the story. Give it a
   second: `@pause 0.8`, or the next direction on a new line, before the next paragraph. A
   `shocked` in the same `@` line as a `talk`, with no pause before the next line, is a
   reaction nobody sees.
 - **Contrast between pages.** No two facing pages should look the same: change the setting,
   the `light=`, the distance (`shot=`), or the staging. A page whose stage is identical to
-  the last one's has nothing to look at; more than three pages in one place under one light
-  is a sequence, so make it one on purpose.
+  the last one's has nothing to look at — the same setting, light and shot, everybody within
+  0.05 of where they stood, in the same pose and stance. A new face alone does not count: moods
+  barely show at proof size. More than three pages in one place under one light is a
+  sequence, so make it one on purpose.
 
 ## Camera
 

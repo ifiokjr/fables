@@ -36,6 +36,8 @@ pub struct CheckReport {
 	/// Things worth knowing that are not mistakes: cast fields a drawn character ignores, and
 	/// the like. One line per member at most.
 	pub notes: Vec<String>,
+	/// The blank pages a short book is padded with, when there are any.
+	pub padding: Option<String>,
 }
 
 /// The ePub and its store cover.
@@ -80,6 +82,7 @@ pub fn check(story: &Story, cast: &Cast) -> Result<CheckReport> {
 		words,
 		cast_members: cast.members.len(),
 		notes: cast_notes(cast),
+		padding: crate::review::padding(story),
 	})
 }
 
