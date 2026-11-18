@@ -664,7 +664,7 @@ impl Prop {
 	pub fn draw_tether(&self, svg: &mut Svg, (start, end): (Pt, Pt), sway: f32) {
 		let path = tether_path(start, end, sway);
 		let saved = svg.use_brush(Brush::new(self.style.line, &self.style.shade, INK));
-		svg.brush_line(&path, INK, self.style.finish.detail * STAGE_SIZE);
+		svg.thread(&path, INK, self.style.finish.detail * STAGE_SIZE);
 		svg.brush = saved;
 	}
 
@@ -814,7 +814,7 @@ impl Prop {
 				} => {
 					match ink {
 						Ink::Brushed { .. } if *opacity >= 0.999 => {
-							svg.brush_line(&path, *colour, *width);
+							svg.thread(&path, *colour, *width);
 						}
 						_ => svg.stroke_alpha(&path, *colour, *width, *opacity),
 					}
@@ -1218,6 +1218,21 @@ mod tests {
 
 	/// How far a tether's first handle sits off the straight line between its ends, as a share
 	/// of its length: positive when it is pushed towards the ground.
+	#[test]
+	fn a_string_is_drawn_even_where_a_style_draws_no_line() {
+		for name in ["cartoon", "silhouette", "paper-theatre", "soft-flat"] {
+			let style = StylePack::named(name).unwrap();
+			let library = Library::for_world(FilePath::new("no-such-world"), &style).unwrap();
+			let mut svg = Svg::new();
+			library.find("kite").unwrap().draw_tether(
+				&mut svg,
+				(pt(0.0, 0.0), pt(200.0, 300.0)),
+				0.0,
+			);
+			assert!(svg.body.contains("stroke="), "{name} lost the string");
+		}
+	}
+
 	fn sag(start: Pt, end: Pt) -> f32 {
 		let (a, _) = tether_handles(start, end, 0.0).unwrap();
 		let off = a - (start + (end - start) * (1.0 / 3.0));

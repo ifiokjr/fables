@@ -2722,7 +2722,7 @@ fn draw_string(svg: &mut Svg, from: Pt, to: Pt, ink: Color, weight: f32, time: f
 	let path = Path::new()
 		.move_to(from)
 		.quad_to(from.lerp(to, 0.5) + slack, to);
-	svg.brush_line(&path, ink, weight * 0.6);
+	svg.thread(&path, ink, weight * 0.6);
 }
 
 fn draw_hand(svg: &mut Svg, puppet: &Authored, hand: Hand, skin: Color, ink: Color, light: Pt) {

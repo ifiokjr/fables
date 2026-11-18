@@ -1133,6 +1133,21 @@ impl Svg {
 		}
 	}
 
+	/// A line that is a thing rather than an outline: a kite's string, a flower's stalk. A style
+	/// with no drawn line still has to show it, so there it is a plain stroke, and on a shadow
+	/// puppet it is the shadow's ink, never the light cut out of it.
+	pub fn thread(&mut self, path: &Path, line: Color, weight: f32) {
+		match self.brush.line.stroke {
+			dials::Stroke::None | dials::Stroke::Cut => {
+				let line = self
+					.solid
+					.map_or_else(|| self.brush_ink(line), |solid| solid.ink);
+				self.plain_stroke(path, line, weight, 1.0);
+			}
+			_ => self.brush_line(path, line, weight),
+		}
+	}
+
 	/// The brushed finish, last step: the line on top.
 	pub fn brush_line(&mut self, path: &Path, line: Color, weight: f32) {
 		let line = self.brush_ink(line);
