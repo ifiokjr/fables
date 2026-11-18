@@ -2,9 +2,13 @@
 //! every mood, and every setting. They are the model sheets an illustrator would pin above the desk, kept
 //! in sync with the cast file automatically.
 
+use std::sync::Arc;
+
+use anyhow::Context;
 use anyhow::Result;
 use resvg::tiny_skia::Pixmap;
 
+use crate::art::Bounds;
 use crate::art::Color;
 use crate::art::Path;
 use crate::art::Pt;
@@ -19,6 +23,7 @@ use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::figure::Viseme;
 use crate::art::light::Light;
+use crate::art::pack::StylePack;
 use crate::art::palette;
 use crate::art::parts::FIGURE_PARTS;
 use crate::art::parts::Level;
@@ -33,6 +38,8 @@ use crate::art::settings::Library;
 use crate::art::settings::Weather;
 use crate::art::shape::Shape;
 use crate::art::style::Style;
+use crate::book;
+use crate::book::BookPage;
 use crate::cast::Cast;
 use crate::cast::Kind;
 use crate::cast::Member;
@@ -40,6 +47,7 @@ use crate::compose;
 use crate::compose::Body;
 use crate::compose::Puppet;
 use crate::raster;
+use crate::story;
 use crate::text;
 use crate::text::Anchor;
 use crate::text::Area;
@@ -377,8 +385,16 @@ pub fn model_sheet(title: &str, look: &Look, px: u32) -> Result<Pixmap> {
 }
 
 /// Every setting in `settings`, by day, plus a few in other weather, labelled with their
-/// script names.
-pub fn places_sheet(settings: &Library, style: Style) -> Result<Pixmap> {
+/// script names. With `zones`, each setting is outlined with what a story page puts on it.
+pub fn places_sheet(settings: &Library, style: Style, zones: Option<&Zones>) -> Result<Pixmap> {
+	let mut pixmap = raster::render(&places_document(settings, style, zones))?;
+	raster::finish(&mut pixmap, &style, 0.05, 0);
+
+	Ok(pixmap)
+}
+
+/// The places sheet as an SVG document.
+fn places_document(settings: &Library, style: Style, zones: Option<&Zones>) -> String {
 	let cell = 600.0;
 	let columns = 4;
 	let mut list: Vec<(&str, Weather)> = Vec::new();
@@ -444,6 +460,11 @@ pub fn places_sheet(settings: &Library, style: Style) -> Result<Pixmap> {
 		settings::backdrop(&mut svg, &setting, weather);
 		settings::foreground(&mut svg, &setting, weather);
 		svg.end();
+
+		if let Some(zones) = zones {
+			draw_zones(&mut svg, zones, setting.ground());
+		}
+
 		svg.raw("</g>");
 		svg.end();
 
@@ -467,12 +488,213 @@ pub fn places_sheet(settings: &Library, style: Style) -> Result<Pixmap> {
 		));
 	}
 
-	let doc = svg.finish((0.0, 0.0, width, height), width as u32, height as u32);
+	svg.finish((0.0, 0.0, width, height), width as u32, height as u32)
+}
 
-	let mut pixmap = raster::render(&doc)?;
-	raster::finish(&mut pixmap, &style, 0.05, 0);
+/// The words of a typical page: two paragraphs, about twenty words, like the median page of
+/// the example books.
+const TYPICAL_PAGE: &str = "Ada looked up at the hill. The wind was busy again, pulling at every \
+                            kite in town.\n\n\"Hold on tight,\" said Gran.";
 
-	Ok(pixmap)
+/// What every story page puts on top of a setting, measured from the book's own layout and
+/// from template characters in a drawing style, so a setting can be composed around it.
+/// Everything is in stage units.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Zones {
+	/// The paper card under a typical page's words at the top of the page.
+	pub top_card: Bounds,
+	/// The same card with `text=bottom`.
+	pub bottom_card: Bounds,
+	/// How far above the ground a standing kid's drawing reaches, hair and all.
+	pub kid_height: f32,
+	/// How far above the ground a standing grown-up's drawing reaches.
+	pub grown_up_height: f32,
+	/// How far either of them reaches to the side of the spot they stand on.
+	pub half_width: f32,
+	/// Where two actors without an `x=` stand, as fractions of the stage's width.
+	pub pair: [f32; 2],
+	/// Where one actor without an `x=` stands.
+	pub lone: f32,
+}
+
+impl Zones {
+	/// Lays out a two-page book in `style`, a typical page with a kid and a grown-up and the
+	/// same page with `text=bottom` and the kid alone, and measures its cards and actors.
+	pub fn measure(style: &Arc<StylePack>) -> Result<Zones> {
+		let cast = Cast::parse_in(
+			"[kid]\nname = \"Kid\"\nkind = \"kid\"\n[adult]\nname = \"Adult\"\nkind = \
+			 \"grown-up\"\n",
+			std::path::Path::new(""),
+			style,
+		)?;
+		let story = story::parse(&format!(
+			"+++\ntitle = \"Zones\"\nauthor = \"fables\"\nstar = \"kid\"\n+++\n# \
+			 plain\n@kid\n@adult\n{TYPICAL_PAGE}\n# plain text=bottom\n@kid\n{TYPICAL_PAGE}\n"
+		))?;
+		let pages = book::assemble(&story, &cast)?;
+		let page = |label: &str| {
+			pages
+				.iter()
+				.find(|page| page.label == label)
+				.with_context(|| format!("the zones book has no {label} page"))
+		};
+		let card = |page: &BookPage| {
+			book::card_rects(page)
+				.into_iter()
+				.next()
+				.with_context(|| format!("{} lays no card", page.label))
+		};
+		let (both, alone) = (page("story-01")?, page("story-02")?);
+		let ground = both.scene.setting.ground();
+		let reach = |id: &str, scene_page: &BookPage| {
+			compose::puppets(&scene_page.scene, 0.0, true)
+				.into_iter()
+				.find(|puppet| puppet.id == id)
+				.map(|puppet| (puppet.at.x, puppet.extents().subject))
+				.with_context(|| format!("{id} is not on {}", scene_page.label))
+		};
+		let (kid_x, kid) = reach("kid", both)?;
+		let (adult_x, adult) = reach("adult", both)?;
+		let (lone_x, _) = reach("kid", alone)?;
+		let half_width = [(kid_x, kid), (adult_x, adult)]
+			.into_iter()
+			.map(|(x, (left, _, right, _))| (x - left).max(right - x))
+			.fold(0.0, f32::max);
+
+		Ok(Zones {
+			top_card: card(both)?,
+			bottom_card: card(alone)?,
+			kid_height: ground - kid.1,
+			grown_up_height: ground - adult.1,
+			half_width,
+			pair: [kid_x / STAGE, adult_x / STAGE],
+			lone: lone_x / STAGE,
+		})
+	}
+}
+
+/// Outlines `zones` on a setting whose actors stand at `ground`: the typical top and bottom
+/// cards, how high a kid's and a grown-up's heads reach, and the spots actors stand on when
+/// the script gives no `x=`.
+fn draw_zones(svg: &mut Svg, zones: &Zones, ground: f32) {
+	let card = palette::TOMATO;
+	let heights = palette::SUNFLOWER;
+	let spots = palette::WHITE;
+
+	zone_box(svg, "card", zones.top_card, card, false);
+	zone_label(
+		svg,
+		pt(STAGE / 2.0, zones.top_card.1 + 40.0),
+		card,
+		"typical card",
+	);
+	zone_box(svg, "card", zones.bottom_card, card, true);
+	zone_label(
+		svg,
+		pt(STAGE / 2.0, zones.bottom_card.3 - 110.0),
+		card,
+		"text=bottom card",
+	);
+
+	// The grown-up's label sits above its line and the others below theirs, so the two head
+	// heights, which are close, keep their labels apart.
+	for (name, height, dashed, label_y) in [
+		("grown-up", zones.grown_up_height, false, -150.0),
+		("kid", zones.kid_height, true, 24.0),
+		("ground", 0.0, false, 24.0),
+	] {
+		let y = ground - height;
+		zone_stroke(
+			svg,
+			"height",
+			"line",
+			&format!(r#"x1="0" y1="{y:.0}" x2="{STAGE}" y2="{y:.0}""#),
+			heights,
+			dashed,
+		);
+		zone_label(svg, pt(230.0, y + label_y), heights, name);
+	}
+
+	let top = ground - zones.grown_up_height;
+
+	for (name, x, dashed) in [
+		("1/3", zones.pair[0], false),
+		("2/3", zones.pair[1], false),
+		("1/2", zones.lone, true),
+	] {
+		let x = x * STAGE;
+		let spot = (x - zones.half_width, top, x + zones.half_width, ground);
+		zone_box(svg, "spot", spot, spots, dashed);
+		zone_label(svg, pt(x, ground - 130.0), spots, name);
+	}
+}
+
+/// A thin rectangle round `bounds`.
+fn zone_box(
+	svg: &mut Svg,
+	zone: &str,
+	(left, top, right, bottom): Bounds,
+	colour: Color,
+	dashed: bool,
+) {
+	zone_stroke(
+		svg,
+		zone,
+		"rect",
+		&format!(
+			r#"x="{left:.0}" y="{top:.0}" width="{:.0}" height="{:.0}" rx="24""#,
+			right - left,
+			bottom - top
+		),
+		colour,
+		dashed,
+	);
+}
+
+/// One outline of the `zone`, drawn twice, a dark line under a thin coloured one, so it reads
+/// over any setting by day or night.
+fn zone_stroke(svg: &mut Svg, zone: &str, element: &str, shape: &str, colour: Color, dashed: bool) {
+	let dash = if dashed {
+		r#" stroke-dasharray="46 30""#
+	} else {
+		""
+	};
+	svg.raw(&format!(
+		r#"<g data-zone="{zone}"><{element} {shape} fill="none" stroke="{}" stroke-opacity="0.55" stroke-width="22"{dash}/><{element} {shape} fill="none" stroke="{colour}" stroke-width="9"{dash}/></g>"#,
+		palette::INK
+	));
+}
+
+/// A label centred on `at`, in `colour` on a dark tab.
+fn zone_label(svg: &mut Svg, at: Pt, colour: Color, words: &str) {
+	let size = 72.0;
+	let block = text::layout(
+		&[words],
+		Area {
+			x: at.x - 600.0,
+			y: at.y,
+			w: 1200.0,
+			h: size * 1.6,
+		},
+		size,
+		Anchor::Top,
+	);
+	let Area { x, y, w, h } = block.bounds;
+	svg.raw(&format!(
+		r#"<rect x="{:.0}" y="{:.0}" width="{:.0}" height="{:.0}" rx="20" fill="{}" fill-opacity="0.72"/>"#,
+		x - 22.0,
+		y - 14.0,
+		w + 44.0,
+		h + 28.0,
+		palette::INK
+	));
+	svg.raw(&text::svg(
+		&block,
+		Ink {
+			body: colour,
+			shout: colour,
+		},
+	));
 }
 
 /// One square on a parts sheet.
@@ -769,4 +991,76 @@ fn union(a: (Pt, Pt), b: (Pt, Pt)) -> (Pt, Pt) {
 		pt(a.0.x.min(b.0.x), a.0.y.min(b.0.y)),
 		pt(a.1.x.max(b.1.x), a.1.y.max(b.1.y)),
 	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn zones() -> Zones {
+		Zones::measure(&StylePack::named("cartoon").unwrap()).unwrap()
+	}
+
+	#[test]
+	fn zones_are_measured_from_the_book_layout() {
+		let zones = zones();
+		let (_, top, _, bottom) = zones.top_card;
+
+		assert!(
+			top < STAGE * 0.1 && (STAGE * 0.25..STAGE * 0.45).contains(&bottom),
+			"a typical top card covers about the top third: {:?}",
+			zones.top_card
+		);
+		assert!(
+			zones.bottom_card.1 > STAGE * 0.55 && zones.bottom_card.3 > STAGE * 0.9,
+			"a bottom card sits low: {:?}",
+			zones.bottom_card
+		);
+		assert!(
+			zones.grown_up_height > zones.kid_height && zones.kid_height > STAGE * 0.35,
+			"a grown-up stands taller than a kid: {zones:?}"
+		);
+		assert!(
+			(zones.pair[0] - 1.0 / 3.0).abs() < 1e-4 && (zones.pair[1] - 2.0 / 3.0).abs() < 1e-4,
+			"two actors share the page in thirds: {:?}",
+			zones.pair
+		);
+		assert!(
+			(zones.lone - 0.5).abs() < 1e-4,
+			"one actor stands in the middle"
+		);
+		assert!(
+			(150.0..400.0).contains(&zones.half_width),
+			"{}",
+			zones.half_width
+		);
+	}
+
+	#[test]
+	fn zones_draw_only_when_asked() {
+		let library = Library::built_in();
+		let style = Style::default();
+		let places = library.names().count() + 4;
+
+		let plain = places_document(&library, style, None);
+		assert!(!plain.contains("data-zone"), "no zones unless asked");
+
+		let zones = zones();
+		let outlined = places_document(&library, style, Some(&zones));
+		assert_eq!(
+			outlined.matches(r#"data-zone="card""#).count(),
+			places * 2,
+			"every place shows the top and bottom cards"
+		);
+		assert_eq!(
+			outlined.matches(r#"data-zone="spot""#).count(),
+			places * 3,
+			"every place shows the three default spots"
+		);
+		let before_zones = outlined.split("<g data-zone").next().unwrap_or_default();
+		assert!(
+			plain.starts_with(before_zones),
+			"the first setting is drawn exactly as on the plain sheet, with the zones over it"
+		);
+	}
 }
