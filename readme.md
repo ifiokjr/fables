@@ -1,15 +1,28 @@
 # fables
 
-Write a children's picture book as one plain-text script, and get all of these from it:
+[![CI](https://github.com/ifiokjr/fables/actions/workflows/ci.yml/badge.svg)](https://github.com/ifiokjr/fables/actions/workflows/ci.yml)
 
-- **page proofs** to review;
-- a **fixed-layout ePub** for Kindle and Apple Books;
-- a **KDP paperback** (interior and full-wrap cover PDFs);
-- **narrated, voice-acted videos** for YouTube (16:9) and for Shorts, TikTok and Reels (9:16). The characters do what the narrator says and can speak their own lines in their own voices, lip-synced.
+fables turns a picture-book script written as plain text into page proofs, a fixed-layout ePub,
+KDP paperback PDFs and narrated, lip-synced videos.
+
+**Status: early.** The script, the settings and the output formats may still change.
+
+## Quick start
+
+With [Rust](https://rustup.rs) installed, plus `ffmpeg` and a voice for the narration (macOS `say`
+works out of the box; see [Voices](#voices)):
 
 ```bash
-cargo run --release -- all worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
+git clone https://github.com/ifiokjr/fables
+cd fables
+cargo run --release -- proofs worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
+cargo run --release -- storyboard worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
+cargo run --release -- video --preview --format landscape worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
 ```
+
+The proofs and contact sheet, the storyboard and the preview video land under `out/`. That renders
+an example world; to make your own from nothing, start with
+[Your first cartoon in five minutes](docs/first-cartoon.md).
 
 ## Why it works this way
 
@@ -28,7 +41,8 @@ The house style, setting and series rules live in the series bible, [`worlds/ker
 1. **[Your first cartoon in five minutes](docs/first-cartoon.md)**: an empty folder to a rendered book, storyboard and preview video, using only the command line.
 2. **[Directing](docs/directing.md)**: the craft rules `fables review` applies.
 3. **[Animation](docs/animation.md)**: how the rig, the acting layer and the camera move.
-4. **[Voices and the show](docs/tv-show.md)**: real voices, character consistency and turning the books into a series.
+4. **[Designing characters with an agent](#designing-characters-with-an-agent-mcp)**: the MCP server that draws, checks and shows model sheets.
+5. **[Voices and the show](docs/tv-show.md)**: real voices, character consistency and turning the books into a series.
 
 ## Worlds
 
@@ -49,8 +63,8 @@ A world needs only a name to start, and `fables world new "Kerfuffle" --style ca
 
 ```toml
 name = "Kerfuffle"
+author = "Ifiok Jr."        # optional: the author of its books, and the default for `fables new`
 style = "cartoon"           # optional: the drawing style its folk are drawn in (default cartoon)
-author = "Ifiok Jr."        # optional: the author credited in its books, unless a book names one
 light = "golden"            # optional: the light every page starts in (default day)
 age = "3-5"                 # optional: who its books are read aloud to (under-3, 3-5, 5-7)
 
@@ -63,6 +77,10 @@ note = "Psst! Wormsley the worm is hiding on every page. Can you find him?"
 meet = ["Have you met the rest of **Kerfuffle**?"]
 draw = ["**Draw your own Kerfuffle folk!**"]
 ```
+
+`fables new` signs a new book with the `--author` you pass, else the world's `author` here. With
+neither it stops and says to pass one or set the field. A book without an `author` in its own front
+matter is also credited to the world's author.
 
 `fables world new` writes `worlds/<slug>/` with that file, a `cast.toml` holding a commented example and nothing else, a `puppets/` folder and a `stories/` folder, then prints the next command. `fables character new <id> --name "…"` adds a cast member; `fables setting new <name>` starts a place.
 
@@ -211,7 +229,10 @@ Install with `cargo install --path .`, or use `cargo run --release --` in place 
 
 ### Requirements
 
-- **Rust** (edition 2024).
+- **Rust**, the pinned nightly in [`rust-toolchain.toml`](rust-toolchain.toml): `rustfmt.toml` uses
+  unstable options. `rustup` installs it, with `rustfmt` and `clippy`, the first time a command
+  runs in the checkout. The Nix shell in [`devenv.nix`](devenv.nix) uses the same rustup
+  toolchain, so it builds with the same compiler.
 - **ffmpeg** with libx264, for video.
 - **A narrator.** macOS `say` by default, or any TTS command (see [Voices](#voices)).
 
@@ -457,7 +478,7 @@ id = "<voice id>"
 
 `fables voice providers` shows which providers can speak right now, `fables voice list` the macOS voices, and `fables voice audition <id> "<line>" --mood cross` speaks a line in a character's voice (or `narrator`) into `out/voices/`. Over MCP, `voice_providers`, `voice_list`, `voice_cast` and `voice_audition` do the same, and auditions come back as audio.
 
-Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Resolve keys with Monosecret once per batch: `msr --reason "voice the books" fables all worlds/kerfuffle`.
+Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Give the run the provider's key in its environment, for one batch: `ELEVENLABS_API_KEY=<key> fables all worlds/kerfuffle`.
 
 Sourcing voices, provider prices and policies, local models, human actors and keeping characters consistent are all in [`docs/tv-show.md`](docs/tv-show.md).
 
@@ -513,6 +534,16 @@ styles/           drawing styles: style.toml, kit and template per look
 docs/             the five-minute guide, voices and turning the books into a show
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```
+
+## Licence
+
+The code is released into the public domain under the [Unlicense](LICENSE). The Kerfuffle series'
+story text, character names and designs, the series bible and the puppet drawings under
+[`worlds/kerfuffle/`](worlds/kerfuffle) are copyright Ifiok Jr., all rights reserved; they are
+included so the tool can be seen working on a real series, and
+[`worlds/kerfuffle/LICENSE`](worlds/kerfuffle/LICENSE) says what that means. Every other world under
+[`worlds/`](worlds) is an example released with the code. The fonts in [`assets/fonts/`](assets/fonts)
+are under the SIL Open Font License, with their licence files beside them.
 
 ## Known limits
 

@@ -35,10 +35,10 @@ name = "coral"
 style = "A warm, brisk British mum who is running out of patience."
 ```
 
-API keys are read from `ELEVENLABS_API_KEY` and `OPENAI_API_KEY`. Resolve them once for the whole batch with Monosecret:
+API keys are read from `ELEVENLABS_API_KEY` and `OPENAI_API_KEY`. Put the provider's key in the environment for the run:
 
 ```bash
-msr --reason "voice the Kerfuffle episodes" fables all worlds/kerfuffle
+ELEVENLABS_API_KEY=<key> fables all worlds/kerfuffle
 ```
 
 A failed API call is reported once and never retried in a loop.

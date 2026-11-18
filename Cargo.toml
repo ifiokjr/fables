@@ -5,6 +5,7 @@ authors = ["Ifiok Jr. <ifiokotung@gmail.com>"]
 description = "Turn a plain-text picture-book script into an ePub, a KDP print book and narrated videos."
 edition = "2024"
 license = "Unlicense"
+repository = "https://github.com/ifiokjr/fables"
 publish = false
 rust-version = "1.88.0"
 

@@ -104,12 +104,14 @@ pub struct World {
 	/// The folder the world lives in.
 	pub dir: PathBuf,
 	pub name: String,
+	/// The author credited in the world's books, unless a script names its own, and the author
+	/// `fables new` puts on the title page, unless `--author` names one (`world.toml`:
+	/// `author = "Ifiok Jr."`).
+	pub author: Option<String>,
 	/// The style pack its puppets are drawn in (see [`StylePack`]).
 	pub style: String,
 	/// A few sentences on the world: where it is, its rule, its tone.
 	pub about: Option<String>,
-	/// The author credited in the world's books, unless a script names its own.
-	pub author: Option<String>,
 	/// Who reads the books aloud, unless a script names its own `[voice]`.
 	pub narrator: Option<Voice>,
 	/// The light the world's books start in, unless a book names its own (`world.toml`:
@@ -147,13 +149,14 @@ impl Default for Matter {
 #[serde(deny_unknown_fields)]
 struct Entry {
 	name: String,
+	/// The author credited in every book of the world, unless a script names its own; also the
+	/// author `fables new` signs a new book with.
+	#[serde(default)]
+	author: Option<String>,
 	#[serde(default = "default_style")]
 	style: String,
 	#[serde(default)]
 	about: Option<String>,
-	/// The author credited in every book of the world, unless a script names its own.
-	#[serde(default)]
-	author: Option<String>,
 	#[serde(default)]
 	light: Option<String>,
 	/// The audience its books are read aloud to, unless a book names its own.
@@ -209,9 +212,9 @@ impl World {
 		Ok(World {
 			dir: dir.to_path_buf(),
 			name: entry.name,
+			author: entry.author,
 			style: entry.style,
 			about: entry.about,
-			author: entry.author,
 			light,
 			age: entry.age,
 			narrator: entry.narrator,
@@ -495,6 +498,16 @@ mod tests {
 		let odd = world(dir.path(), "odd", "style = \"vaporwave\"\n");
 		let error = format!("{:#}", World::load(&odd).unwrap_err());
 		assert!(error.contains("unknown drawing style"), "{error}");
+	}
+
+	#[test]
+	fn a_world_names_the_author_of_its_new_books() {
+		let dir = tempfile::tempdir().unwrap();
+		let plain = World::load(&world(dir.path(), "plain", "")).unwrap();
+		assert_eq!(plain.author, None);
+
+		let signed = World::load(&world(dir.path(), "signed", "author = \"Ifiok Jr.\"\n")).unwrap();
+		assert_eq!(signed.author.as_deref(), Some("Ifiok Jr."));
 	}
 
 	#[test]
