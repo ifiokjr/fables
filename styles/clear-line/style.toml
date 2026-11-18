@@ -116,6 +116,9 @@ leg-profile = [30.0, 28.0, 25.0, 21.0, 23.5, 19.0, 15.0]
 arm-profile = [21.0, 19.5, 17.0, 14.5, 16.0, 13.0, 10.5]
 floor = true
 
+# A stout build fills out the slim body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
+
 [bodies.kid.limbs]
 pelvis-y = -270.0
 ankle-y = -24.0
@@ -142,6 +145,9 @@ leg-profile = [38.0, 35.0, 30.0, 25.0, 28.0, 23.0, 18.0]
 arm-profile = [25.0, 23.0, 20.0, 17.0, 19.0, 15.0, 12.5]
 foot-scale = 1.3
 floor = true
+
+# A stout build fills out the slim body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
 
 [bodies.grown-up.limbs]
 pelvis-y = -460.0
