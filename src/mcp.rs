@@ -598,7 +598,8 @@ impl StudioServer {
 	#[tool(
 		description = "Write a book's script (the whole story.md) into a world and check it \
 		               against the cast. A script that doesn't parse or rehearse is not kept; the \
-		               error says what to fix, by line."
+		               error says what to fix, by line. The story belongs to the world it is \
+		               written into, so its front matter may not name a `world`."
 	)]
 	fn story_write(&self, Parameters(params): Parameters<WriteStoryParams>) -> CallToolResult {
 		json(

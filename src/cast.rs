@@ -95,6 +95,10 @@ pub struct Member {
 	/// The character's own voice for dialogue, consistent across every book.
 	pub voice: Option<Voice>,
 	pub kind: Kind,
+	/// The cast fields only the parametric puppet reads (`hair`, `head`, `body`, `nose`,
+	/// `mouth`), named. They are ignored when the character is drawn from parts, and `check`
+	/// says so once per member.
+	pub parametric_fields: Vec<&'static str>,
 }
 
 /// A visitor from another world, invited by a script's front matter (`guests = ["world/id"]`).
@@ -106,13 +110,6 @@ pub struct Guest {
 	pub world: String,
 	/// Their cast entry in that world, built with that world's style.
 	pub member: Member,
-}
-
-impl Guest {
-	/// How directions name them when their id clashes with a local cast member: `world.id`.
-	pub fn qualified(&self) -> String {
-		format!("{}.{}", self.world, self.member.id)
-	}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -171,13 +168,40 @@ struct Entry {
 	flower: Option<String>,
 	#[serde(default)]
 	voice: Option<Voice>,
-	/// An authored puppet's part file, relative to the cast file.
+	/// The character's drawing: an authored puppet's part file, relative to the cast file, or
+	/// `"parametric"` for the older puppet. Without a line they are drawn from their drawing
+	/// style's template, in their own colours.
 	#[serde(default)]
-	puppet: Option<PathBuf>,
+	puppet: Option<String>,
 }
+
+/// The `puppet` value that asks for the older parametric puppet.
+pub const PARAMETRIC: &str = "parametric";
 
 fn default_kind() -> String {
 	"kid".to_owned()
+}
+
+impl Entry {
+	/// The cast fields only the parametric puppet reads, which an authored (or template-drawn)
+	/// character ignores.
+	fn parametric_fields(&self) -> Vec<&'static str> {
+		let mut fields = Vec::new();
+
+		for (set, name) in [
+			(self.hair.is_some(), "hair"),
+			(self.head.is_some(), "head"),
+			(self.body.is_some(), "body"),
+			(self.nose.is_some(), "nose"),
+			(self.mouth.is_some(), "mouth"),
+		] {
+			if set {
+				fields.push(name);
+			}
+		}
+
+		fields
+	}
 }
 
 impl Cast {
@@ -205,6 +229,7 @@ impl Cast {
 		for (id, entry) in entries {
 			let kind = build_kind(&id, &entry, dir, style)
 				.with_context(|| format!("cast member `{id}`"))?;
+			let parametric_fields = entry.parametric_fields();
 
 			if let Some(voice) = &entry.voice {
 				voice
@@ -222,6 +247,7 @@ impl Cast {
 					about: entry.about,
 					voice: entry.voice,
 					kind,
+					parametric_fields,
 				},
 			);
 		}
@@ -431,9 +457,15 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 		})
 		.collect::<Result<Vec<_>>>()?;
 
-	let puppet = match &entry.puppet {
-		Some(file) => Some(Authored::load(&dir.join(file), style)?),
-		None => None,
+	let puppet = match entry.puppet.as_deref() {
+		Some(PARAMETRIC) => None,
+		Some(file) => {
+			Some(Authored::load(
+				&crate::world::under(dir, "puppet", file)?,
+				style,
+			)?)
+		}
+		None => Some(Authored::from_template(style)?),
 	};
 
 	Ok(Look {
@@ -519,6 +551,7 @@ colour = "#c9865a"
 					)
 					.unwrap(),
 				),
+				parametric_fields: Vec::new(),
 			}
 		};
 
@@ -605,10 +638,86 @@ colour = "#c9865a"
 		};
 		let puppet = look.puppet.expect("the kid has a puppet");
 		assert_eq!(puppet.file, dir.path().join("puppets/stinky.svg"));
+		assert!(!puppet.template, "a part file is not the template");
 		assert!(puppet.parts.get("head.front").is_some());
 		assert!(
 			puppet.parts.get("hand-fist").is_some(),
 			"kit parts come along"
+		);
+	}
+
+	#[test]
+	fn a_puppet_file_must_live_beside_the_cast_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("cast.toml");
+
+		for puppet in ["../outside.svg", "/etc/passwd", "puppets/../../outside.svg"] {
+			std::fs::write(
+				&path,
+				format!("[kid]\nname = \"Kid\"\npuppet = \"{puppet}\"\n"),
+			)
+			.unwrap();
+			let error = format!(
+				"{:#}",
+				Cast::load(&path, &StylePack::default_pack()).unwrap_err()
+			);
+			assert!(
+				error.contains("puppet name") && error.contains(puppet),
+				"{puppet}: {error}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_character_without_a_puppet_is_drawn_from_the_style_template() {
+		let style = StylePack::named("chibi").unwrap();
+		let cast = Cast::parse_in(
+			"[pip]\nname = \"Pip\"\nskin = \"teal\"\nhair = \"bun\"\n",
+			Path::new(""),
+			&style,
+		)
+		.unwrap();
+		let Kind::Figure(look) = cast.resolve("pip").unwrap() else {
+			panic!("pip is a person");
+		};
+		let puppet = look
+			.puppet
+			.expect("a template-drawn character is drawn from parts");
+		assert!(puppet.template, "no file of their own yet");
+		assert_eq!(puppet.style.name, "chibi");
+		assert_eq!(
+			puppet.parts.get("head.front"),
+			style.template.get("head.front")
+		);
+		assert!(
+			puppet.parts.get("hand-fist").is_some(),
+			"the style's kit comes along"
+		);
+		assert_eq!(
+			cast.member("pip").unwrap().parametric_fields,
+			vec!["hair"],
+			"the fields only the parametric puppet reads are named"
+		);
+
+		let cartoon = Cast::parse("[stinky]\nname = \"Stinky\"\n").unwrap();
+		let Kind::Figure(look) = cartoon.resolve("stinky").unwrap() else {
+			panic!("stinky is a person");
+		};
+		assert!(
+			look.puppet.is_some_and(|puppet| puppet.template),
+			"the default cast is drawn from the cartoon template"
+		);
+	}
+
+	#[test]
+	fn the_parametric_puppet_is_asked_for_by_name() {
+		let cast = Cast::parse("[old]\nname = \"Old\"\npuppet = \"parametric\"\n").unwrap();
+		let Kind::Figure(look) = cast.resolve("old").unwrap() else {
+			panic!("old is a person");
+		};
+		assert!(
+			look.puppet.is_none(),
+			"`puppet = \"parametric\"` still draws the old puppet"
 		);
 	}
 }

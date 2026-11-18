@@ -23,6 +23,7 @@ use std::process::Stdio;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use rayon::prelude::*;
 
 use crate::cast::Cast;
@@ -35,6 +36,23 @@ use crate::video::timeline::Timeline;
 
 /// Frames rendered together before being handed to ffmpeg in order.
 const BATCH: usize = 48;
+
+/// The longest video fables will make: half an hour. The frame count and the soundtrack are
+/// sized from the timeline's duration, so no script may ask for more than this.
+pub const MAX_SECONDS: f32 = 30.0 * 60.0;
+
+/// Refuses a timeline too long to be a book's video, before anything is allocated from its
+/// duration.
+pub fn check_length(duration: f32) -> Result<()> {
+	ensure!(
+		duration.is_finite() && duration <= MAX_SECONDS,
+		"the video would run {duration:.0}s; fables makes videos of at most {MAX_SECONDS:.0} \
+		 seconds (30 minutes): trim the script with `~` book-only paragraphs, or shorten a \
+		 `@pause` or `@hold`"
+	);
+
+	Ok(())
+}
 
 /// Options for a video build.
 #[derive(Clone, Copy, Debug)]
@@ -75,6 +93,7 @@ pub fn make(
 	options: Options,
 	dir: &Path,
 ) -> Result<Vec<PathBuf>> {
+	check_length(timeline.duration)?;
 	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
 
 	let soundtrack = dir.join("soundtrack.wav");
@@ -332,5 +351,47 @@ mod tests {
 		assert_eq!(stamp(0.0), "00:00:00,000");
 		assert_eq!(stamp(83.4567), "00:01:23,457");
 		assert_eq!(stamp(3725.0), "01:02:05,000");
+	}
+
+	/// A timeline longer than fables will make, built without recording a word.
+	fn long_video() -> (Story, Timeline) {
+		let pages: String = (0..31).map(|_| "# park\n@pause 60\n").collect();
+		let story = crate::story::parse(&format!(
+			"+++\ntitle = \"Long\"\nauthor = \"A\"\n+++\n{pages}"
+		))
+		.unwrap();
+		let cast = Cast::default();
+		let rehearsals = rehearse(&story, &cast).unwrap();
+		let timeline = timeline::build(&story, &cast, &rehearsals, |_| {
+			Ok(voice::Speech {
+				text: String::new(),
+				samples: Vec::new(),
+				envelope: Vec::new(),
+				track: lipsync::Track::default(),
+			})
+		})
+		.unwrap();
+
+		(story, timeline)
+	}
+
+	#[test]
+	fn a_video_longer_than_half_an_hour_is_refused_before_it_allocates() {
+		let (story, timeline) = long_video();
+		assert!(timeline.duration > MAX_SECONDS, "{}", timeline.duration);
+
+		let dir = tempfile::tempdir().unwrap();
+		let video = dir.path().join("video");
+		let error = format!(
+			"{:#}",
+			make(&story, &timeline, &[], Options { preview: true }, &video).unwrap_err()
+		);
+		assert!(error.contains("30 minutes"), "{error}");
+		assert!(!video.exists(), "nothing is made for a refused video");
+
+		let soundtrack = dir.path().join("soundtrack.wav");
+		let error = format!("{:#}", audio::write(&timeline, &soundtrack).unwrap_err());
+		assert!(error.contains("30 minutes"), "{error}");
+		assert!(!soundtrack.exists(), "no soundtrack is allocated");
 	}
 }

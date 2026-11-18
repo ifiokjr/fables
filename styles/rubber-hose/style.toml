@@ -4,6 +4,7 @@
 # stretch and overshoot, with everyone bobbing to the beat on twos.
 name = "rubber-hose"
 description = "Early animated cartoons: round heads, pie-cut eyes, white four-finger gloves, bendy hose limbs, a thick even black line, flat colour, and bouncy squash and stretch on twos."
+skin = "riso"
 
 [finish]
 line = 6.0              # one thick, even black line

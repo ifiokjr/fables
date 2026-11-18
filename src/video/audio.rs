@@ -183,6 +183,11 @@ impl Sound {
 		("heartbeat", Sound::Heartbeat),
 	];
 
+	/// The names, for error messages that list the options.
+	pub fn names() -> String {
+		Self::ALL.map(|(name, _)| name).join(", ")
+	}
+
 	pub fn parse(name: &str) -> Option<Sound> {
 		Self::ALL
 			.iter()
@@ -1265,6 +1270,7 @@ pub fn render(timeline: &Timeline) -> Soundtrack {
 
 /// Renders the full soundtrack and writes it as 48 kHz 16-bit stereo WAV.
 pub fn write(timeline: &Timeline, path: &Path) -> Result<()> {
+	super::check_length(timeline.duration)?;
 	let Soundtrack { mix, .. } = render(timeline);
 	let peak = mix.iter().fold(0.0_f32, |peak, s| peak.max(s.abs()));
 	let scale = if peak > 0.95 { 0.95 / peak } else { 1.0 };

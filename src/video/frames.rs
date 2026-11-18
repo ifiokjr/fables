@@ -320,6 +320,8 @@ impl<'a> Renderer<'a> {
 			motion,
 			lines: self.spoken_lines(shot),
 			key_time: current.time,
+			// A dead stop freezes the idle movement as well as the sound.
+			hold: self.timeline.in_hold(time),
 		};
 		let mut puppets = Vec::with_capacity(after.len());
 
