@@ -42,8 +42,8 @@ use crate::studio::WorldBrief;
 const GUIDE: &str = include_str!("../docs/directing.md");
 
 /// The guide's topics, which are its `##` headings.
-const GUIDE_TOPICS: [&str; 8] = [
-	"overview", "story", "staging", "camera", "light", "acting", "mixing", "workflow",
+const GUIDE_TOPICS: [&str; 9] = [
+	"overview", "story", "staging", "camera", "light", "acting", "mixing", "sound", "workflow",
 ];
 
 /// The guide's `##` sections, as (heading, body), in file order.
@@ -83,7 +83,7 @@ Changes that would break a figure are refused with the part check's findings. A 
 
 To make a book:
 1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
-                            mixing and workflow.
+                            mixing, sound and workflow.
 2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
 3. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
                             pages that start `# setting`, with narration and `@actor` stage \
@@ -110,7 +110,7 @@ pub struct StyleParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GuideParams {
-	/// The topic: overview, story, staging, camera, light, acting, mixing or workflow. Leave
+	/// The topic: overview, story, staging, camera, light, acting, mixing, sound or workflow. Leave
 	/// it out for the overview and the topic list.
 	pub topic: Option<String>,
 }
@@ -415,8 +415,8 @@ impl StudioServer {
 
 	#[tool(
 		description = "The director's guide, by topic: overview, story, staging, camera, light, \
-		               acting, mixing or workflow. No topic returns the overview and the topic \
-		               list. Read it before directing a book or a cartoon."
+		               acting, mixing, sound or workflow. No topic returns the overview and the \
+		               topic list. Read it before directing a book or a cartoon."
 	)]
 	#[expect(
 		clippy::unused_self,

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2080">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2080" data-ambience="crowd,room" data-indoors="true">
   <title>Stage: a little theatre with red curtains, a painted backdrop, floorboards, footlights and a spotlight</title>
   <path id="far-backdrop" d="M-160 -160 Q1242.2 -160 2560 -160 Q2560 755 2560 1660 Q1167.1 1660 -160 1660 Q-160 849.6 -160 -160 Z" fill="sky" data-night="night" data-line="none"/>
   <path id="far-sun" d="M1613.9 875.1 C1589.6 867.5 1562.9 845.9 1549.6 824.2 C1536.3 802.5 1530.7 770.3 1533.9 744.9 C1537.1 719.5 1550.5 689.3 1568.9 671.8 C1587.3 654.3 1618.9 641.1 1644.5 639.9 C1670.2 638.7 1702.4 649 1722.9 664.7 C1743.4 680.3 1761.9 708.5 1767.7 733.7 C1773.5 758.9 1769.7 793.2 1757.7 815.8 C1745.7 838.5 1719.6 859.7 1695.6 869.6 C1671.7 879.5 1638.3 882.6 1613.9 875.1 Z" fill="sunflower" data-time="day"/>

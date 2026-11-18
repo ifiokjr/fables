@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2060">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2060" data-ambience="birds,breeze">
   <title>Garden: a picket fence round a flower bed of flowers with faces, a striped lawn and the neighbours&apos; roofs</title>
   <path id="far-sky" d="M-160 -160 Q1050.4 -160 2560 -160 Q2560 704.3 2560 1650 Q1064.9 1650 -160 1650 Q-160 762.1 -160 -160 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="1200" cy="1510" data-glow="1500 white 0.5" data-time="day"/>

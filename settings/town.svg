@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2090">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2090" data-ambience="birds,crowd">
   <title>Town: crooked painted houses climbing the hill to the leaning clock tower, with a sandy path winding up</title>
   <path id="far-sky" d="M-160 -160 Q1341.5 -160 2560 -160 Q2560 796 2560 1700 Q1206.4 1700 -160 1700 Q-160 867.1 -160 -160 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="1200" cy="1560" data-glow="1500 white 0.5" data-time="day"/>
