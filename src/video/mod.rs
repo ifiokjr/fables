@@ -80,13 +80,31 @@ pub fn plan(story: &Story, cast: &Cast, cache: &Path) -> Result<Timeline> {
 		voice::speak(line, cache)
 	})?;
 
+	let own_voices = cast.members.values().any(|member| member.voice.is_some());
 	eprintln!(
-		"  voiced {spoken} lines ({} character voices), {:.0}s total",
-		characters.len(),
-		timeline.duration
+		"  {}",
+		voiced_summary(
+			spoken,
+			characters.len(),
+			timeline.duration,
+			story.meta.video.cast_voices && !own_voices
+		)
 	);
 
 	Ok(timeline)
+}
+
+/// The line a build prints once the story is narrated. `narrator_only` is a book that asks for
+/// cast voices in a world where nobody has one: it says why no character spoke.
+fn voiced_summary(spoken: usize, characters: usize, seconds: f32, narrator_only: bool) -> String {
+	let why = if narrator_only {
+		"; `cast-voices` is on but no cast member has a voice of their own, so the narrator reads \
+		 everything (give one a voice with a `[<id>.voice]` table in the cast file)"
+	} else {
+		""
+	};
+
+	format!("voiced {spoken} lines ({characters} character voices), {seconds:.0}s total{why}")
 }
 
 /// Builds the soundtrack, captions file and one MP4 per format. Returns the video paths.
@@ -743,6 +761,19 @@ impl Drop for Scratch {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn the_voiced_line_says_why_nobody_has_a_character_voice() {
+		let plain = voiced_summary(12, 2, 61.4, false);
+		assert_eq!(plain, "voiced 12 lines (2 character voices), 61s total");
+
+		let narrator = voiced_summary(12, 0, 61.4, true);
+		assert!(narrator.starts_with(&voiced_summary(12, 0, 61.4, false)));
+		assert!(
+			narrator.contains("no cast member has a voice of their own"),
+			"{narrator}"
+		);
+	}
 
 	#[test]
 	fn srt_timestamps_are_well_formed() {
