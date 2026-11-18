@@ -968,6 +968,23 @@ mod tests {
 	}
 
 	#[test]
+	fn unknown_props_and_eyelines_are_reported_with_line_numbers() {
+		let error = run("# park\n@stinky holds=unicorn\n").unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 6"), "{message}");
+		assert!(message.contains("unknown prop `unicorn`"), "{message}");
+		assert!(
+			message.contains("kite-spool"),
+			"it lists the props: {message}"
+		);
+
+		let error = run("# park\n@stinky\n@mum see=moon\n").unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 7"), "{message}");
+		assert!(message.contains("see `moon`"), "{message}");
+	}
+
+	#[test]
 	fn a_kid_stands_as_tall_in_every_style() {
 		let staged = |style: &str, build: Build| {
 			let look =
