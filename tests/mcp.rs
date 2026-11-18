@@ -413,3 +413,86 @@ fn an_agent_invites_a_guest_from_another_world() {
 	);
 	assert_eq!(kept["isError"], true, "the refused story is not kept");
 }
+
+/// The storyboard's shot list, pinning and the animatic, over the protocol.
+#[test]
+fn an_agent_pins_the_plan_and_cuts_an_animatic() {
+	let root = tempfile::tempdir().unwrap();
+	let mut session = Session::start(root.path());
+
+	session.json(
+		"world_create",
+		&json!({ "name": "Nibbleton", "about": "A town of small habits." }),
+	);
+	session.json(
+		"character_create",
+		&json!({
+			"world": "nibbleton",
+			"character": {
+				"id": "nell", "name": "Nell Nibbles", "habit": "Nibbles her nails.",
+				"colours": {
+					"skin": "#f4c766", "hair": "#7a4a35", "top": "#ec7aa6", "trim": "#fff8ef",
+					"bottom": "#2e9a90", "shoes": "#7a5cb8", "eyes": "#5d9e5a"
+				}
+			}
+		}),
+	);
+	session.json(
+		"story_write",
+		&json!({
+			"world": "nibbleton",
+			"story": "nell-nibbles",
+			"script": "+++\ntitle = \"Nell Nibbles\"\nauthor = \"A\"\nstar = \"nell\"\n+++\n# park\n@nell x=0.5 happy wave\nNell nibbled her nails, and waited for the bus.\n"
+		}),
+	);
+
+	// The board and its text shot list.
+	let board = session.call(
+		"storyboard_render",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles" }),
+	);
+	let list = board[0]["text"].as_str().unwrap();
+	assert!(list.contains("shot list (landscape)"), "{list}");
+	assert!(list.contains("| # | page | line |"), "{list}");
+	assert!(
+		board.iter().any(|block| {
+			block["type"] == "image" && block["data"].as_str().unwrap().len() > 10_000
+		}),
+		"the board comes back as an image"
+	);
+
+	// Pin the plan into the script, then take exactly those lines out again.
+	let pinned = session.json(
+		"storyboard_pin",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles" }),
+	);
+	let count = pinned["pinned"].as_u64().unwrap();
+	assert!(count > 0, "{pinned}");
+	assert!(
+		pinned["script"].as_str().unwrap().contains("// pinned"),
+		"{pinned}"
+	);
+
+	let unpinned = session.json(
+		"storyboard_pin",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles", "unpin": true }),
+	);
+	assert_eq!(unpinned["unpinned"].as_u64(), Some(count), "{unpinned}");
+	assert!(!unpinned["script"].as_str().unwrap().contains("// pinned"));
+
+	// The animatic is written where the report says, and its shot list reads.
+	let animatic = session.json(
+		"animatic_render",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles" }),
+	);
+	let file = root.path().join(animatic["file"].as_str().unwrap());
+	assert!(file.is_file(), "{file:?}");
+	assert!(animatic["seconds"].as_f64().unwrap() > 0.0, "{animatic}");
+	assert!(
+		animatic["shot_list"]
+			.as_str()
+			.unwrap()
+			.contains("shot list"),
+		"{animatic}"
+	);
+}
