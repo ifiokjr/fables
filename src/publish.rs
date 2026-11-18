@@ -289,8 +289,8 @@ pub fn review(story: &Story, cast: &Cast, out: &Path) -> Result<Vec<crate::revie
 }
 
 /// Characters a second a voice reads at the default 165 words a minute, measured on the
-/// recorded takes of The Visitor, Mo Mumble and Stinky McStinkbreath: characters vary far less
-/// than words do from one line to the next.
+/// recorded takes of The Visitor, Mo Mumble and Stinky: characters vary far less than words do
+/// from one line to the next.
 const CHARACTERS_A_SECOND: f32 = 16.0;
 
 /// How long a line takes to say without a recording: its characters at the voice's own rate,

@@ -282,8 +282,7 @@ pub fn plan(_story: &Story, timeline: &Timeline, cast: &Cast, portrait: bool) ->
 		row.music = timeline
 			.music
 			.iter()
-			.filter(|cue| cue.time >= row.start - 1e-3 && cue.time < end - 1e-3)
-			.next_back()
+			.rfind(|cue| cue.time >= row.start - 1e-3 && cue.time < end - 1e-3)
 			.map(|cue| cue.music);
 		row.stop = timeline
 			.holds
