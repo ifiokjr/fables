@@ -573,6 +573,7 @@ fn acting_stage(
 		motion: *motion,
 		lines,
 		key_time,
+		hold: false,
 	};
 
 	let speaker =

@@ -26,6 +26,7 @@ use crate::art::props;
 use crate::art::props::Prop;
 use crate::art::rig::Gait;
 use crate::art::rig::Stance;
+use crate::art::settings::Bed;
 use crate::art::settings::Library;
 use crate::art::settings::Setting;
 use crate::art::settings::Weather;
@@ -38,6 +39,7 @@ use crate::story::Story;
 use crate::story::TextPlace;
 use crate::story::Token;
 use crate::story::Transition;
+use crate::video::audio::Music;
 
 /// Where an actor walks in from or off to (video only; stills just show or hide them).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -371,6 +373,18 @@ impl Camera {
 	}
 }
 
+/// Where a scene's ambience beds come from.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Ambience {
+	/// The setting's own beds, plus what the scene's light adds.
+	#[default]
+	Default,
+	/// None at all (`@scene ambience=none`).
+	Off,
+	/// Exactly these beds (`@scene ambience=birds,rain`).
+	Beds(Vec<Bed>),
+}
+
 /// Everything on stage at one moment.
 #[derive(Clone, Debug)]
 pub struct Scene {
@@ -381,6 +395,10 @@ pub struct Scene {
 	pub actors: Vec<Actor>,
 	pub camera: Camera,
 	pub text: TextPlace,
+	/// The scene's music cue (`music=` on a heading or `@scene`), or `None` for the light's.
+	pub music: Option<Music>,
+	/// Where the scene's ambience comes from.
+	pub ambience: Ambience,
 }
 
 impl Scene {
@@ -397,6 +415,8 @@ impl Scene {
 			actors: Vec::new(),
 			camera: Camera::default(),
 			text: page.text_place(),
+			music: None,
+			ambience: Ambience::Default,
 		};
 
 		for token in &page.options {
@@ -417,6 +437,9 @@ impl Scene {
 				}
 				"transition" => {
 					transition(token.value.as_deref(), page.line)?;
+				}
+				"hold" => {
+					page.hold()?;
 				}
 				_ => scene.apply_scene_token(token, page.line)?,
 			}
@@ -543,6 +566,21 @@ impl Scene {
 			("ease", None) => self.camera.travel = Some(Travel::Glide),
 			("over", Some(v)) => self.camera.over = number(token, v, line)?.max(0.0),
 			("shake", Some(v)) => self.camera.shake = number(token, v, line)?.clamp(0.0, 1.0),
+			("music", Some(v)) => {
+				self.music = Some(Music::parse(v).ok_or_else(|| {
+					anyhow::anyhow!("line {line}: unknown music `{v}`; try {}", Music::names())
+				})?);
+			}
+			("ambience", Some(v)) => self.ambience = ambience(v, line)?,
+			("music", None) => {
+				bail!("line {line}: `music` needs a cue; try {}", Music::names());
+			}
+			("ambience", None) => {
+				bail!(
+					"line {line}: `ambience` needs `none` or a bed list; try {} or `none`",
+					Bed::names()
+				);
+			}
 			(key, None) => {
 				// A bare light preset means `light=<preset>`. `night` and `day` keep their
 				// existing bare weather meaning, above.
@@ -552,7 +590,8 @@ impl Scene {
 					bail!(
 						"line {line}: `{token}` is not a scene option; use night, day, light=, a \
 						 light preset ({}), wilt=, stink=, mint=, tint=, speed=, impact=, zoom=, \
-						 look=x,y, shot=, on=, move=, over=, shake=, cut or ease",
+						 look=x,y, shot=, on=, move=, over=, shake=, music=, ambience=, cut or \
+						 ease",
 						Preset::names()
 					)
 				}
@@ -561,7 +600,7 @@ impl Scene {
 				bail!(
 					"line {line}: `{token}` is not a scene option; use night, day, light=, a \
 					 light preset ({}), wilt=, stink=, mint=, tint=, speed=, impact=, zoom=, \
-					 look=x,y, shot=, on=, move=, over=, shake=, cut or ease",
+					 look=x,y, shot=, on=, move=, over=, shake=, music=, ambience=, cut or ease",
 					Preset::names()
 				)
 			}
@@ -612,6 +651,41 @@ fn number(token: &Token, value: &str, line: usize) -> Result<f32> {
 	);
 
 	Ok(parsed)
+}
+
+/// A scene's ambience: `none`, or a comma-separated bed list (`birds,rain`).
+fn ambience(value: &str, line: usize) -> Result<Ambience> {
+	if value.eq_ignore_ascii_case("none") {
+		return Ok(Ambience::Off);
+	}
+
+	let mut beds = Vec::new();
+
+	for name in value
+		.split(',')
+		.map(str::trim)
+		.filter(|name| !name.is_empty())
+	{
+		let bed = Bed::parse(name).with_context(|| {
+			format!(
+				"line {line}: unknown ambience `{name}`; try {} or `none`",
+				Bed::names()
+			)
+		})?;
+
+		if !beds.contains(&bed) {
+			beds.push(bed);
+		}
+	}
+
+	if beds.is_empty() {
+		bail!(
+			"line {line}: `ambience` named no beds; try {} or `none`",
+			Bed::names()
+		);
+	}
+
+	Ok(Ambience::Beds(beds))
 }
 
 /// The page transition named in a heading (`transition=wipe|cut|dissolve|fade|iris|push`).
@@ -917,7 +991,11 @@ pub fn rehearse(story: &Story, cast: &Cast) -> Result<Vec<Rehearsal>> {
 		for beat in &page.beats {
 			match beat {
 				Beat::Direct(directive) => scene.apply(directive, cast, &mut memory)?,
-				Beat::Say { .. } | Beat::Pause { .. } | Beat::Sfx { .. } => {}
+				Beat::Say { .. }
+				| Beat::Pause { .. }
+				| Beat::Sfx { .. }
+				| Beat::Hold { .. }
+				| Beat::Music { .. } => {}
 			}
 
 			after.push(scene.clone());
@@ -1270,6 +1348,59 @@ mod tests {
 	}
 
 	#[test]
+	fn music_and_ambience_are_scene_state() {
+		let scene = run("# park music=tense ambience=birds,rain\n@stinky\n").unwrap();
+		assert_eq!(scene.music, Some(Music::Tense));
+		assert_eq!(scene.ambience, Ambience::Beds(vec![Bed::Birds, Bed::Rain]));
+
+		let scene = run("# park light=storm\n@stinky\n@scene ambience=none\n").unwrap();
+		assert_eq!(scene.music, None, "without a cue the light chooses");
+		assert_eq!(scene.ambience, Ambience::Off);
+
+		let scene = run("# park\n@stinky\n@scene music=sleepy ambience=room\n").unwrap();
+		assert_eq!(scene.music, Some(Music::Sleepy));
+		assert_eq!(scene.ambience, Ambience::Beds(vec![Bed::Room]));
+
+		// A bare light preset names the light, beside the script's own scene words.
+		let scene = run("# street golden\n@stinky\n").unwrap();
+		assert_eq!(scene.weather.light.preset, Preset::Golden);
+		let scene = run("# park\n@stinky\n@scene moonlit\n").unwrap();
+		assert_eq!(scene.weather.light.preset, Preset::Moonlit);
+	}
+
+	#[test]
+	fn a_bad_cue_or_bed_names_the_line_and_the_choices() {
+		let error = run("# park music=loud\n").unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 5"), "{message}");
+		assert!(message.contains("unknown music `loud`"), "{message}");
+		assert!(message.contains("sleepy"), "{message}");
+
+		let error = run("# park\n@stinky\n@scene ambience=seagulls\n").unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 7"), "{message}");
+		assert!(message.contains("unknown ambience `seagulls`"), "{message}");
+		assert!(message.contains("crickets"), "{message}");
+
+		let error = run("# park music\n").unwrap_err();
+		assert!(
+			format!("{error:#}").contains("`music` needs a cue"),
+			"{error:#}"
+		);
+	}
+
+	#[test]
+	fn a_page_hold_is_checked_before_anything_renders() {
+		let error = run("# park hold=soon\n").unwrap_err();
+		let message = format!("{error:#}");
+		assert!(message.contains("line 5"), "{message}");
+		assert!(message.contains("not a number"), "{message}");
+
+		let scene = run("# park hold=1.5\n").unwrap();
+		assert_eq!(scene.text, TextPlace::Top);
+	}
+
+	#[test]
 	fn every_number_a_script_supplies_is_finite() {
 		for value in ["nan", "inf", "-inf"] {
 			for script in [
@@ -1308,7 +1439,7 @@ mod tests {
 			Some("0.9")
 		);
 		assert!(page.flag("no-wormsley"));
-		Scene::for_page(page, &story.settings).unwrap();
+		Scene::for_page(page, &story.settings, &story.props).unwrap();
 	}
 
 	#[test]

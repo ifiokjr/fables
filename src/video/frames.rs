@@ -45,6 +45,7 @@ use crate::video::audio::Sound;
 use crate::video::director;
 use crate::video::director::View;
 use crate::video::timeline::Framing;
+use crate::video::timeline::Line;
 use crate::video::timeline::Setup;
 use crate::video::timeline::Shot;
 use crate::video::timeline::ShotKind;
@@ -320,6 +321,8 @@ impl<'a> Renderer<'a> {
 			motion,
 			lines: self.spoken_lines(shot),
 			key_time: current.time,
+			// A dead stop freezes the idle movement as well as the sound.
+			hold: self.timeline.in_hold(time),
 		};
 		let mut puppets = Vec::with_capacity(after.len());
 
@@ -896,10 +899,11 @@ impl<'a> Renderer<'a> {
 	}
 
 	fn captions(&self, svg: &mut Svg, shot: &Shot, time: f32) {
-		let Some(line) = shot.lines.iter().find(|line| {
-			let duration = self.timeline.speeches[line.speech].duration();
-			time >= line.start && time < line.start + duration + 0.3
-		}) else {
+		let Some(line) = caption_line(
+			&shot.lines,
+			|speech| self.timeline.speeches[speech].duration(),
+			time,
+		) else {
 			return;
 		};
 
@@ -1218,6 +1222,22 @@ fn tallest_view(format: Format) -> f32 {
 // Arrivals, leaves, walk cycles, hops, follow-through, smears and everything else between
 // keyframes live in [`acting`](crate::video::acting), the performance layer.
 
+/// The line whose caption is up at `time`. A cue stops when the next line's audio begins, so a
+/// character's quoted words and the narrator's following sentence are two cues at the boundary
+/// the audio already has, and a cue never mixes two speakers.
+fn caption_line(lines: &[Line], duration: impl Fn(usize) -> f32, time: f32) -> Option<&Line> {
+	lines.iter().find(|line| {
+		let next = lines
+			.iter()
+			.filter(|other| other.start > line.start + 1e-3)
+			.map(|other| other.start)
+			.fold(f32::INFINITY, f32::min);
+		let until = (line.start + duration(line.speech) + 0.3).min(next);
+
+		time >= line.start && time < until
+	})
+}
+
 /// Splits a paragraph into caption-sized pieces, preferring breaks after punctuation.
 fn chunk(text: &str, limit: usize) -> Vec<String> {
 	let mut chunks: Vec<String> = Vec::new();
@@ -1315,6 +1335,51 @@ fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_caption_cue_never_runs_into_another_speaker() {
+		let line = |start: f32, speech: usize, voiced_by: Option<&str>, text: &str| {
+			Line {
+				start,
+				speech,
+				duration: 0.0,
+				speakers: voiced_by.map(|id| vec![id.to_owned()]).unwrap_or_default(),
+				text: text.to_owned(),
+				voiced_by: voiced_by.map(str::to_owned),
+			}
+		};
+		let lines = vec![
+			line(1.0, 0, Some("kid"), "\u{201c}Nope.\u{201d}"),
+			line(1.68, 1, None, "said Kid."),
+		];
+		let duration = |speech: usize| if speech == 0 { 0.5 } else { 0.4 };
+
+		// The quote is up while its own audio plays, and through its beat of silence.
+		assert_eq!(
+			caption_line(&lines, duration, 1.0)
+				.unwrap()
+				.voiced_by
+				.as_deref(),
+			Some("kid")
+		);
+		assert_eq!(
+			caption_line(&lines, duration, 1.67)
+				.unwrap()
+				.voiced_by
+				.as_deref(),
+			Some("kid")
+		);
+
+		// From the instant the narrator's tag begins, its cue is up: never two speakers at once.
+		assert_eq!(
+			caption_line(&lines, duration, 1.68).unwrap().voiced_by,
+			None
+		);
+		assert_eq!(caption_line(&lines, duration, 2.3).unwrap().voiced_by, None);
+		// And the last line's caption keeps its 0.3 s tail.
+		assert!(caption_line(&lines, duration, 2.37).is_some());
+		assert!(caption_line(&lines, duration, 2.4).is_none());
+	}
 
 	#[test]
 	fn captions_split_on_phrases_and_keep_markup_balanced() {

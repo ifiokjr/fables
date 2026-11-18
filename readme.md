@@ -67,6 +67,7 @@ name = "Kerfuffle"
 author = "Ifiok Jr."        # optional: the author of its books, and the default for `fables new`
 style = "cartoon"           # optional: the drawing style its folk are drawn in (default cartoon)
 light = "golden"            # optional: the light every page starts in (default day)
+age = "3-5"                 # optional: who its books are read aloud to (under-3, 3-5, 5-7)
 
 [narrator]                  # optional: who reads every book aloud, unless a script names its own [voice]
 name = "Daniel"
@@ -158,6 +159,8 @@ A setting is an SVG file of named parts on the square stage (2400 units, with 16
 | `data-depth` | 0 to 1: far things fade into the sky and lose line. |
 | `data-dots` | A riso dot screen: `colour spacing radius opacity`. |
 | `data-drift`, `data-swing` | Clouds drift sideways; a swing swings from its pivot (`x y`). |
+| `data-ambience` | Sound beds the place adds to the video (`birds,breeze`): `birds`, `breeze`, `waves`, `rain`, `wind`, `crickets`, `room`, `crowd`. The scene's light adds its own (`storm` brings rain and wind, `night` and `moonlit` bring crickets). |
+| `data-indoors` | On the root: the place is inside, so night's crickets stay outside. |
 
 `<circle data-sparkle="size colour">` twinkles, and `<circle data-critter="flower|tree" r="height" data-colour data-seed>` places one of the living plants, which have faces and wilt. The root `<svg>` sets `data-ground`, where actors stand.
 
@@ -204,7 +207,7 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 
 | Tool | What it does |
 | --- | --- |
-| `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, workflow. |
+| `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, sound, workflow. |
 | `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences, a drawing style and an author, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
 | `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space, the drawing rules and the page skin the style prints in; the kit as an image. |
 | `character_create` | A new cast member from who they are and their colours, drawn from the style's template. `draw` also writes their part file. |
@@ -284,6 +287,7 @@ A script is TOML front matter between `+++` lines, then pages. Each page starts 
 title = "Stinky McStinkbreath"
 author = "Ifiok Jr."
 star = "stinky"                 # who goes on the cover
+age = "3-5"                     # who it is read aloud to: under-3, 3-5 or 5-7
 moral = "Brush your teeth, morning and night."
 
 [cover]
@@ -298,6 +302,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 @stinky talk
 "**NOPE**," said Stanley.
 ```
+
+`age` sets how the book is read aloud: the narration rate (about 125, 135 and 150 words a minute for `under-3`, `3-5` and `5-7`), the gaps between lines and the tail after a page, and how long a page in a new place is seen before it is talked over. A world sets a default in its `world.toml`, a book's own `age` wins, and a narrator with an explicit `rate` keeps it. A book with no `age` anywhere keeps the older, brisker timing (165 words a minute), so its video does not change; `fables check` suggests one.
 
 - **In the book**, each page shows the stage *at the end of the page*. The text sits on a paper card, at the top unless the heading says `text=bottom`.
 - **In the video**, each `@` line takes effect *when the narrator reaches it*. Above, Mum points and talks during the first line; Stanley crosses his arms and his mouth moves during the second.
@@ -328,6 +334,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | `zoom=1.5 look=0.5,0.6` | A close-up on the point (x, y), as fractions of the page. |
 | `shot=… on=…` | A shot size that frames the still illustration: `wide`, `full`, `medium`, `close` or `extreme-close` on the actors named by `on=` (comma-separated ids; empty means everyone on stage, or whoever speaks for a close shot). Framing is measured from what the puppets actually draw — hair, raised arms, held props and all — with headroom and lead room, so a page can be a close-up without typing coordinates. A still is framed into the part of the page its text card leaves clear, falling back to a tighter shot when a long card leaves no room, so a head is never hidden under the words. |
 | `transition=wipe` | How the page is entered in the video: `wipe` (the paper sheet), `cut`, `dissolve`, `fade`, `iris` or `push`. `[video] transition = "…"` sets a book's default. |
+| `music=calm` | The page's music cue: `play`, `calm`, `tense`, `sad`, `sleepy`, `bright` or `none`. Without one, its `light=` picks a cue. |
+| `hold=1.2` | A silent hold at the start of the page, before its first line, for a reveal. |
 | `video=skip`, `book=skip` | Leave the page out of one format. |
 | `no-wormsley` | Don't hide Wormsley on this page. |
 
@@ -335,7 +343,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`), or a prop's name, which stands that prop on the stage (`@kite`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, and friends; the video eases the change over about a second), and `@camera …` the framing.
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`), or a prop's name, which stands that prop on the stage (`@kite`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, `music=…`, `ambience=…`, and friends; the video eases the change over about a second), and `@camera …` the framing. `@music <cue>` changes the cue from that line on, and `@hold <seconds>` is a dead stop (below).
 
 | Kind | Values |
 | --- | --- |
@@ -348,6 +356,9 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=<prop>` (any world or built-in prop, or `nothing`), `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers), `tether=<actor>` (a stage prop's string) |
 | Eyes | `see=<actor>`, `<prop>`, `mine`, `up`, `down`, `left`, `right`, `front` or `away`: it holds until it is changed, `front` releases it, and the eyes lead the head. `notice` plays a small beat first: the eyes flick to the `see=` target (or whoever spoke last), hold for about half a second, and then the rest of the direction lands. |
 | Entrances | `enter=left`/`right`, `exit=left`/`right` (figures walk on and off in video, critters keep their own entrances; in the book they just appear or vanish) |
+| Scene | `light=golden` or a bare preset (`dusk`), `wilt=1`, `stink=1`, `mint=1`, `tint=sunflower`, `music=calm`, `ambience=birds` (or `none`), `speed=1`, `impact=1` |
+| Directions (no actor) | `@pause 1` `@hold 1.5` `@music calm` `@sfx pop` |
+| Effects | `pop` `plop` `bonk` `boing` `whoosh` `sparkle` `tweet` `blorp` `page` `sting` `tada` `twinkle` `thud` `splash` `gasp-whoosh` `ding` `drum-roll` `heartbeat` |
 | Camera | `shot=wide`/`full`/`medium`/`close`/`extreme-close` framed on `on=<actor>,<actor>` (empty: everyone, or the speaker for a close), `move=push`/`pull`/`pan-left`/`pan-right`/`tilt-up`/`tilt-down`/`track` taking `over=<seconds>` (default the rest of the shot), `shake=0`–`1`, and `cut` or `ease` to choose how the camera arrives (a change of shot cuts unless the direction says `ease`). The older `zoom=` and `look=` still work and win when given. |
 
 ### Who points the camera
@@ -359,16 +370,35 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `[video] acting = "plain"` turns the acting layer off and reproduces the plain motion; every style's `[motion]` dials tune it, and [`docs/animation.md`](docs/animation.md) has the whole story.
 
+`[video]` sets how the book is performed:
+
+| Option | Meaning |
+| --- | --- |
+| `cast-voices = true` | Quoted words are spoken by the character whose `talk` direction introduced them; the narrator reads the rest. |
+| `drop-tags = true` | With cast voices, skip short tags like "said Mum." so the scene plays like a show. |
+| `direction = "auto"` | `auto` shots pages by film rules; `locked` is the older always-gliding camera. |
+| `acting = "full"` | `full` performs by the acting rules; `plain` turns the layer off. |
+| `depth-of-field = false` | Stop softening the setting behind close shots. |
+| `transition = "wipe"` | How pages are entered unless the heading says otherwise. |
+| `music = "auto"` | `auto` lets each page's `light=` pick the cue; a cue name (`play`, `calm`, `tense`, `sad`, `sleepy`, `bright`, `none`) is the book's default; `play` holds the old loop throughout. |
+| `ambience = true` | Procedural sound beds from each setting and light. On already for a book with an `age`. |
+
 A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Setups on directed pages follow the same 1.2 s floor: one that would flash by is merged into its neighbour, but a cut the script wrote is honoured — the storyboard marks the hold it leaves under 1.2 s with `· short`. Every shot frames its subject's whole head, hair and all — measured from the puppet's own drawing, so a tall hairdo, a raised hand or a held prop is never guessed at — with headroom above and room beside it (room enough to survive the slow push a long hold rides in on); only an extreme close-up may crop hair above the brow line, and lead room never pushes a head out of frame. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
 
 Teeth, stink and mint **carry over from page to page** until changed, so grotty teeth stay grotty. Actors without an `x` are spaced out automatically.
 
 **Timing and sound** (video only):
 
-- `@pause 0.4` adds a beat of silence, of at most 60 seconds.
-- `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`.
-- Fainting bonks, hops boing and entrances pop automatically.
+- `@pause 0.4` adds a beat of silence, of at most 60 seconds; `@hold 1.2` is a dead stop, where the voice, the music, the ambience and the performance's idle movement all stop. `hold=1.2` on a heading does the same at the start of a page. Both take 0 to 60 seconds and count towards the video's length.
+- `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`, `sting`, `tada`, `twinkle`, `thud`, `splash`, `gasp-whoosh`, `ding`, `drum-roll`, `heartbeat`. An unknown name is an error listing these.
+- Fainting bonks, hops boing and entrances pop automatically. In a book with an `age`, an action's sound lands on its contact frame plus about three frames, never before it.
 - A video runs at most 30 minutes (1800 seconds); a longer script is refused before any audio or frame is made.
+- The music follows the story. A page's `light=` picks the cue (`storm` and `overcast` → `tense`, `dusk` and `golden` → `calm`, `night`, `moonlit` and `candle` → `sleepy`, otherwise `play`); `music=` on a heading, `@music <cue>` mid-page or `[video] music = "<cue>"` says otherwise, and `[video] music = "auto"` is each page's light. Cues cross-fade over about a second.
+- A `@sfx` effect is normalised to the same loudness as the rest, so a new one never jumps out of the mix.
+- When a `**SHOUTED**` line is spoken by a character whose mood has just turned cross, defiant, shocked or laughing, the music drops out half a second before the line and returns after it.
+- Ambience comes from the place: a setting's `data-ambience` and its light's own beds (`storm` adds rain and wind; `night` and `moonlit` add crickets outdoors). It sits about 25 dB under the narration and ducks like the music. A book with an `age` gets it; a book with neither an `age` nor `[video] ambience = true` keeps the soundtrack it had.
+- A page in a new place is seen for at least a second and a half before the first line is spoken, so the place lands before it is talked over; the age band scales it.
+
 
 ### Guests
 

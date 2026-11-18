@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2100" data-ambience="room" data-indoors="true">
   <title>Playroom: a striped play tent, a toy box, a shelf of toys, a window and a floor of bright play mats</title>
   <path id="far-sky" d="M1630 460 Q1969.3 460 2310 460 Q2310 883 2310 1220 Q1967.7 1220 1630 1220 Q1630 780.1 1630 460 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="1970" cy="1240" data-glow="448 white 0.5" data-time="day"/>

@@ -333,7 +333,7 @@ impl VoiceChoice {
 		Voice {
 			provider: self.provider.clone(),
 			name: self.name.clone().unwrap_or(plain.name),
-			rate: self.rate.unwrap_or(plain.rate),
+			rate: self.rate.or(plain.rate),
 			command: None,
 			id: self.id.clone(),
 			model: self.model.clone(),
@@ -1679,6 +1679,8 @@ pub fn create_setting(
 			settings::SettingFile {
 				ground: 2060.0,
 				title: about.to_owned(),
+				ambience: Vec::new(),
+				indoors: false,
 				parts: vec![
 					(
 						"far-sky".into(),
@@ -2529,7 +2531,7 @@ mod tests {
 		assert_eq!(worlds[0].style, "cartoon");
 
 		let report = studio.describe_world("nibbleton").unwrap();
-		assert!(report.cast.is_empty());
+		assert!(report.cast.is_empty(), "no cast yet");
 		assert_eq!(
 			report.summary.about.as_deref(),
 			Some("A town of small habits.")
@@ -2628,7 +2630,10 @@ mod tests {
 			studio.create_character("nibbleton", &bad).unwrap_err()
 		);
 		assert!(error.contains("jetpack"), "{error}");
-		assert!(studio.describe_world("nibbleton").unwrap().cast.is_empty());
+		assert!(
+			studio.describe_world("nibbleton").unwrap().cast.is_empty(),
+			"no cast yet"
+		);
 		studio
 			.create_character("nibbleton", &brief("nell"))
 			.unwrap();

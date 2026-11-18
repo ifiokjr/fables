@@ -833,6 +833,37 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	Ok(())
 }
 
+/// The age band every new book is read aloud to until its author says otherwise.
+const NEW_BOOK_AGE: &str = "3-5";
+
+/// Gives a new book the default `age` in its front matter. Every new book's text passes here,
+/// whether it came from the world's `recipe.md` or from the built-in flow that starts a book
+/// in a world without one, so both paths get the band; a recipe that names its own `age`
+/// keeps it.
+fn with_default_age(script: String) -> String {
+	let front = script.split("\n+++").next().unwrap_or(&script);
+	let names_age = front.lines().skip(1).any(|line| {
+		line.trim()
+			.strip_prefix("age")
+			.is_some_and(|rest| rest.trim_start().starts_with('='))
+	});
+
+	if names_age {
+		return script;
+	}
+
+	match script.find("\n+++") {
+		Some(end) => {
+			format!(
+				"{}\nage = \"{NEW_BOOK_AGE}\"{}",
+				&script[..end],
+				&script[end..]
+			)
+		}
+		None => script,
+	}
+}
+
 /// Starts a book from the world's recipe, filled in with a title, a star and an author.
 fn new_story(
 	world: &World,
@@ -873,11 +904,13 @@ fn new_story(
 		+ std::time::SystemTime::now()
 			.duration_since(std::time::UNIX_EPOCH)
 			.map_or(0, |elapsed| elapsed.as_secs() / 31_556_952);
-	let script = recipe
-		.replace("{{title}}", title)
-		.replace("{{star}}", star)
-		.replace("{{author}}", author)
-		.replace("{{year}}", &year.to_string());
+	let script = with_default_age(
+		recipe
+			.replace("{{title}}", title)
+			.replace("{{star}}", star)
+			.replace("{{author}}", author)
+			.replace("{{year}}", &year.to_string()),
+	);
 
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
@@ -1076,6 +1109,13 @@ fn check(story: &Story, cast: &Cast, notes: bool) -> Result<()> {
 		for note in &report.notes {
 			say!("  note: {note}")?;
 		}
+	}
+
+	if story.age.is_none() {
+		println!(
+			"· no `age` in the front matter, so the narrator keeps the older pace; add `age = \
+			 \"3-5\"` (or `under-3`, `5-7`) to pace the read-aloud."
+		);
 	}
 
 	Ok(())
@@ -1651,5 +1691,22 @@ mod tests {
 			error.contains("--author") && error.contains("world.toml"),
 			"{error}"
 		);
+	}
+
+	#[test]
+	fn a_new_book_starts_at_the_default_age() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("age = \"3-5\""), "{script}");
+		assert_eq!(script.matches("\nage").count(), 1, "{script}");
+	}
+
+	#[test]
+	fn a_recipe_that_names_its_own_age_keeps_it() {
+		let own = "+++\ntitle = \"T\"\nage = \"5-7\"\n+++\n\n# park\nHi.\n";
+		assert_eq!(with_default_age(own.to_owned()), own);
+		let tight = "+++\ntitle = \"T\"\nage=\"under-3\"\n+++\n";
+		assert_eq!(with_default_age(tight.to_owned()), tight);
 	}
 }

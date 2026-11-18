@@ -115,6 +115,22 @@ fn stage_directions() -> Vec<String> {
 	let mut tokens = Vec::new();
 
 	for (kind, values) in table("### Stage directions") {
+		// A row of whole directions (a `@pause`, `@hold`, `@music` or `@sfx`) or of `@sfx`
+		// names, fed to the parser exactly as the readme writes them.
+		if kind.starts_with("Directions") {
+			tokens.extend(spans(&values).into_iter().map(|(_, span)| span));
+			continue;
+		}
+
+		if kind == "Effects" {
+			tokens.extend(
+				spans(&values)
+					.into_iter()
+					.map(|(_, name)| format!("@sfx {name}")),
+			);
+			continue;
+		}
+
 		let words = matches!(kind.as_str(), "Moods" | "Poses" | "Gaits" | "Actions")
 			|| kind.starts_with("Stances")
 			|| kind == "Camera";
@@ -143,7 +159,8 @@ fn parses(script: &str) -> Result<(), String> {
 	let source = format!("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n{script}");
 	let story = story::parse(&source).map_err(|error| format!("{error:#}"))?;
 	let page = &story.pages[0];
-	let mut scene = Scene::for_page(page, &story.settings).map_err(|error| format!("{error:#}"))?;
+	let mut scene = Scene::for_page(page, &story.settings, &story.props)
+		.map_err(|error| format!("{error:#}"))?;
 	let cast =
 		Cast::parse("[stinky]\nname = \"Stinky\"\n").map_err(|error| format!("{error:#}"))?;
 	let mut memory = HashMap::new();
@@ -201,6 +218,13 @@ fn every_documented_stage_direction_word_key_and_value_parses() {
 	);
 
 	for token in &tokens {
+		// A whole direction parses as written, with no actor in front of it.
+		if token.starts_with('@') {
+			parses(&format!("# park\n{token}\n"))
+				.unwrap_or_else(|error| panic!("{token}: {error}"));
+			continue;
+		}
+
 		let mut failures = Vec::new();
 		let mut accepted = false;
 

@@ -32,6 +32,7 @@ use crate::art::pack::StylePack;
 use crate::art::settings::Library;
 use crate::cast::Cast;
 use crate::cast::Kind;
+use crate::story::Age;
 use crate::story::Drawing;
 use crate::story::GuestStyle;
 use crate::story::Story;
@@ -116,6 +117,9 @@ pub struct World {
 	/// The light the world's books start in, unless a book names its own (`world.toml`:
 	/// `light = "golden"`).
 	pub light: Option<Light>,
+	/// The audience the world's books are read aloud to, unless a book names its own
+	/// (`world.toml`: `age = "3-5"`).
+	pub age: Option<Age>,
 	pub matter: Matter,
 }
 
@@ -155,6 +159,9 @@ struct Entry {
 	about: Option<String>,
 	#[serde(default)]
 	light: Option<String>,
+	/// The audience its books are read aloud to, unless a book names its own.
+	#[serde(default)]
+	age: Option<Age>,
 	#[serde(default)]
 	narrator: Option<Voice>,
 	#[serde(default)]
@@ -209,6 +216,7 @@ impl World {
 			style: entry.style,
 			about: entry.about,
 			light,
+			age: entry.age,
 			narrator: entry.narrator,
 			matter: entry.book,
 		})
@@ -438,6 +446,11 @@ impl World {
 			&& story.light.is_day()
 		{
 			story.light = *light;
+		}
+
+		// So does the world's age band, which only sets how the book is read aloud.
+		if story.age.is_none() {
+			story.age = self.age;
 		}
 
 		if story.meta.voice.is_none() {
@@ -765,6 +778,37 @@ mod tests {
 		);
 		assert!(
 			error.contains("world/character") && error.contains("away.hana"),
+			"{error}"
+		);
+	}
+
+	#[test]
+	fn a_world_sets_the_age_band_unless_the_book_names_one() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = World::load(&world(dir.path(), "home", "age = \"under-3\"\n")).unwrap();
+		assert_eq!(home.age, Some(Age::Under3));
+
+		let plain =
+			&mut crate::story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n")
+				.unwrap();
+		home.furnish(plain).unwrap();
+		assert_eq!(plain.age, Some(Age::Under3));
+		assert_eq!(plain.pacing().rate, 125);
+
+		let own = &mut crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nage = \"5-7\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		home.furnish(own).unwrap();
+		assert_eq!(own.age, Some(Age::FiveToSeven));
+		assert_eq!(own.pacing().rate, 150);
+
+		let error = format!(
+			"{:#}",
+			World::load(&world(dir.path(), "odd", "age = \"toddler\"\n")).unwrap_err()
+		);
+		assert!(
+			error.contains("toddler") && error.contains("3-5"),
 			"{error}"
 		);
 	}
