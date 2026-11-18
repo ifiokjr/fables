@@ -99,7 +99,7 @@ fn cast_notes(cast: &Cast) -> Vec<String> {
 			}
 
 			let drawn = if puppet.template {
-				format!("drawn from the {} template", puppet.style.name)
+				format!("drawn from {}", puppet.style.template_origin(look.build))
 			} else {
 				"drawn from an authored puppet".to_owned()
 			};

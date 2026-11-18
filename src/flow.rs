@@ -143,6 +143,36 @@ const BUILT_IN: [(&str, &str); 9] = [
 /// The flow a book starts from when its world has no `recipe.md` and no flow is named.
 pub const DEFAULT: &str = "three-tries";
 
+/// The age band every new book is read aloud to until its author says otherwise.
+pub const NEW_BOOK_AGE: &str = "3-5";
+
+/// Gives a new book the default `age` in its front matter. Every new book's text passes here,
+/// whether it came from the world's `recipe.md` or from a flow, so both paths get the band; a
+/// recipe or flow that names its own `age` keeps it.
+fn with_default_age(script: String) -> String {
+	let front = script.split("\n+++").next().unwrap_or(&script);
+	let names_age = front.lines().skip(1).any(|line| {
+		line.trim()
+			.strip_prefix("age")
+			.is_some_and(|rest| rest.trim_start().starts_with('='))
+	});
+
+	if names_age {
+		return script;
+	}
+
+	match script.find("\n+++") {
+		Some(end) => {
+			format!(
+				"{}\nage = \"{NEW_BOOK_AGE}\"{}",
+				&script[..end],
+				&script[end..]
+			)
+		}
+		None => script,
+	}
+}
+
 /// The table of a flow file's front matter, as the file writes it (`[flow]` and its beats).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -427,7 +457,7 @@ pub fn start(
 		let flow = find(Some(world), name)?;
 
 		return Ok(Started {
-			script: flow.scaffold(world, title, star, friend, author)?,
+			script: with_default_age(flow.scaffold(world, title, star, friend, author)?),
 			source: format!("the flow \"{}\"", flow.name),
 		});
 	}
@@ -438,7 +468,7 @@ pub fn start(
 		let script = fill(&recipe, title, star, author, friend.unwrap_or(""));
 
 		return Ok(Started {
-			script,
+			script: with_default_age(script),
 			source: format!("the {} recipe", world.name),
 		});
 	}
@@ -446,7 +476,7 @@ pub fn start(
 	let flow = built_in(DEFAULT)?;
 
 	Ok(Started {
-		script: flow.scaffold(world, title, star, friend, author)?,
+		script: with_default_age(flow.scaffold(world, title, star, friend, author)?),
 		source: format!("the flow \"{}\"", flow.name),
 	})
 }

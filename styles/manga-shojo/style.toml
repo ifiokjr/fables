@@ -128,13 +128,13 @@ forearm = 166.0
 
 # A grown-up: about seven heads, the same head on a long body.
 [bodies.grown-up]
-neck = [0.0, -1380.0]
+neck = [0.0, -1324.0]
 head-above-neck = 150.0
-shoulder-y = -1290.0
-shoulder-half = 116.0
-shoulders-turned = [-102.0, 80.0]
+shoulder-y = -1222.0
+shoulder-half = 112.0
+shoulders-turned = [-98.0, 80.0]
 hips-turned = [-40.0, 52.0]
-hem-y = -880.0
+hem-y = -876.0
 body-radius = 104.0
 leg-width = [92.0, 32.0]
 forearm-width = [44.0, 30.0]

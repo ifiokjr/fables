@@ -67,6 +67,7 @@ name = "Kerfuffle"
 author = "Ifiok Jr."        # optional: the author of its books, and the default for `fables new`
 style = "cartoon"           # optional: the drawing style its folk are drawn in (default cartoon)
 light = "golden"            # optional: the light every page starts in (default day)
+age = "3-5"                 # optional: who its books are read aloud to (under-3, 3-5, 5-7)
 
 [narrator]                  # optional: who reads every book aloud, unless a script names its own [voice]
 name = "Daniel"
@@ -149,14 +150,18 @@ A drawing style is a folder in `styles/` that characters are drawn from, so a ne
 styles/cartoon/
   style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page skin that suits the look
   kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
-  template.svg    a plain character's own parts, which new characters are drawn from
+  template.svg    a plain kid's own parts, which new kids are drawn from
+  template-grown-up.svg
+                  a plain grown-up's own parts, cut for the grown-up body, which new grown-ups are drawn from
 ```
+
+Every style has two bodies, `kid` and `grown-up`, and a template for each, so a grown-up is drawn with the style's adult proportions instead of a kid's torso, sleeves and legwear stretched over a taller skeleton.
 
 | Command | What it does |
 | --- | --- |
-| `fables style list` | The drawing styles, with a sentence on each look and the page skin it prints in. |
-| `fables style check <name>` | Checks the template over the kit draws a whole figure, and every body stands up. |
-| `fables style describe <name>` | Every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
+| `fables style list` | The drawing styles, with a sentence on each look, the bodies it draws (kid, grown-up) and the page skin it prints in. |
+| `fables style check <name>` | Checks each body's template over the kit draws a whole figure whose parts join, and every body stands up. Joins are measured standing, cheering and sitting, front-on and three-quarters: the head or its neck must touch the torso, each arm must start inside the torso or its sleeve, each leg inside the torso or the legwear, and a sleeve or trouser leg drawn in two pieces must meet at the elbow or knee. |
+| `fables style describe <name>` | The bodies the style draws and the template each starts from, every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
 | `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet) and `<name>-parts.png` (every kit and template part). |
 
 | Drawing style | Look |
@@ -197,7 +202,7 @@ The built-in drawing styles are compiled into fables, so a world anywhere on dis
 
 ## Settings
 
-A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page skin, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene. A page's `light=` grades every colour the scene paints exactly once, paints `fill="sky"` parts with the light's sky gradient, and washes a haze and a vignette over the art; the story text and captions keep their own colours.
+A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page skin, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene. A page's `light=` grades every colour the scene paints exactly once (a part takes the full grade, losing a little more colour and contrast the higher its `data-depth`, while the characters in front take a gentler share), paints `fill="sky"` parts with the light's sky gradient, and washes a haze and a vignette over the art; the story text and captions keep their own colours.
 
 | Attribute | Meaning |
 | --- | --- |
@@ -207,14 +212,18 @@ A setting is an SVG file of named parts on the square stage (2400 units, with 16
 | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides: `dusk` shows the sun, `moonlit` the moon and stars, `overcast` and `storm` cover the sun with cloud, and an `indoor` or `candle` light shows neither. |
 | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows at dusk, stars at night). |
 | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, lawns, floors). Both colours wilt, fade with distance, dim on a bare night and grade with the light like a flat fill; on a bare night a part with a `data-night` colour turns that flat colour, and under a scene light both stops keep the gradient. |
-| `data-glow` | On a `<circle>`, `radius colour opacity`: a soft radial pool of light fading to transparent (a lamp, a window, the sun's bloom). |
-| `data-depth` | 0 to 1: far things fade into the sky and lose line. |
+| `data-glow` | On a `<circle>`, `radius colour opacity`: a soft radial pool of light fading to transparent (a lamp, a window, the sun's bloom). A `light=` colours it but does not dim it, so a lamp still glows at night. |
+| `data-depth` | 0 to 1: far things fade into the sky and lose line, and under a `light=` lose a little more colour and contrast. |
 | `data-dots` | A riso dot screen: `colour spacing radius opacity`. |
 | `data-drift`, `data-swing` | Clouds drift sideways; a swing swings from its pivot (`x y`). |
+| `data-ambience` | Sound beds the place adds to the video (`birds,breeze`): `birds`, `breeze`, `waves`, `rain`, `wind`, `crickets`, `room`, `crowd`. The scene's light adds its own (`storm` brings rain and wind, `night` and `moonlit` bring crickets). |
+| `data-indoors` | On the root: the place is inside, so night's crickets stay outside. |
 
 `<circle data-sparkle="size colour">` twinkles, and `<circle data-critter="flower|tree" r="height" data-colour data-seed>` places one of the living plants, which have faces and wilt. The root `<svg>` sets `data-ground`, where actors stand.
 
 The fifteen built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`) live in [`settings/`](settings) and every world can use them. A world adds its own, or repaints a built-in one by name, in its `settings/` folder; over MCP, `setting_create`, `setting_parts`, `setting_set_parts` and `setting_render` do the same.
+
+**Composing for the stage.** Every page puts a text card and actors on top of a setting, so give each landmark a home neither covers (`fables sheets --zones` outlines these zones on every setting). In stage units, measured from the top: the built-in grounds sit at y 2060–2100; a typical top card covers x 150–2250 down to y ≈ 880 (a short line stops near 375, a long page near 970), and with `text=bottom` it covers y ≈ 1520–2280 (1470 for a long page). Heads reach 1000–1170 above the ground for a kid and 1160–1270 for a grown-up across the drawing styles, so they top out at y ≈ 800–1100. Actors without an `x=` stand at ½ alone, at ⅓ and ⅔ as a pair (x 800 and 1600, each covering about 480 across) and at ¼, ½ and ¾ as three; `x=far-left`, `left`, `center`, `right` and `far-right` are 0.12, 0.28, 0.5, 0.72 and 0.88. That leaves the wings (x below about 540 and above about 1860) from y 880 down to the ground for landmarks, a sun or a moon low in a wing at y ≈ 950–1120, the gutter between a pair (x 1040–1360) for something a lone actor may hide, and the card band for detail a story can lose. Keep the band behind the actors calm and mid-toned, with no straight edge across the heads.
 
 ## Designing characters with an agent (MCP)
 
@@ -226,7 +235,7 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 
 | Tool | What it does |
 | --- | --- |
-| `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, workflow. |
+| `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, sound, workflow. |
 | `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences, a drawing style and an author, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
 | `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space, the drawing rules and the page skin the style prints in; the kit as an image. |
 | `character_create` | A new cast member from who they are and their colours, drawn from the style's template. `draw` also writes their part file. |
@@ -270,7 +279,7 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<skin>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. A hold a script-written cut leaves under 1.2 s is labelled `· short`. Never records a voice, so it runs offline in a second or two. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
-| `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. |
+| `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
 | `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every page skin, side by side. |
 | `fables rig <id>` | `out/rig/<skin>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character), a motion-test video, and an acting-test video (the ten acting rules, in order, on two characters). |
 
@@ -305,6 +314,7 @@ A script is TOML front matter between `+++` lines, then pages. Each page starts 
 title = "Stinky McStinkbreath"
 author = "Ifiok Jr."
 star = "stinky"                 # who goes on the cover
+age = "3-5"                     # who it is read aloud to: under-3, 3-5 or 5-7
 moral = "Brush your teeth, morning and night."
 
 [cover]
@@ -319,6 +329,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 @stinky talk
 "**NOPE**," said Stanley.
 ```
+
+`age` sets how the book is read aloud: the narration rate (about 125, 135 and 150 words a minute for `under-3`, `3-5` and `5-7`), the gaps between lines and the tail after a page, and how long a page in a new place is seen before it is talked over. A world sets a default in its `world.toml`, a book's own `age` wins, and a narrator with an explicit `rate` keeps it. A book with no `age` anywhere keeps the older, brisker timing (165 words a minute), so its video does not change; `fables check` suggests one.
 
 - **In the book**, each page shows the stage *at the end of the page*. The text sits on a paper card, at the top unless the heading says `text=bottom`.
 - **In the video**, each `@` line takes effect *when the narrator reaches it*. Above, Mum points and talks during the first line; Stanley crosses his arms and his mouth moves during the second.
@@ -342,13 +354,15 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | --- | --- |
 | Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`, or one of the world's own (see Settings). |
 | `night`, `wilt=1`, `stink=0.5`, `mint=1`, `tint=sunflower` | Starting weather (`tint` colours the `plain` blob). |
-| `light=golden`, `golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. A bare preset word means `light=<preset>` in a heading (`# street golden`) or an `@scene` direction (`@scene dusk`). It grades every colour in the scene once, paints the sky, aims the shadows and adds haze and a vignette. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. Bare `night` and `day` keep their weather meaning exactly: `night` turns the sky night without naming a light, so the book's default light still applies. Under a `light=` the light alone makes the night: parts keep their day colour and the light grades it, so `data-night` colours are for bare nights. |
+| `light=golden`, `golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. A bare preset word means `light=<preset>` in a heading (`# street golden`) or an `@scene` direction (`@scene dusk`). It grades every colour in the scene once, paints the sky, aims the shadows and adds haze and a vignette. Every colour stays recognisably itself: a hue turns only a little towards the light, lines stay ink, skin keeps its warmth in every light, and the characters sit a little forward of the setting. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. Bare `night` and `day` keep their weather meaning exactly: `night` turns the sky night without naming a light, so the book's default light still applies. Under a `light=` the light alone makes the night: parts keep their day colour and the light grades it, so `data-night` colours are for bare nights. |
 | `speed=1`, `impact=1` | Manga effects: focus lines rushing in towards the first person on stage, or a jagged burst behind them. They work in every style. |
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
 | `size=0.9` | Scales the page's text. |
 | `zoom=1.5 look=0.5,0.6` | A close-up on the point (x, y), as fractions of the page. |
 | `shot=… on=…` | A shot size that frames the still illustration: `wide`, `full`, `medium`, `close` or `extreme-close` on the actors named by `on=` (comma-separated ids; empty means everyone on stage, or whoever speaks for a close shot). Framing is measured from what the puppets actually draw — hair, raised arms, held props and all — with headroom and lead room, so a page can be a close-up without typing coordinates. A still is framed into the part of the page its text card leaves clear, falling back to a tighter shot when a long card leaves no room, so a head is never hidden under the words. |
 | `transition=wipe` | How the page is entered in the video: `wipe` (the paper sheet), `cut`, `dissolve`, `fade`, `iris` or `push`. `[video] transition = "…"` sets a book's default. |
+| `music=calm` | The page's music cue: `play`, `calm`, `tense`, `sad`, `sleepy`, `bright` or `none`. Without one, its `light=` picks a cue. |
+| `hold=1.2` | A silent hold at the start of the page, before its first line, for a reveal. |
 | `video=skip`, `book=skip` | Leave the page out of one format. |
 | `no-wormsley` | Don't hide Wormsley on this page. |
 
@@ -356,7 +370,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, and friends; the video eases the change over about a second), and `@camera …` the framing.
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, `music=…`, `ambience=…`, and friends; the video eases the change over about a second), and `@camera …` the framing. `@music <cue>` changes the cue from that line on, and `@hold <seconds>` is a dead stop (below).
+
 
 | Kind | Values |
 | --- | --- |
@@ -368,6 +383,9 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (for flyers), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
 | Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=toothbrush`/`parcel`/`jam`/`nothing`, `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers) |
 | Entrances | `enter=left`/`right`, `exit=left`/`right` (figures walk on and off in video, critters keep their own entrances; in the book they just appear or vanish) |
+| Scene | `light=golden` or a bare preset (`dusk`), `wilt=1`, `stink=1`, `mint=1`, `tint=sunflower`, `music=calm`, `ambience=birds` (or `none`), `speed=1`, `impact=1` |
+| Directions (no actor) | `@pause 1` `@hold 1.5` `@music calm` `@sfx pop` |
+| Effects | `pop` `plop` `bonk` `boing` `whoosh` `sparkle` `tweet` `blorp` `page` `sting` `tada` `twinkle` `thud` `splash` `gasp-whoosh` `ding` `drum-roll` `heartbeat` |
 | Camera | `shot=wide`/`full`/`medium`/`close`/`extreme-close` framed on `on=<actor>,<actor>` (empty: everyone, or the speaker for a close), `move=push`/`pull`/`pan-left`/`pan-right`/`tilt-up`/`tilt-down`/`track` taking `over=<seconds>` (default the rest of the shot), `shake=0`–`1`, and `cut` or `ease` to choose how the camera arrives (a change of shot cuts unless the direction says `ease`). The older `zoom=` and `look=` still work and win when given. |
 
 ### Who points the camera
@@ -379,16 +397,35 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `[video] acting = "plain"` turns the acting layer off and reproduces the plain motion; every style's `[motion]` dials tune it, and [`docs/animation.md`](docs/animation.md) has the whole story.
 
+`[video]` sets how the book is performed:
+
+| Option | Meaning |
+| --- | --- |
+| `cast-voices = true` | Quoted words are spoken by the character whose `talk` direction introduced them; the narrator reads the rest. |
+| `drop-tags = true` | With cast voices, skip short tags like "said Mum." so the scene plays like a show. |
+| `direction = "auto"` | `auto` shots pages by film rules; `locked` is the older always-gliding camera. |
+| `acting = "full"` | `full` performs by the acting rules; `plain` turns the layer off. |
+| `depth-of-field = false` | Stop softening the setting behind close shots. |
+| `transition = "wipe"` | How pages are entered unless the heading says otherwise. |
+| `music = "auto"` | `auto` lets each page's `light=` pick the cue; a cue name (`play`, `calm`, `tense`, `sad`, `sleepy`, `bright`, `none`) is the book's default; `play` holds the old loop throughout. |
+| `ambience = true` | Procedural sound beds from each setting and light. On already for a book with an `age`. |
+
 A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Setups on directed pages follow the same 1.2 s floor: one that would flash by is merged into its neighbour, but a cut the script wrote is honoured — the storyboard marks the hold it leaves under 1.2 s with `· short`. Every shot frames its subject's whole head, hair and all — measured from the puppet's own drawing, so a tall hairdo, a raised hand or a held prop is never guessed at — with headroom above and room beside it (room enough to survive the slow push a long hold rides in on); only an extreme close-up may crop hair above the brow line, and lead room never pushes a head out of frame. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
 
 Teeth, stink and mint **carry over from page to page** until changed, so grotty teeth stay grotty. Actors without an `x` are spaced out automatically.
 
 **Timing and sound** (video only):
 
-- `@pause 0.4` adds a beat of silence, of at most 60 seconds.
-- `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`.
-- Fainting bonks, hops boing and entrances pop automatically.
+- `@pause 0.4` adds a beat of silence, of at most 60 seconds; `@hold 1.2` is a dead stop, where the voice, the music, the ambience and the performance's idle movement all stop. `hold=1.2` on a heading does the same at the start of a page. Both take 0 to 60 seconds and count towards the video's length.
+- `@sfx name` plays a built-in effect: `pop`, `plop`, `bonk`, `boing`, `whoosh`, `sparkle`, `tweet`, `blorp`, `page`, `sting`, `tada`, `twinkle`, `thud`, `splash`, `gasp-whoosh`, `ding`, `drum-roll`, `heartbeat`. An unknown name is an error listing these.
+- Fainting bonks, hops boing and entrances pop automatically. In a book with an `age`, an action's sound lands on its contact frame plus about three frames, never before it.
 - A video runs at most 30 minutes (1800 seconds); a longer script is refused before any audio or frame is made.
+- The music follows the story. A page's `light=` picks the cue (`storm` and `overcast` → `tense`, `dusk` and `golden` → `calm`, `night`, `moonlit` and `candle` → `sleepy`, otherwise `play`); `music=` on a heading, `@music <cue>` mid-page or `[video] music = "<cue>"` says otherwise, and `[video] music = "auto"` is each page's light. Cues cross-fade over about a second.
+- A `@sfx` effect is normalised to the same loudness as the rest, so a new one never jumps out of the mix.
+- When a `**SHOUTED**` line is spoken by a character whose mood has just turned cross, defiant, shocked or laughing, the music drops out half a second before the line and returns after it.
+- Ambience comes from the place: a setting's `data-ambience` and its light's own beds (`storm` adds rain and wind; `night` and `moonlit` add crickets outdoors). It sits about 25 dB under the narration and ducks like the music. A book with an `age` gets it; a book with neither an `age` nor `[video] ambience = true` keeps the soundtrack it had.
+- A page in a new place is seen for at least a second and a half before the first line is spoken, so the place lands before it is talked over; the age band scales it.
+
 
 ### Guests
 
@@ -433,11 +470,13 @@ name = "Eddy (English (UK))"
 style = "A friendly, slightly mumbly six-year-old boy."
 ```
 
-A person with **no `puppet` line** is drawn from their world's drawing style's template, in their own colours, exactly as if `fables puppet template` had written the file and it had never been touched. That is how a new character is ready in one command.
+A person with **no `puppet` line** is drawn from their world's drawing style's template for their body, in their own colours, exactly as if `fables puppet template` had written the file and it had never been touched. That is how a new character is ready in one command.
 
 - `fables puppet template <id>` writes `puppets/<id>.svg` from the template and adds the `puppet = "puppets/<id>.svg"` line itself, so a part can be redrawn with `fables puppet set <id> <part> --d "M…"`.
 - `fables character new <id> --name "…" --draw` writes both the table and the part file in one step.
 - `puppet = "parametric"` draws the older parametric puppet instead, the one that reads `hair`, `head`, `body`, `nose` and `mouth` (`mouth_size` in code). Those five fields do nothing on a character drawn from parts, and `fables check` says so once per member.
+
+A person is `kind = "kid"` (the default) or `kind = "grown-up"`, and the kind picks the body they stand on and the template they are drawn from. Every drawing style has a kid template and a grown-up one cut for adult proportions, so a grown-up with no `puppet` line, or one started with `puppet template` or `character new --draw`, is a grown-up of that style rather than a kid stretched tall. `fables puppet check <id>` fails a figure whose parts come apart on its body, naming the part, the gap and the pose, and `fables puppet set` refuses a change that opens a join.
 
 Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book. The full command-line vocabulary for a character is `fables puppet parts <id>` (their parts as path data) and `fables style describe <drawing style>` (every part, its space and the drawing rules).
 

@@ -26,11 +26,13 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::art::dials::Fill;
+use crate::art::figure::Build;
 use crate::art::figure::Mood;
 use crate::art::light::Preset;
 use crate::art::pack::Face;
 use crate::art::pack::Finish;
 use crate::art::pack::StylePack;
+use crate::art::pack::body_name;
 use crate::art::parts;
 use crate::art::parts::FIGURE_PARTS;
 use crate::art::parts::Home;
@@ -149,6 +151,14 @@ impl BuildName {
 			BuildName::GrownUp => "grown-up",
 		}
 	}
+
+	/// The body this names.
+	pub fn build(self) -> Build {
+		match self {
+			BuildName::Kid => Build::Kid,
+			BuildName::GrownUp => Build::Grownup,
+		}
+	}
 }
 
 /// A character's colours: palette names (`tangerine`, `teal`…) or hex codes (`#ff8a3d`).
@@ -204,8 +214,9 @@ pub struct CharacterBrief {
 	/// Extras from the kit, e.g. glasses, freckles, lashes, bow.
 	#[serde(default)]
 	pub extras: Vec<String>,
-	/// Also write `puppets/<id>.svg` from the style's template and set `puppet = …`, so every
-	/// part can be redrawn. Without it the character is drawn straight from the template.
+	/// Also write `puppets/<id>.svg` from the style's template for their body (`build`) and set
+	/// `puppet = …`, so every part can be redrawn. Without it the character is drawn straight
+	/// from that template.
 	#[serde(default)]
 	pub draw: bool,
 }
@@ -248,6 +259,11 @@ pub struct StyleReport {
 #[derive(Clone, Debug, Serialize)]
 pub struct BodyReport {
 	pub name: String,
+	/// The template a character on this body is drawn from, e.g.
+	/// `styles/anime/template-grown-up.svg`.
+	pub template: String,
+	/// How many of their own parts that template draws (the rest come from the kit).
+	pub template_parts: usize,
 	/// Where the neck sits, in figure units (the soles at y = 0, up is negative).
 	pub neck_y: f32,
 	pub shoulder_y: f32,
@@ -330,7 +346,7 @@ impl VoiceChoice {
 		Voice {
 			provider: self.provider.clone(),
 			name: self.name.clone().unwrap_or(plain.name),
-			rate: self.rate.unwrap_or(plain.rate),
+			rate: self.rate.or(plain.rate),
 			command: None,
 			id: self.id.clone(),
 			model: self.model.clone(),
@@ -1370,11 +1386,14 @@ impl Studio {
 			skin: pack.skin.clone(),
 			finish: pack.finish,
 			face: pack.face,
-			bodies: pack
-				.bodies()
-				.map(|(name, body)| {
+			bodies: [Build::Kid, Build::Grownup]
+				.into_iter()
+				.map(|build| {
+					let body = pack.body(build);
 					BodyReport {
-						name: name.to_owned(),
+						name: body_name(build).to_owned(),
+						template: pack.template_file(build).display().to_string(),
+						template_parts: pack.template_for(build).iter().count(),
 						neck_y: body.neck.y,
 						shoulder_y: body.shoulder_y,
 						pelvis_y: body.limbs.pelvis_y,
@@ -1410,7 +1429,7 @@ impl Studio {
 	/// A style's template kid on a model sheet, and its kit and template parts.
 	pub fn style_sheets(name: &str, px: u32) -> Result<Vec<Image>> {
 		let pack = StylePack::named(name)?;
-		let look = crate::cast::template_look(&pack, crate::art::figure::Build::Kid)?;
+		let look = crate::cast::template_look(&pack, Build::Kid)?;
 		let mut model = sheets::model_sheet(&format!("The {name} style"), &look, px)?;
 
 		if pack.shade.fill == Fill::Screentone {
@@ -1419,7 +1438,7 @@ impl Studio {
 
 		let parts = sheets::parts_sheet(
 			&format!("The {name} style: kit and template"),
-			&pack.template_figure(),
+			&pack.template_figure(Build::Kid),
 		)?;
 
 		Ok(vec![
@@ -1436,8 +1455,8 @@ impl Studio {
 }
 
 /// Adds a character to a world's cast. With `brief.draw`, their part file is written from the
-/// style's template and `puppet = …` set; without it they are drawn from the template in their
-/// own colours.
+/// style's template for their body and `puppet = …` set; without it they are drawn from that
+/// template in their own colours.
 pub fn create_character(world: &World, brief: &CharacterBrief) -> Result<MemberReport> {
 	check_slug("character", &brief.id)?;
 	let style = world.style()?;
@@ -1469,10 +1488,14 @@ pub fn create_character(world: &World, brief: &CharacterBrief) -> Result<MemberR
 		.with_context(|| format!("could not write {}", cast_file.display()))?;
 
 	if brief.draw {
-		let drawings: Vec<(&str, &crate::art::shape::Shape)> = style.template.iter().collect();
+		// The template drawn for their body: a grown-up's parts are cut for a grown-up.
+		let build = brief.build.build();
+		let template = style.template_for(build);
+		let drawings: Vec<(&str, &crate::art::shape::Shape)> = template.iter().collect();
 		let title = format!(
-			"{}: own parts (started from the {} template; redraw each one)",
-			brief.name, style.name
+			"{}: own parts (started from {}; redraw each one)",
+			brief.name,
+			style.template_origin(build)
 		);
 		std::fs::create_dir_all(world.dir.join("puppets"))
 			.with_context(|| format!("could not create {}", world.dir.join("puppets").display()))?;
@@ -1556,6 +1579,8 @@ pub fn create_setting(
 			settings::SettingFile {
 				ground: 2060.0,
 				title: about.to_owned(),
+				ambience: Vec::new(),
+				indoors: false,
 				parts: vec![
 					(
 						"far-sky".into(),
@@ -1597,6 +1622,10 @@ struct OwnParts {
 	title: String,
 	/// Whether the parts are still the style's untouched template.
 	template: bool,
+	/// The style the parts are drawn in, and the body they are drawn for, so a redraw can be
+	/// posed and its joins measured.
+	style: std::sync::Arc<StylePack>,
+	build: Build,
 }
 
 /// A character's own parts, or why they have none to redraw.
@@ -1624,15 +1653,17 @@ fn own_parts(world: &World, id: &str) -> Result<OwnParts> {
 	} else {
 		puppet.file.clone()
 	};
+	// A character still drawn from the template has the template for their body as their own.
 	let parts = if puppet.template {
-		puppet.style.template.clone()
+		puppet.style.template_for(look.build)
 	} else {
 		Parts::load(&puppet.file)?
 	};
 	let title = if puppet.template {
 		format!(
-			"{}: own parts (started from the {} template; redraw each one)",
-			member.name, puppet.style.name
+			"{}: own parts (started from {}; redraw each one)",
+			member.name,
+			puppet.style.template_origin(look.build)
 		)
 	} else {
 		first_title(&puppet.file).unwrap_or_else(|| format!("{id}: own parts"))
@@ -1644,6 +1675,8 @@ fn own_parts(world: &World, id: &str) -> Result<OwnParts> {
 		file,
 		title,
 		template: puppet.template,
+		style: puppet.style.clone(),
+		build: look.build,
 	})
 }
 
@@ -1715,8 +1748,19 @@ pub fn set_parts(
 		problems.join("\n  ")
 	);
 
-	let findings = drawings.clone().over(own.kit.clone()).check();
-	let written = !findings.iter().any(|finding| finding.level == Level::Error);
+	let figure = drawings.clone().over(own.kit.clone());
+	let mut findings = figure.check();
+	let broken =
+		|findings: &[parts::Finding]| findings.iter().any(|finding| finding.level == Level::Error);
+
+	// A whole figure must also join up on the character's own body, posed: a redraw that
+	// leaves a gap at the neck, a shoulder or a hip is refused like any other broken part.
+	if !broken(&findings) {
+		let posed = crate::art::puppet::Authored::from_parts(&own.file, figure, &own.style)?;
+		findings.extend(crate::art::puppet::joins(&posed, own.build));
+	}
+
+	let written = !broken(&findings);
 
 	if written {
 		if own.template {
@@ -1749,9 +1793,9 @@ pub fn set_parts(
 	})
 }
 
-/// Starts a character's own part file (from the style's template, or another cast member's
-/// drawings) and points their cast entry at it. Either order works: add the cast entry first
-/// and run this, or write the file first and name it in the entry.
+/// Starts a character's own part file (from the style's template for their body, or another
+/// cast member's drawings) and points their cast entry at it. Either order works: add the cast
+/// entry first and run this, or write the file first and name it in the entry.
 pub fn template_puppet(world: &World, id: &str, from: Option<&str>) -> Result<MemberReport> {
 	check_slug("character", id)?;
 	let cast = world.cast()?;
@@ -1788,10 +1832,11 @@ pub fn template_puppet(world: &World, id: &str, from: Option<&str>) -> Result<Me
 			let source = own_parts(world, from)?;
 			(source.parts, format!("{from}'s drawings"))
 		}
+		// The template drawn for their body: a grown-up's parts are cut for a grown-up.
 		None => {
 			(
-				style.template.clone(),
-				format!("the {} template", style.name),
+				style.template_for(look.build),
+				style.template_origin(look.build),
 			)
 		}
 	};
@@ -2307,7 +2352,7 @@ mod tests {
 		assert_eq!(worlds[0].style, "cartoon");
 
 		let report = studio.describe_world("nibbleton").unwrap();
-		assert!(report.cast.is_empty());
+		assert!(report.cast.is_empty(), "no cast yet");
 		assert_eq!(
 			report.summary.about.as_deref(),
 			Some("A town of small habits.")
@@ -2406,7 +2451,10 @@ mod tests {
 			studio.create_character("nibbleton", &bad).unwrap_err()
 		);
 		assert!(error.contains("jetpack"), "{error}");
-		assert!(studio.describe_world("nibbleton").unwrap().cast.is_empty());
+		assert!(
+			studio.describe_world("nibbleton").unwrap().cast.is_empty(),
+			"no cast yet"
+		);
 		studio
 			.create_character("nibbleton", &brief("nell"))
 			.unwrap();
@@ -2470,6 +2518,107 @@ mod tests {
 		studio
 			.character_sheets("nibbleton", "nell", &[SheetKind::Model])
 			.unwrap();
+	}
+
+	#[test]
+	fn a_grown_up_starts_from_the_grown_up_template_and_a_redraw_that_opens_a_join_is_refused() {
+		let dir = tempfile::tempdir().unwrap();
+		let studio = Studio::new(dir.path());
+		studio
+			.create_world(&WorldBrief {
+				name: "Hoop Lane".into(),
+				about: None,
+				style: Some("rubber-hose".into()),
+				author: None,
+			})
+			.unwrap();
+		let grown_up = |id: &str, draw| {
+			CharacterBrief {
+				build: BuildName::GrownUp,
+				extras: Vec::new(),
+				draw,
+				..brief(id)
+			}
+		};
+		studio
+			.create_character("hoop-lane", &grown_up("gran", false))
+			.unwrap();
+		studio
+			.create_character("hoop-lane", &grown_up("pop", true))
+			.unwrap();
+
+		// Both start from the grown-up's torso, not the kid's: Gran reads it as her own parts,
+		// and Pop's file was written with it (as `character_create` with `draw` does).
+		let style = StylePack::named("rubber-hose").unwrap();
+		let torso = |parts: &Parts| parts.get("torso.front").unwrap().path().as_str().to_owned();
+		let grown_up_torso = torso(&style.template_for(Build::Grownup));
+		assert_ne!(grown_up_torso, torso(&style.template));
+		let gran = studio
+			.character_parts("hoop-lane", "gran", &["torso.front".into()])
+			.unwrap();
+		assert_eq!(
+			(gran[0].from, gran[0].d.as_str()),
+			("template", grown_up_torso.as_str())
+		);
+		let world = studio.world("hoop-lane").unwrap();
+		let pop = Parts::load(&world.dir.join("puppets/pop.svg")).unwrap();
+		assert!(
+			pop.get("tuft.front").is_none(),
+			"a grown-up has no kid's tuft"
+		);
+		assert_eq!(
+			pop.iter().count(),
+			style.template_for(Build::Grownup).iter().count()
+		);
+
+		// The kid's torso on a grown-up leaves the head and arms in the air: the whole figure
+		// still draws, but the redraw is refused with the gaps, and nothing is written.
+		let kid_torso = |view: &str| {
+			PartData {
+				name: format!("torso.{view}"),
+				d: style
+					.template
+					.get(&format!("torso.{view}"))
+					.unwrap()
+					.path()
+					.as_str()
+					.to_owned(),
+			}
+		};
+		let update = studio
+			.set_parts(
+				"hoop-lane",
+				"gran",
+				&[kid_torso("front"), kid_torso("3q")],
+				&[],
+			)
+			.unwrap();
+		assert!(!update.written);
+		assert!(
+			update
+				.findings
+				.iter()
+				.any(|finding| finding.contains("the head and its neck are clear of the torso")),
+			"{:#?}",
+			update.findings
+		);
+		assert!(!world.dir.join("puppets/gran.svg").exists());
+
+		// The same redraw is refused for a grown-up with a file of their own, which keeps it.
+		let before = std::fs::read_to_string(world.dir.join("puppets/pop.svg")).unwrap();
+		let update = studio
+			.set_parts(
+				"hoop-lane",
+				"pop",
+				&[kid_torso("front"), kid_torso("3q")],
+				&[],
+			)
+			.unwrap();
+		assert!(!update.written, "{:#?}", update.findings);
+		assert_eq!(
+			std::fs::read_to_string(world.dir.join("puppets/pop.svg")).unwrap(),
+			before
+		);
 	}
 
 	#[test]
