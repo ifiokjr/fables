@@ -237,6 +237,9 @@ pub struct StoryboardPinParams {
 	/// Remove the directions a previous pin wrote instead of pinning.
 	#[serde(default)]
 	pub unpin: bool,
+	/// Whose plan to pin: `landscape` (the default) or `portrait`.
+	#[serde(default)]
+	pub shape: Option<VideoShape>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -738,8 +741,9 @@ impl StudioServer {
 		description = "Pin the director's shot list into a book's script as editable `@camera` \
 		               directions, one before the line or direction that starts each shot, or \
 		               remove the ones pinned before (`unpin`). A page that already directs its \
-		               own camera is left as written; when portrait plans different shots, the \
-		               landscape plan is pinned and noted. Returns the new script."
+		               own camera is left as written. `shape` picks whose plan is pinned \
+		               (landscape by default); pages where the other shape plans other shots are \
+		               named in one note. Returns the new script."
 	)]
 	fn storyboard_pin(
 		&self,
@@ -747,10 +751,13 @@ impl StudioServer {
 	) -> CallToolResult {
 		let pages = (!params.pages.is_empty()).then_some(params.pages.as_slice());
 
-		json(
-			self.studio
-				.pin_story(&params.world, &params.story, pages, params.unpin),
-		)
+		json(self.studio.pin_story(
+			&params.world,
+			&params.story,
+			pages,
+			params.unpin,
+			params.shape.unwrap_or(VideoShape::Landscape),
+		))
 	}
 
 	#[tool(

@@ -27,7 +27,104 @@ fn timed(story: &Story, cast: &Cast, out: &Path) -> Timeline {
 	publish::estimated_timeline(story, cast, out).unwrap()
 }
 
-/// The three books the task names, pinned in memory and compared shot for shot.
+/// Pins `source` in one shape's plan, checks `--unpin` restores it byte for byte, and checks
+/// the pinned script shoots the same setups and shots as before. `replan` loads a script into
+/// a story, its cast and its estimated timeline.
+fn assert_pins_exactly(
+	name: &str,
+	source: &str,
+	portrait: bool,
+	replan: impl Fn(&str) -> (Story, Cast, Timeline),
+) {
+	let (story, cast, before) = replan(source);
+	let pinned = storyboard::pin(source, &story, &before, None, portrait).unwrap();
+
+	assert!(pinned.count > 0, "{name}: pinned nothing");
+	assert!(
+		!pinned.pages.is_empty(),
+		"{name}: pinned no pages ({} notes)",
+		pinned.notes.len()
+	);
+
+	// The marker lines are exactly what `--unpin` removes.
+	let (restored, removed) = storyboard::unpin(&pinned.script);
+	assert_eq!(
+		removed, pinned.count,
+		"{name}: every pinned line is removed"
+	);
+	assert_eq!(
+		restored, source,
+		"{name}: unpin restores the script byte for byte"
+	);
+
+	// The pinned script is still the same book, with the same cast.
+	let (after_story, after_cast, after) = replan(&pinned.script);
+
+	assert!(
+		(after.duration - before.duration).abs() < 1e-3,
+		"{name}: the film runs {:.3}s before pinning and {:.3}s after",
+		before.duration,
+		after.duration
+	);
+	assert_eq!(before.holds, after.holds, "{name}: dead stops");
+
+	for (before_shot, after_shot) in before.shots.iter().zip(&after.shots) {
+		let (x_setups, y_setups) = (
+			before_shot.setups_for(portrait),
+			after_shot.setups_for(portrait),
+		);
+		assert_eq!(before_shot.kind, after_shot.kind, "{name}");
+		assert_eq!(
+			x_setups.len(),
+			y_setups.len(),
+			"{name} {:?}: setups before {x_setups:#?} after {y_setups:#?}",
+			before_shot.kind,
+		);
+
+		for (x, y) in x_setups.iter().zip(y_setups) {
+			assert_eq!(x.framing, y.framing, "{name} {:?}", before_shot.kind);
+			assert_eq!(x.travel, y.travel, "{name} {:?}", before_shot.kind);
+			assert!(
+				(x.time - y.time).abs() < 0.01,
+				"{name} {:?}: a setup starts at {:.3}s before and {:.3}s after",
+				before_shot.kind,
+				x.time,
+				y.time
+			);
+			assert!(
+				(x.over - y.over).abs() < 0.01,
+				"{name} {:?}: move length {:.3}s before and {:.3}s after",
+				before_shot.kind,
+				x.over,
+				y.over
+			);
+		}
+	}
+
+	let before_rows = storyboard::plan(&story, &before, &cast, portrait);
+	let after_rows = storyboard::plan(&after_story, &after, &after_cast, portrait);
+	assert_eq!(before_rows.len(), after_rows.len(), "{name}: shot rows");
+
+	for (x, y) in before_rows.iter().zip(&after_rows) {
+		assert_eq!(x.size, y.size, "{name} #{}", x.number);
+		assert_eq!(x.subjects, y.subjects, "{name} #{}", x.number);
+		assert_eq!(x.movement, y.movement, "{name} #{}", x.number);
+		assert!(
+			(x.start - y.start).abs() < 0.01,
+			"{name} #{}: {:.3}s before and {:.3}s after",
+			x.number,
+			x.start,
+			y.start
+		);
+		assert!((x.hold - y.hold).abs() < 0.01, "{name} #{}", x.number);
+		assert_eq!(x.spoken.len(), y.spoken.len(), "{name} #{}", x.number);
+		assert_eq!(x.music, y.music, "{name} #{}", x.number);
+		assert!((x.stop - y.stop).abs() < 0.01, "{name} #{}", x.number);
+	}
+}
+
+/// The three books the task names, pinned in memory in each shape's plan and compared shot
+/// for shot.
 #[test]
 fn pinning_reproduces_the_plan_and_unpins_byte_for_byte() {
 	for name in [
@@ -36,93 +133,77 @@ fn pinning_reproduces_the_plan_and_unpins_byte_for_byte() {
 		"worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md",
 	] {
 		let path = script(name);
-		let (world, story, cast) = load(&path);
+		let (world, ..) = load(&path);
 		let out = tempfile::tempdir().unwrap();
-		let before = timed(&story, &cast, out.path());
 		let source = std::fs::read_to_string(&path).unwrap();
-		let pinned = storyboard::pin(&source, &story, &before, None).unwrap();
+		let replan = |script: &str| {
+			let mut story = fables::story::parse(script).unwrap();
+			world.furnish(&mut story).unwrap();
+			let cast = world.cast_for(&story).unwrap();
+			let timeline = timed(&story, &cast, out.path());
+			(story, cast, timeline)
+		};
 
-		assert!(pinned.count > 0, "{name}: pinned nothing");
-		assert!(
-			!pinned.pages.is_empty(),
-			"{name}: pinned no pages ({} notes)",
-			pinned.notes.len()
-		);
-
-		// The marker lines are exactly what `--unpin` removes.
-		let (restored, removed) = storyboard::unpin(&pinned.script);
-		assert_eq!(
-			removed, pinned.count,
-			"{name}: every pinned line is removed"
-		);
-		assert_eq!(
-			restored, source,
-			"{name}: unpin restores the script byte for byte"
-		);
-
-		// The pinned script is still the same book, with the same cast.
-		let mut after_story = fables::story::parse(&pinned.script).unwrap();
-		world.furnish(&mut after_story).unwrap();
-		let after_cast = world.cast_for(&after_story).unwrap();
-		let after = timed(&after_story, &after_cast, out.path());
-
-		assert!(
-			(after.duration - before.duration).abs() < 1e-3,
-			"{name}: the film runs {:.3}s before pinning and {:.3}s after",
-			before.duration,
-			after.duration
-		);
-
-		for (before_shot, after_shot) in before.shots.iter().zip(&after.shots) {
-			assert_eq!(before_shot.kind, after_shot.kind, "{name}");
-			assert_eq!(
-				before_shot.setups.len(),
-				after_shot.setups.len(),
-				"{name} {:?}: setups before {:#?} after {:#?}",
-				before_shot.kind,
-				before_shot.setups,
-				after_shot.setups
+		for portrait in [false, true] {
+			assert_pins_exactly(
+				&format!("{name} (portrait {portrait})"),
+				&source,
+				portrait,
+				replan,
 			);
-
-			for (x, y) in before_shot.setups.iter().zip(&after_shot.setups) {
-				assert_eq!(x.framing, y.framing, "{name} {:?}", before_shot.kind);
-				assert_eq!(x.travel, y.travel, "{name} {:?}", before_shot.kind);
-				assert!(
-					(x.time - y.time).abs() < 0.01,
-					"{name} {:?}: a setup starts at {:.3}s before and {:.3}s after",
-					before_shot.kind,
-					x.time,
-					y.time
-				);
-				assert!(
-					(x.over - y.over).abs() < 0.01,
-					"{name} {:?}: move length {:.3}s before and {:.3}s after",
-					before_shot.kind,
-					x.over,
-					y.over
-				);
-			}
-		}
-
-		let before_rows = storyboard::plan(&story, &before, &cast, false);
-		let after_rows = storyboard::plan(&after_story, &after, &after_cast, false);
-		assert_eq!(before_rows.len(), after_rows.len(), "{name}: shot rows");
-
-		for (x, y) in before_rows.iter().zip(&after_rows) {
-			assert_eq!(x.size, y.size, "{name} #{}", x.number);
-			assert_eq!(x.subjects, y.subjects, "{name} #{}", x.number);
-			assert_eq!(x.movement, y.movement, "{name} #{}", x.number);
-			assert!(
-				(x.start - y.start).abs() < 0.01,
-				"{name} #{}: {:.3}s before and {:.3}s after",
-				x.number,
-				x.start,
-				y.start
-			);
-			assert!((x.hold - y.hold).abs() < 0.01, "{name} #{}", x.number);
-			assert_eq!(x.spoken.len(), y.spoken.len(), "{name} #{}", x.number);
 		}
 	}
+}
+
+/// A book with an age band (its own lead-in, gaps and tail), a heading's `hold=` and an
+/// `@hold` dead stop, music cues and a slow push: a pinned `after=` is measured the way the
+/// timeline measures time, so it still lands where the director put it.
+#[test]
+fn pinning_stays_exact_with_an_age_band_and_dead_stops() {
+	let source = "+++\ntitle = \"Holding On\"\nauthor = \"A\"\nage = \"3-5\"\nstar = \
+	              \"kid\"\n[video]\ncast-voices = true\n+++\n# park hold=1.5\n@kid x=0.3\n@mum \
+	              x=0.7\nThe kite went up and up and up, past the trees and the tall red chimney \
+	              and the little round clouds, and Kid watched it go all the way.\n@kid \
+	              talk\n\"Look at it fly,\" said Kid.\n@hold 2\n@mum talk\n\"Hold on tight,\" \
+	              said Mum.\n@music tense\n@kid shocked talk\n\"It is pulling me!\" said \
+	              Kid.\n\n# garden hold=0.8\n@kid x=0.4\n@hold 1.2\nThe wind dropped, and the \
+	              kite came down softly onto the grass, and everything was quiet again.\n";
+	let cast =
+		Cast::parse("[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n").unwrap();
+	let out = tempfile::tempdir().unwrap();
+	let replan = |script: &str| {
+		let story = fables::story::parse(script).unwrap();
+		let timeline = timed(&story, &cast, out.path());
+		(story, cast.clone(), timeline)
+	};
+
+	let (story, _, timeline) = replan(source);
+	assert!(story.age.is_some(), "the book has an age band");
+	assert!(
+		timeline.holds.len() >= 3,
+		"both headings' holds and the @hold dead stops are in the timeline: {:?}",
+		timeline.holds
+	);
+	assert!(
+		timeline
+			.shots
+			.iter()
+			.any(|shot| { shot.setups.iter().any(|setup| setup.travel.is_move()) }),
+		"the long opening hold rides a slow push, so a pin needs `after=`"
+	);
+
+	for portrait in [false, true] {
+		assert_pins_exactly(
+			&format!("holding on (portrait {portrait})"),
+			source,
+			portrait,
+			replan,
+		);
+	}
+
+	// The pinned script's `after=` lines are what make this hard; check one is written.
+	let pinned = storyboard::pin(source, &story, &timeline, None, false).unwrap();
+	assert!(pinned.script.contains("after="), "{}", pinned.script);
 }
 
 /// Whether two timelines shoot the same setups. Both come from one script with or without a
@@ -157,9 +238,15 @@ fn a_pinned_line_writes_no_option_at_its_default() {
 		let (world, story, cast) = load(&path);
 		let out = tempfile::tempdir().unwrap();
 		let source = std::fs::read_to_string(&path).unwrap();
-		let pinned = storyboard::pin(&source, &story, &timed(&story, &cast, out.path()), None)
-			.unwrap()
-			.script;
+		let pinned = storyboard::pin(
+			&source,
+			&story,
+			&timed(&story, &cast, out.path()),
+			None,
+			false,
+		)
+		.unwrap()
+		.script;
 		let replan = |script: &str| {
 			let mut story = fables::story::parse(script).unwrap();
 			world.furnish(&mut story).unwrap();
@@ -223,6 +310,7 @@ fn pinning_named_pages_touches_only_them() {
 		&story,
 		&timed(&story, &cast, out.path()),
 		Some(&[3]),
+		false,
 	)
 	.unwrap();
 
@@ -259,7 +347,14 @@ fn pinning_leaves_comments_and_spacing_alone() {
 	let cast =
 		Cast::parse("[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n").unwrap();
 	let out = tempfile::tempdir().unwrap();
-	let pinned = storyboard::pin(source, &story, &timed(&story, &cast, out.path()), None).unwrap();
+	let pinned = storyboard::pin(
+		source,
+		&story,
+		&timed(&story, &cast, out.path()),
+		None,
+		false,
+	)
+	.unwrap();
 
 	assert!(pinned.count > 0);
 	assert!(pinned.script.contains("// a comment"));
@@ -281,7 +376,14 @@ fn a_page_with_no_body_pins_after_its_heading() {
 	let story = fables::story::parse(source).unwrap();
 	let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
 	let out = tempfile::tempdir().unwrap();
-	let pinned = storyboard::pin(source, &story, &timed(&story, &cast, out.path()), None).unwrap();
+	let pinned = storyboard::pin(
+		source,
+		&story,
+		&timed(&story, &cast, out.path()),
+		None,
+		false,
+	)
+	.unwrap();
 
 	assert!(
 		pinned.script.contains("# park\n@camera "),
@@ -304,11 +406,10 @@ fn the_visitor_shot_list_names_every_shot_and_its_line() {
 		text.starts_with("# The Visitor — shot list (landscape)"),
 		"{text}"
 	);
-	assert!(
-		text.contains(
-			"| # | page | line | at | hold | shot | subjects | move | in | by | spoken |"
-		)
-	);
+	assert!(text.contains(
+		"| # | page | line | at | length | shot | subjects | move | in | by | music | stop | \
+		 spoken |"
+	));
 	assert!(text.contains("**Length.** 16:9"), "{text}");
 	assert!(text.contains("**Shots.**"), "{text}");
 	assert!(text.contains("**Short.**"), "{text}");
@@ -368,5 +469,32 @@ fn animatic_frames_land_on_the_timelines_boundaries() {
 			(timeline.duration * 24.0).round() as usize,
 			"{name}: the last shot ends where the timeline does"
 		);
+	}
+}
+
+/// Where the two shapes plan other shots, one note names those pages and the way the other
+/// shape leans, so a writer knows `--format portrait` would pin something else.
+#[test]
+fn one_note_names_the_pages_the_other_shape_shoots_differently() {
+	let path = script("worlds/mumbleton/stories/the-visitor/story.md");
+	let (_, story, cast) = load(&path);
+	let out = tempfile::tempdir().unwrap();
+	let source = std::fs::read_to_string(&path).unwrap();
+	let timeline = timed(&story, &cast, out.path());
+
+	for (portrait, expected) in [
+		(false, "portrait plans closer shots on pages 1, "),
+		(true, "landscape plans wider shots on pages 1, "),
+	] {
+		let pinned = storyboard::pin(&source, &story, &timeline, None, portrait).unwrap();
+		let notes: Vec<&String> = pinned
+			.notes
+			.iter()
+			.filter(|note| note.contains("plans"))
+			.collect();
+
+		assert_eq!(notes.len(), 1, "one note per pin run: {:?}", pinned.notes);
+		assert!(notes[0].starts_with(expected), "{}", notes[0]);
+		assert!(notes[0].contains("--format portrait"), "{}", notes[0]);
 	}
 }

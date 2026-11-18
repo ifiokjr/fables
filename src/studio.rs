@@ -1105,6 +1105,7 @@ impl Studio {
 		story: &str,
 		pages: Option<&[usize]>,
 		unpin: bool,
+		shape: VideoShape,
 	) -> Result<PinReport> {
 		let (world, script, cast) = self.book(folder, story)?;
 		let path = world::under(&world.stories(), "story", Path::new(story).join("story.md"))?;
@@ -1126,7 +1127,13 @@ impl Studio {
 		}
 
 		let timeline = publish::estimated_timeline(&script, &cast, &self.root.join("out"))?;
-		let pinned = crate::press::storyboard::pin(&source, &script, &timeline, pages)?;
+		let pinned = crate::press::storyboard::pin(
+			&source,
+			&script,
+			&timeline,
+			pages,
+			shape == VideoShape::Portrait,
+		)?;
 		std::fs::write(&path, &pinned.script)
 			.with_context(|| format!("could not write {}", path.display()))?;
 

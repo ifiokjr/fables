@@ -21,6 +21,7 @@ use crate::story::Story;
 use crate::story::Transition;
 use crate::story::plain_text;
 use crate::text::display_width;
+use crate::video::audio::Music;
 use crate::video::director;
 use crate::video::director::View;
 use crate::video::frames::Format;
@@ -103,6 +104,11 @@ pub struct Row {
 	pub short: bool,
 	/// The words spoken over the shot, plain text.
 	pub spoken: Vec<String>,
+	/// The music cue that comes in during the shot (the film's first cue on the first shot);
+	/// `None` while the cue before it plays on.
+	pub music: Option<Music>,
+	/// Seconds of dead stop (`@hold`, or a heading's `hold=`) inside the shot.
+	pub stop: f32,
 	/// The first and last setups in the timeline this shot covers. A move that continues the
 	/// shot before it is the second setup, and belongs to the same row.
 	pub first_setup: usize,
@@ -261,6 +267,8 @@ pub fn plan(_story: &Story, timeline: &Timeline, cast: &Cast, portrait: bool) ->
 				origin: setup.origin,
 				short: end - setup.time + 0.01 < director::MIN_SHOT,
 				spoken: spoken(timeline, shot, setup.time, end),
+				music: None,
+				stop: 0.0,
 				first_setup: index,
 				last_setup: index,
 			});
@@ -270,6 +278,18 @@ pub fn plan(_story: &Story, timeline: &Timeline, cast: &Cast, portrait: bool) ->
 
 	for (index, row) in rows.iter_mut().enumerate() {
 		row.number = index + 1;
+		let end = row.start + row.hold;
+		row.music = timeline
+			.music
+			.iter()
+			.filter(|cue| cue.time >= row.start - 1e-3 && cue.time < end - 1e-3)
+			.next_back()
+			.map(|cue| cue.music);
+		row.stop = timeline
+			.holds
+			.iter()
+			.map(|hold| (hold.end.min(end) - hold.start.max(row.start)).max(0.0))
+			.sum();
 	}
 
 	rows
@@ -552,16 +572,23 @@ pub fn shot_list(story: &Story, timeline: &Timeline, rows: &[Row], portrait: boo
 	let _ = write!(
 		out,
 		"# {} — shot list ({shape})\n\nOne row per shot the camera makes, in film order. `line` \
-		 is the story.md line the shot starts at.\n\n",
+		 is the story.md line the shot starts at; `music` names a cue that comes in during the \
+		 shot, and `stop` the seconds of dead stop (`@hold`, `hold=`) inside it.\n\n",
 		story.meta.title
 	);
-	out.push_str("| # | page | line | at | hold | shot | subjects | move | in | by | spoken |\n");
-	out.push_str("|---|------|------|----|------|------|----------|------|----|----|--------|\n");
+	out.push_str(
+		"| # | page | line | at | length | shot | subjects | move | in | by | music | stop | \
+		 spoken |\n",
+	);
+	out.push_str(
+		"|---|------|------|----|--------|------|----------|------|----|----|-------|------|\
+		 --------|\n",
+	);
 
 	for row in rows {
 		let _ = writeln!(
 			out,
-			"| {} | {} | {} | {:.1}s | {:.1}s | {} | {} | {} | {} | {} | {} |",
+			"| {} | {} | {} | {:.1}s | {:.1}s | {} | {} | {} | {} | {} | {} | {} | {} |",
 			row.number,
 			row.page_cell(),
 			row.line_cell(),
@@ -573,6 +600,12 @@ pub fn shot_list(story: &Story, timeline: &Timeline, rows: &[Row], portrait: boo
 				.map_or("—".to_owned(), |travel| travel.name().to_owned()),
 			row.entry.text(),
 			row.origin.name(),
+			row.music.map_or("—", Music::name),
+			if row.stop > 0.05 {
+				format!("{:.1}s", row.stop)
+			} else {
+				"—".to_owned()
+			},
 			cell(&row.spoken.join(" / ")),
 		);
 	}
@@ -629,16 +662,18 @@ pub struct Pinned {
 /// Writes the director's shots into the script as `@camera` directions, each before the line
 /// or direction that starts it, so the writer can edit, delete or reorder them. A pinned
 /// direction reproduces the director's choice: its framing, move, landing time and shake.
-/// Pages that already direct their own camera are left exactly as written.
+/// Pages that already direct their own camera are left exactly as written. `portrait` pins the
+/// portrait plan instead of the landscape one; a pinned page is shot as written in both.
 pub fn pin(
 	source: &str,
 	story: &Story,
 	timeline: &Timeline,
 	pages: Option<&[usize]>,
+	portrait: bool,
 ) -> Result<Pinned> {
 	if story.meta.video.direction != Direction::Auto {
 		anyhow::bail!(
-			"pinning needs `[video] direction = \"auto\"`; the locked camera has no script 			 \
+			"pinning needs `[video] direction = \"auto\"`; the locked camera has no script \
 			 vocabulary"
 		);
 	}
@@ -651,6 +686,9 @@ pub fn pin(
 	let mut insertions: Vec<(usize, String)> = Vec::new();
 	let mut pinned_pages = Vec::new();
 	let mut notes = Vec::new();
+	// Pages whose other shape plans other shot sizes or subjects, and which way they lean.
+	let mut differ = Vec::new();
+	let mut closer = 0_i32;
 
 	for shot in &timeline.shots {
 		let Some(page) = shot.kind.page() else {
@@ -671,10 +709,15 @@ pub fn pin(
 
 		pinned_pages.push(number);
 
-		if plans_differ(&shot.setups, &shot.portrait_setups) {
-			notes.push(format!(
-				"page {number} plans different shots for portrait; pinned the landscape plan"
-			));
+		let (pinned, other) = if portrait {
+			(&shot.portrait_setups, &shot.setups)
+		} else {
+			(&shot.setups, &shot.portrait_setups)
+		};
+
+		if let Some(lean) = shots_differ(pinned, other) {
+			differ.push(number);
+			closer += lean;
 		}
 
 		// The page's opening camera goes straight after its heading, so it stays inside the
@@ -704,7 +747,7 @@ pub fn pin(
 		let mut camera = Carried::opening(shot);
 		let mut waiting: Vec<(f32, Carried)> = Vec::new();
 
-		for (index, setup) in shot.setups.iter().enumerate() {
+		for (index, setup) in pinned.iter().enumerate() {
 			let anchor = if index == 0 {
 				heading + 1
 			} else if setup.line <= heading {
@@ -744,6 +787,28 @@ pub fn pin(
 
 			insertions.push((anchor, format!("{direction}{newline}")));
 		}
+	}
+
+	if !differ.is_empty() {
+		let list = differ
+			.iter()
+			.map(usize::to_string)
+			.collect::<Vec<_>>()
+			.join(", ");
+		let (other, how) = if portrait {
+			("landscape", "pin without `--format portrait`")
+		} else {
+			("portrait", "pin with `--format portrait`")
+		};
+		// `closer` already leans from the pinned plan towards the other one.
+		let lean = match closer.signum() {
+			1 => "closer",
+			-1 => "wider",
+			_ => "other",
+		};
+		notes.push(format!(
+			"{other} plans {lean} shots on pages {list}; {how} to pin those instead"
+		));
 	}
 
 	if pinned_pages.is_empty() && notes.is_empty() {
@@ -961,11 +1026,37 @@ fn beat_time(shot: &Shot, line: usize) -> Option<f32> {
 		})
 }
 
-fn plans_differ(landscape: &[Setup], portrait: &[Setup]) -> bool {
-	landscape.len() != portrait.len()
-		|| landscape.iter().zip(portrait).any(|(a, b)| {
-			a.framing != b.framing || a.travel != b.travel || (a.time - b.time).abs() > 0.01
-		})
+/// Whether `other` plans other shot sizes or subjects than `pinned`, ignoring framing numbers
+/// and timing, and if so how much closer it frames: positive when `other` is closer.
+fn shots_differ(pinned: &[Setup], other: &[Setup]) -> Option<i32> {
+	let shots = |setups: &[Setup]| -> Vec<(i32, Vec<String>)> {
+		setups
+			.iter()
+			.filter_map(|setup| {
+				match &setup.framing {
+					Framing::Shot { size, on } => Some((*size as i32, on.clone())),
+					_ => None,
+				}
+			})
+			.collect()
+	};
+	let (pinned, other) = (shots(pinned), shots(other));
+
+	if pinned == other {
+		return None;
+	}
+
+	// The mean shot size, wide 0 to extreme close 4, so a plan with more shots is not closer
+	// for that alone.
+	let closeness = |shots: &[(i32, Vec<String>)]| {
+		shots.iter().map(|(size, _)| *size as f32).sum::<f32>() / shots.len().max(1) as f32
+	};
+	let lean = closeness(&other) - closeness(&pinned);
+	Some(if lean.abs() < 1e-3 {
+		0
+	} else {
+		lean.signum() as i32
+	})
 }
 
 /// A number as the script writes it: no exponent, no trailing zeros.
@@ -1247,7 +1338,8 @@ mod tests {
 
 		let text = shot_list(&story, &timeline, &rows, false);
 		assert!(text.contains(
-			"| # | page | line | at | hold | shot | subjects | move | in | by | spoken |"
+			"| # | page | line | at | length | shot | subjects | move | in | by | music | stop | \
+			 spoken |"
 		));
 		assert!(text.contains("**Length.** 16:9"));
 		assert!(text.contains("**Shots.**"));
