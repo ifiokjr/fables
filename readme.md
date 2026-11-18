@@ -277,7 +277,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `age` sets how the book is read aloud: the narration rate (about 125, 135 and 150 words a minute for `under-3`, `3-5` and `5-7`), the gaps between lines and the tail after a page, and how long a page in a new place is seen before it is talked over. A world sets a default in its `world.toml`, a book's own `age` wins, and a narrator with an explicit `rate` keeps it. A book with no `age` anywhere keeps the older, brisker timing (165 words a minute), so its video does not change; `fables check` suggests one.
 
-- **In the book**, each page shows the stage *at the end of the page*. The text sits on a paper card, at the top unless the heading says `text=bottom`.
+- **In the book**, each page shows the stage *at the end of the page*, framed by its heading alone (`shot=`, `on=`, `zoom=`, `look=`; `@camera` is video-only, so pinning a camera plan never changes a page). The text sits on a paper card, at the top unless the heading says `text=bottom`. A world whose cast is only the star gets no "meet the folk" page.
+- **On the cover**, the star takes `[cover]`'s `pose` in its `setting`, `tint` and `light` (any light preset, such as `light = "moonlit"`; daylight when unset).
 - **In the video**, each `@` line takes effect *when the narrator reaches it*. Above, Mum points and talks during the first line; Stanley crosses his arms and his mouth moves during the second.
 
 ### Text

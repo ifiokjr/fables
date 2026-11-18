@@ -155,6 +155,58 @@ fn pinning_reproduces_the_plan_and_unpins_byte_for_byte() {
 	}
 }
 
+/// `@camera` is video-only: a book page is framed by its heading alone, so pinning the
+/// director's plan into a script leaves every proof page exactly as it was.
+#[test]
+fn pinning_leaves_every_proof_page_as_it_was() {
+	use fables::book;
+
+	let pages_of = |story: &Story, cast: &Cast| -> Vec<String> {
+		book::assemble(story, cast)
+			.unwrap()
+			.iter()
+			.map(|page| book::page_svg(page, book::Side::Screen, 256, 256, true))
+			.collect()
+	};
+
+	for name in [
+		"worlds/mumbleton/stories/the-visitor/story.md",
+		"worlds/mumbleton/stories/camera-test/story.md",
+		"worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md",
+	] {
+		let path = script(name);
+		let (world, ..) = load(&path);
+		let out = tempfile::tempdir().unwrap();
+		let source = std::fs::read_to_string(&path).unwrap();
+		let book_of = |script: &str| {
+			let mut story = fables::story::parse(script).unwrap();
+			world.furnish(&mut story).unwrap();
+			let cast = world.cast_for(&story).unwrap();
+			(story, cast)
+		};
+		let (story, cast) = book_of(&source);
+		let before = pages_of(&story, &cast);
+
+		for portrait in [false, true] {
+			let timeline = timed(&story, &cast, out.path());
+			let pinned = storyboard::pin(&source, &story, &timeline, None, portrait).unwrap();
+			assert!(pinned.count > 0, "{name}: pinned nothing");
+
+			let (after_story, after_cast) = book_of(&pinned.script);
+			let after = pages_of(&after_story, &after_cast);
+
+			assert_eq!(before.len(), after.len(), "{name}: page count");
+
+			for (number, (x, y)) in before.iter().zip(&after).enumerate() {
+				assert!(
+					x == y,
+					"{name} (portrait {portrait}): page {number} changed when pinned"
+				);
+			}
+		}
+	}
+}
+
 /// A book with an age band (its own lead-in, gaps and tail), a heading's `hold=` and an
 /// `@hold` dead stop, music cues and a slow push: a pinned `after=` is measured the way the
 /// timeline measures time, so it still lands where the director put it.
