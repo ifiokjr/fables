@@ -14,6 +14,7 @@
 //! walking up from the script (or the current folder) to the nearest `world.toml`. From a
 //! folder that holds `worlds/`, a single world there is used without asking.
 
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use serde::Deserialize;
 
 use crate::art::light::Light;
@@ -41,6 +43,38 @@ pub const FILE: &str = "world.toml";
 /// A world's folder name (the last component of its path).
 fn folder_of(dir: &Path) -> &str {
 	dir.file_name().and_then(|name| name.to_str()).unwrap_or("")
+}
+
+/// A path under `root` named by a tool argument or by a value read from a file under the root.
+///
+/// The name must be a relative path of plain components: an empty name, an absolute path, or a
+/// `.`/`..` component is refused before the file system is touched, and the joined path is
+/// proved to still sit under `root`.
+pub fn under(root: &Path, what: &str, name: impl AsRef<Path>) -> Result<PathBuf> {
+	let name = name.as_ref();
+	let plain = !name.as_os_str().is_empty()
+		&& name
+			.components()
+			.all(|part| matches!(part, Component::Normal(_)));
+	ensure!(
+		plain,
+		"`{}` is not a {what} name: use a plain name, never a path",
+		name.display()
+	);
+
+	let path = root.join(name);
+	let inside = path.strip_prefix(root).is_ok_and(|rest| {
+		rest.components()
+			.all(|part| matches!(part, Component::Normal(_)))
+	});
+	ensure!(
+		inside,
+		"`{}` is not a {what} name: it leads outside {}",
+		name.display(),
+		root.display()
+	);
+
+	Ok(path)
 }
 
 /// A loaded world.
@@ -207,7 +241,13 @@ impl World {
 	pub fn for_story(story: &Story, explicit: Option<&Path>) -> Result<World> {
 		match (explicit, story.meta.world.as_deref()) {
 			(Some(dir), _) => Self::load(dir),
-			(None, Some(dir)) => Self::load(&story.dir.join(dir)),
+			(None, Some(dir)) => {
+				ensure!(
+					!Path::new(dir).is_absolute(),
+					"a script's `world` must be a path relative to the script, not `{dir}`"
+				);
+				Self::load(&story.dir.join(dir))
+			}
 			(None, None) => Self::find(&story.dir),
 		}
 	}
@@ -282,6 +322,14 @@ impl World {
 				} else {
 					format!("the worlds beside {} are {}", self.name, folders.join(", "))
 				};
+
+				if folder == folder_of(&self.dir) {
+					bail!(
+						"`{invited}` invites somebody from {}'s own world; guests come from \
+						 another world under the same root ({beside})",
+						self.name
+					);
+				}
 
 				bail!("there is no world `{folder}` to invite a guest from; {beside}");
 			};
@@ -405,6 +453,73 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let error = format!("{:#}", World::find(dir.path()).unwrap_err());
 		assert!(error.contains("--world"), "{error}");
+	}
+
+	#[test]
+	fn a_script_may_name_its_world_but_only_by_a_relative_path() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = world(dir.path(), "home", "");
+		let book = home.join("stories/book");
+		std::fs::create_dir_all(&book).unwrap();
+		let script = book.join("story.md");
+
+		std::fs::write(
+			&script,
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nworld = \"../../../home\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		let story = Story::load(&script).unwrap();
+		assert_eq!(World::for_story(&story, None).unwrap().name, "home");
+
+		std::fs::write(
+			&script,
+			format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\nworld = \"{}\"\n+++\n# plain\nHi.\n",
+				home.display()
+			),
+		)
+		.unwrap();
+		let story = Story::load(&script).unwrap();
+		let error = format!("{:#}", World::for_story(&story, None).unwrap_err());
+		assert!(
+			error.contains("relative") && error.contains("world"),
+			"{error}"
+		);
+	}
+
+	#[test]
+	fn a_joined_path_never_leaves_its_root() {
+		let root = Path::new("/studio/worlds");
+
+		assert_eq!(
+			under(root, "world", "kerfuffle").unwrap(),
+			root.join("kerfuffle")
+		);
+		assert_eq!(
+			under(root, "puppet", "puppets/nell.svg").unwrap(),
+			root.join("puppets/nell.svg")
+		);
+
+		for name in ["", ".", "..", "../outside", "/etc/passwd", "a/../../b"] {
+			let error = format!("{:#}", under(root, "world", name).unwrap_err());
+			assert!(error.contains("not a world name"), "{name:?}: {error}");
+		}
+	}
+
+	#[test]
+	fn inviting_your_own_world_says_guests_come_from_another() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = two_worlds(dir.path());
+		let error = format!(
+			"{:#}",
+			home.cast_for(&story_with_guests("guests = [\"home/mo\"]\n"))
+				.unwrap_err()
+		);
+
+		assert!(
+			error.contains("home/mo") && error.contains("another world"),
+			"{error}"
+		);
 	}
 
 	#[test]
