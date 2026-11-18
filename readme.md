@@ -24,6 +24,24 @@ The proofs and contact sheet, the storyboard and the preview video land under `o
 an example world; to make your own from nothing, start with
 [Your first cartoon in five minutes](docs/first-cartoon.md).
 
+## Gallery
+
+Three of the example books as cartoons, each in a different drawing style and story flow. Click a cover for its storyboard, frames and preview video.
+
+[![The Lamplighter's Yawn](https://github.com/user-attachments/assets/e95889b1-9ccc-4c79-8677-eec6ac2bf042)](https://github.com/ifiokjr/fables/issues/18#issuecomment-6993927939)
+
+*The Lamplighter's Yawn*: `silhouette` style, `round-we-go` flow ([script](worlds/lantern-lane/stories/the-lamplighter-s-yawn/story.md)).
+
+[![The Letter with No Address](https://github.com/user-attachments/assets/d61f7edf-202e-4c07-aa2c-52eae3cd72d1)](https://github.com/ifiokjr/fables/issues/18#issuecomment-6993927939)
+
+*The Letter with No Address*: `rubber-hose` style, `there-and-back` flow ([script](worlds/hoppington/stories/the-letter-with-no-address/story.md)).
+
+[![Mochi and the Fireworks](https://github.com/user-attachments/assets/4c258cb5-f5db-4733-bb60-d627185e9cc7)](https://github.com/ifiokjr/fables/issues/18#issuecomment-6993927939)
+
+*Mochi and the Fireworks*: `chibi` style, `three-tries` flow ([script](worlds/teacup-town/stories/mochi-and-the-fireworks/story.md)).
+
+The images live on the pinned issue [Media assets](https://github.com/ifiokjr/fables/issues/18), so no media is committed here. The previews were rendered with a stand-in voice, so they have timing but no speech.
+
 ## Why it works this way
 
 Every character is a **puppet drawn in code**, not a generated picture. That one decision is what makes the rest possible:
