@@ -336,7 +336,18 @@ impl Scene {
 			match token.key.as_str() {
 				// Page-level choices, not scene state: the book and the timeline read them
 				// from the heading.
-				"text" | "video" | "book" | "size" | "no-wormsley" => {}
+				"text" | "video" | "book" | "no-wormsley" => {}
+				"size" => {
+					let value = token.value.as_deref().with_context(|| {
+						format!("line {}: `size` needs a scale, e.g. `size=0.9`", page.line)
+					})?;
+					let scale = number(token, value, page.line)?;
+					ensure!(
+						scale > 0.0,
+						"line {}: `size` must be more than zero, e.g. `size=0.9`",
+						page.line
+					);
+				}
 				"transition" => {
 					transition(token.value.as_deref(), page.line)?;
 				}
@@ -1093,6 +1104,7 @@ mod tests {
 				format!("# park\n@stinky size={value}"),
 				format!("# park\n@stinky x={value}"),
 				format!("# park wilt={value}"),
+				format!("# park size={value}"),
 				format!("# park\n@camera look={value},{value}"),
 				format!("# park\n@camera shake={value}"),
 			] {
@@ -1102,6 +1114,12 @@ mod tests {
 					"{script}: {message}"
 				);
 			}
+		}
+
+		// A page's text scale must also leave the type a size to set.
+		for value in ["0", "-1"] {
+			let message = format!("{:#}", run(&format!("# park size={value}")).unwrap_err());
+			assert!(message.contains("more than zero"), "{value}: {message}");
 		}
 	}
 
