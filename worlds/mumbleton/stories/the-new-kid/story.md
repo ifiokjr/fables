@@ -59,17 +59,17 @@ Nan put down the basket and stared. The pins in her mouth clicked. Mo gave her h
 @nan x=0.7 worried
 Mo stared back. Maybe the new kid did not like songs. Maybe it wanted the socks a different way. He checked his pockets for a better answer.
 
-# garden dusk hold=2 shot=extreme-close on=mo
+# garden dusk hold=2 shot=full on=mo,dog.a
 @mo x=0.4 shocked
 @camera move=pull over=2
-@dog.a x=0.85 enter=right wag
-@nan x=0.7 laugh
+@dog.a x=0.62 enter=right wag
+@nan x=0.85 laugh
 The new kid arrived. It had four paws, one wet nose, and Mo's best sock in its mouth.
 
 # garden dusk shot=wide
-@mo x=0.3 laugh
-@nan x=0.7 laugh
-@dog.a x=0.85 wag
+@mo x=0.3 laugh sit
+@nan x=0.85 laugh
+@dog.a x=0.6 wag
 Mo laughed so hard he had to sit down on the grass. The new kid sat down too, and dropped the sock. The sock was very wet.
 
 # garden moonlit shot=wide
