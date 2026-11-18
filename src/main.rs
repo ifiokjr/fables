@@ -933,7 +933,7 @@ fn flow_show(world: Option<&World>, name: &str) -> Result<()> {
 			beat.pages,
 			pages((beat.words[0], beat.words[1]))
 		)?;
-		say!("  {:<width$}  {}", "", beat.note)?;
+		say!("    {}", beat.note)?;
 	}
 
 	Ok(())
