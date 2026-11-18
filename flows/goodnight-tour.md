@@ -58,6 +58,7 @@ note = "Three to eight words, no more; the music stops and the page fades."
 // The Goodnight Tour: a bedtime walk that says goodnight to the world, one place a page.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: Evening, and a small problem. Two pages, 30–35 words.
 // Golden light, and a calm camera; golden already picks the calm cue.

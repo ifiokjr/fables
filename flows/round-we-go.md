@@ -52,6 +52,7 @@ note = "The same framing once more, and the smallest possible line; iris out on 
 // Round We Go: one tiny cause, seven consequences, and the same image at the end.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: The opening image and a tiny cause. One page, 15–25 words.
 // Note this framing exactly: setting, light, shot and where everyone stands. Page 9 returns

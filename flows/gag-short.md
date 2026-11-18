@@ -70,6 +70,7 @@ note = "Three to eight words, and the iris: end on the image, not the explanatio
 // The Gag Short: one want, three gags, and a twist with no anticipation.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables storyboard` to see the timing before you render video.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: Normal. One page, 5–15 words.
 // One full shot, one locked camera.

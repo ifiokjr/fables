@@ -97,6 +97,7 @@ enum Command {
 		dir: Option<PathBuf>,
 	},
 	/// Choose a story flow: a laid-out shape a new book can start from.
+	#[command(visible_alias = "flows")]
 	Flow {
 		#[command(subcommand)]
 		action: FlowAction,
@@ -111,7 +112,7 @@ enum Command {
 		#[command(subcommand)]
 		action: Box<CharacterAction>,
 	},
-	/// Start a world's own setting, blank or from one it already uses.
+	/// List the settings and lights a world's pages can use, or start a setting of its own.
 	Setting {
 		#[command(subcommand)]
 		action: SettingAction,
@@ -289,52 +290,76 @@ enum CharacterAction {
 	/// Add a character to the world's cast, in their own colours.
 	///
 	/// Example: `fables character new pip --name "Pip Pocket" --top teal --draw`
-	New {
-		/// The cast id scripts use after `@`: lowercase letters, digits and hyphens.
-		id: String,
-		/// Their full name, e.g. "Pip Pocket".
-		#[arg(long)]
-		name: String,
-		/// kid or grown-up.
-		#[arg(long, default_value = "kid", value_parser = ["kid", "grown-up"])]
-		kind: String,
-		/// Who they are, in a sentence.
-		#[arg(long)]
-		about: Option<String>,
-		#[arg(long)]
-		skin: Option<String>,
-		#[arg(long = "hair-colour")]
-		hair_colour: Option<String>,
-		#[arg(long)]
-		top: Option<String>,
-		#[arg(long)]
-		trim: Option<String>,
-		#[arg(long)]
-		bottom: Option<String>,
-		#[arg(long)]
-		shoes: Option<String>,
-		#[arg(long)]
-		eyes: Option<String>,
-		/// The pattern on the top, in the trim colour: plain, stripes, dots or star.
-		#[arg(long)]
-		pattern: Option<String>,
-		/// A hairdo their style draws on their body (`fables style describe` lists them). Left
-		/// out, one is picked from their id.
-		#[arg(long)]
-		hair: Option<String>,
-		/// How heavily built they are. Left out, one is picked from their id.
-		#[arg(long, value_parser = ["slim", "plain", "stout"])]
-		build: Option<String>,
-		/// Brows their style draws; left out, the style's own.
-		#[arg(long)]
-		brows: Option<String>,
-		/// A nose their style draws, or `none`; left out, the style's own.
-		#[arg(long)]
-		nose: Option<String>,
-		/// Also write their part file from the style's template, so it can be redrawn.
-		#[arg(long)]
-		draw: bool,
+	New(Box<NewCharacter>),
+	/// Check a character's parts: the same check as `fables puppet check`.
+	Check {
+		/// The cast id to check; leave it out to check every person drawn from parts.
+		id: Option<String>,
 	},
+}
+
+// What `fables character new` takes; boxed, so the other actions stay small.
+#[derive(clap::Args)]
+struct NewCharacter {
+	/// The cast id scripts use after `@`: lowercase letters, digits and hyphens.
+	id: String,
+	/// Their full name, e.g. "Pip Pocket".
+	#[arg(long)]
+	name: String,
+	/// kid or grown-up.
+	#[arg(long, default_value = "kid", value_parser = ["kid", "grown-up"])]
+	kind: String,
+	/// Who they are, in a sentence.
+	#[arg(long)]
+	about: Option<String>,
+	/// Their skin: a palette name or #rrggbb (default: tangerine, a cartoon orange). The
+	/// palette names that read as skin are cream, sand, toffee and cocoa; any colour is
+	/// allowed. The palette: paper, ink, white, tangerine, sunflower, mustard, bubblegum,
+	/// flamingo, blush, tomato, teal, mint, ice, sky, cornflower, grape, lilac, leaf, meadow,
+	/// moss, bog, cocoa, toffee, sand, plum, slate, night, cream.
+	#[arg(long)]
+	skin: Option<String>,
+	/// Their hair's colour: a palette name (see --skin) or #rrggbb (default: plum).
+	#[arg(long = "hair-colour")]
+	hair_colour: Option<String>,
+	/// Their top's colour: a palette name (see --skin) or #rrggbb (default: teal).
+	#[arg(long)]
+	top: Option<String>,
+	/// The colour of the top's trim and pattern: a palette name (see --skin) or #rrggbb
+	/// (default: cream).
+	#[arg(long)]
+	trim: Option<String>,
+	/// Their trousers' or skirt's colour: a palette name (see --skin) or #rrggbb (default:
+	/// night).
+	#[arg(long)]
+	bottom: Option<String>,
+	/// Their shoes' colour: a palette name (see --skin) or #rrggbb (default: ink).
+	#[arg(long)]
+	shoes: Option<String>,
+	/// Their eyes' colour: a palette name (see --skin) or #rrggbb (default: cocoa).
+	#[arg(long)]
+	eyes: Option<String>,
+	/// The pattern on the top, in the trim colour: plain, stripes, dots or star.
+	#[arg(long)]
+	pattern: Option<String>,
+	/// A hairdo their style draws on their body (`fables style describe` lists them). Left
+	/// out, one is picked from their id.
+	#[arg(long)]
+	hair: Option<String>,
+	/// How heavily built they are. Left out, one is picked from their id.
+	#[arg(long, value_parser = ["slim", "plain", "stout"])]
+	build: Option<String>,
+	/// Brows their style draws; left out, the style's own.
+	#[arg(long)]
+	brows: Option<String>,
+	/// A nose their style draws, or `none`; left out, the style's own.
+	#[arg(long)]
+	nose: Option<String>,
+	/// Also write their part file from the style's template, so it can be redrawn. The
+	/// part file then draws their hair, brows and nose, so the cast file notes them in a
+	/// comment instead of naming them.
+	#[arg(long)]
+	draw: bool,
 }
 
 #[derive(Subcommand)]
@@ -352,6 +377,9 @@ enum SettingAction {
 		#[arg(long)]
 		about: Option<String>,
 	},
+	/// List every setting the world's pages can use (its own and the built-in ones), every
+	/// light, and the pose and mood words a direction takes. For props, `fables prop list`.
+	List,
 }
 
 #[derive(Subcommand)]
@@ -572,25 +600,26 @@ fn run(cli: Cli) -> Result<()> {
 		}
 		Command::Character { action } => {
 			match *action {
-				CharacterAction::New {
-					id,
-					name,
-					kind,
-					about,
-					skin,
-					hair_colour,
-					top,
-					trim,
-					bottom,
-					shoes,
-					eyes,
-					pattern,
-					hair,
-					build,
-					brows,
-					nose,
-					draw,
-				} => {
+				CharacterAction::New(new) => {
+					let NewCharacter {
+						id,
+						name,
+						kind,
+						about,
+						skin,
+						hair_colour,
+						top,
+						trim,
+						bottom,
+						shoes,
+						eyes,
+						pattern,
+						hair,
+						build,
+						brows,
+						nose,
+						draw,
+					} = *new;
 					let kind = if kind == "grown-up" {
 						BuildName::GrownUp
 					} else {
@@ -623,6 +652,7 @@ fn run(cli: Cli) -> Result<()> {
 
 					character_new(&world()?, &brief)
 				}
+				CharacterAction::Check { id } => puppet_check(&world()?, id.as_deref()),
 			}
 		}
 		Command::Setting { action } => {
@@ -630,6 +660,7 @@ fn run(cli: Cli) -> Result<()> {
 				SettingAction::New { name, from, about } => {
 					setting_new(&world()?, &name, from.as_deref(), about.as_deref())
 				}
+				SettingAction::List => setting_list(&world()?),
 			}
 		}
 		Command::Sheets { moods, zones, out } => {
@@ -641,7 +672,7 @@ fn run(cli: Cli) -> Result<()> {
 				None
 			};
 
-			for style in sheet_styles(&choices) {
+			for style in sheet_styles(&choices, &world)? {
 				sheets(
 					&world,
 					moods.as_deref(),
@@ -731,7 +762,7 @@ fn run(cli: Cli) -> Result<()> {
 			let choices = style_choices(style.as_deref())?;
 			let world = world()?;
 
-			for style in sheet_styles(&choices) {
+			for style in sheet_styles(&choices, &world)? {
 				rig(
 					&world,
 					&id,
@@ -887,12 +918,16 @@ fn style_choices(argument: Option<&str>) -> Result<Vec<Option<String>>> {
 		.collect()
 }
 
-/// Styles for sheets and rig tests, which have no script to take a default from.
-fn sheet_styles(choices: &[Option<String>]) -> Vec<Style> {
-	choices
+/// Page skins for sheets and rig tests, which have no script to take a default from: the ones
+/// `--style` names, else the skin the world's books print in, so a world's sheets land beside its
+/// books' folders.
+fn sheet_styles(choices: &[Option<String>], world: &World) -> Result<Vec<Style>> {
+	let own = Style::parse(&world.style()?.skin).unwrap_or_default();
+
+	Ok(choices
 		.iter()
-		.map(|choice| choice.as_deref().and_then(Style::parse).unwrap_or_default())
-		.collect()
+		.map(|choice| choice.as_deref().and_then(Style::parse).unwrap_or(own))
+		.collect())
 }
 
 /// Runs `action` on every script (see [`each`]) once per chosen page skin. The third argument
@@ -1004,6 +1039,10 @@ fn new_story(
 	std::fs::write(&path, started.script)
 		.with_context(|| format!("could not write {}", path.display()))?;
 	say!("✓ wrote {} from {}", path.display(), started.source)?;
+
+	if let Some(roles) = &started.roles {
+		say!("  cast: {roles}")?;
+	}
 
 	if let Err(error) =
 		load(&path, None, Some(&world.dir)).and_then(|(story, cast, _)| check(&story, &cast, true))
@@ -1145,6 +1184,30 @@ fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
 		report.id,
 		world.cast_file().display()
 	)?;
+	if brief.draw {
+		let asked: Vec<&str> = [
+			("--hair", &brief.hair),
+			("--brows", &brief.brows),
+			("--nose", &brief.nose),
+		]
+		.into_iter()
+		.filter(|(_, value)| value.is_some())
+		.map(|(flag, _)| flag)
+		.collect();
+
+		if !asked.is_empty() {
+			say!(
+				"  {} drawn into the part file, which draws their hair, brows and nose from now \
+				 on; the cast file notes them in a comment, with no `hair`, `brows` or `nose` line",
+				if asked.len() == 1 {
+					format!("{} is", asked[0])
+				} else {
+					format!("{} are", asked.join(", "))
+				}
+			)?;
+		}
+	}
+
 	let next = if brief.draw {
 		format!("fables puppet parts {}", brief.id)
 	} else {
@@ -1168,6 +1231,41 @@ fn setting_new(world: &World, name: &str, from: Option<&str>, about: Option<&str
 			.display()
 	)?;
 	say!("  next: fables sheets   (see every setting drawn)")?;
+	Ok(())
+}
+
+/// Prints what a page heading and a direction can name: the world's settings, the lights, and
+/// the pose and mood words.
+fn setting_list(world: &World) -> Result<()> {
+	let settings = world.settings()?;
+	let own = world.dir.join("settings");
+
+	for setting in settings.settings() {
+		let from = if own.join(format!("{}.svg", setting.name())).is_file() {
+			"world"
+		} else {
+			"built-in"
+		};
+		say!("{:<14} {:<9} {}", setting.name(), from, setting.about())?;
+	}
+
+	say!("\nlights (after the setting in a page heading, e.g. `# park dusk`):")?;
+
+	for light in Studio::lights() {
+		say!("{:<14} {}", light.name, light.about)?;
+	}
+
+	let words = |all: &[&str]| all.join(", ");
+	say!(
+		"\nposes (`@pip wave`): {}",
+		words(&fables::art::figure::Pose::ALL.map(|(name, _)| name))
+	)?;
+	say!(
+		"moods (`@pip happy`): {}",
+		words(&fables::art::figure::Mood::ALL.map(|(name, _)| name))
+	)?;
+	say!("props (`@pip holds=ball`): fables prop list")?;
+
 	Ok(())
 }
 
@@ -1944,6 +2042,61 @@ fn done(path: &Path, started: Instant) -> Result<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn the_colour_flags_list_the_palette_and_its_skin_tones() {
+		use clap::CommandFactory;
+
+		let mut cli = Cli::command();
+		let new = cli
+			.find_subcommand_mut("character")
+			.and_then(|character| character.find_subcommand_mut("new"))
+			.unwrap();
+		let help = new.render_long_help().to_string();
+		let words: Vec<&str> = help
+			.split(|letter: char| !letter.is_alphanumeric())
+			.collect();
+
+		for (name, _) in fables::art::palette::NAMED {
+			assert!(words.contains(name), "`{name}` is missing from: {help}");
+		}
+
+		for name in fables::art::palette::SKIN_TONES {
+			assert!(help.contains(name), "{help}");
+		}
+
+		assert!(help.contains("read as skin"), "{help}");
+	}
+
+	#[test]
+	fn sheets_print_in_the_worlds_own_skin_unless_one_is_named() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "style = \"silhouette\"\n");
+		let own = sheet_styles(&[None], &world).unwrap();
+		assert_eq!(own[0].name.name(), "shadow");
+
+		let named = sheet_styles(&[Some("riso".to_owned())], &world).unwrap();
+		assert_eq!(named[0].name.name(), "riso");
+
+		let other = tempfile::tempdir().unwrap();
+		let plain = new_world(other.path(), "");
+		assert_eq!(
+			sheet_styles(&[None], &plain).unwrap()[0].name.name(),
+			Style::default().name.name()
+		);
+	}
+
+	#[test]
+	fn the_natural_guesses_are_commands() {
+		for guess in [
+			&["fables", "flows", "list"][..],
+			&["fables", "setting", "list"],
+			&["fables", "character", "check"],
+			&["fables", "character", "check", "pip"],
+		] {
+			assert!(Cli::try_parse_from(guess).is_ok(), "{guess:?}");
+		}
+	}
 
 	/// A minimal world whose recipe `fables new` can start a book from.
 	fn new_world(dir: &Path, extra: &str) -> World {

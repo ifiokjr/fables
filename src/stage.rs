@@ -750,8 +750,12 @@ pub fn transition(value: Option<&str>, line: usize) -> Result<Transition> {
 }
 
 fn colour(value: &str, line: usize) -> Result<Color> {
-	Color::parse(value)
-		.ok_or_else(|| anyhow::anyhow!("line {line}: `{value}` is not a palette colour or #rrggbb"))
+	Color::parse(value).ok_or_else(|| {
+		let nearest = crate::art::palette::suggest(value).map_or(String::new(), |nearest| {
+			format!("; the nearest palette name is `{nearest}`")
+		});
+		anyhow::anyhow!("line {line}: `{value}` is not a palette colour or #rrggbb{nearest}")
+	})
 }
 
 fn pair(token: &Token, value: &str, line: usize) -> Result<(f32, f32)> {

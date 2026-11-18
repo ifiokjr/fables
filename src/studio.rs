@@ -1859,14 +1859,7 @@ pub fn create_character(world: &World, brief: &CharacterBrief) -> Result<MemberR
 		cast.push('\n');
 	}
 
-	// A part file draws their hair, brows and nose, so only a template-drawn character's cast
-	// names them.
-	let named = if template.is_none() {
-		picks
-	} else {
-		Picks::default()
-	};
-	cast.push_str(&cast_entry(brief, &named, physique));
+	cast.push_str(&cast_entry(brief, &picks, physique));
 	std::fs::write(&cast_file, &cast)
 		.with_context(|| format!("could not write {}", cast_file.display()))?;
 
@@ -2602,14 +2595,32 @@ fn cast_entry(brief: &CharacterBrief, picks: &Picks, physique: Physique) -> Stri
 		keys.push(("puppet", &puppet));
 	}
 
-	if let Some(hair) = &picks.hair {
+	// A part file draws their hair, brows and nose, so only a template-drawn character's cast
+	// names them; a drawn character's are noted in a comment, so the file still says which
+	// they started with.
+	let features = [
+		("hair", &picks.hair),
+		("brows", &picks.brows),
+		("nose", &picks.nose),
+	];
+	let mut drawn = Vec::new();
+
+	if !brief.draw
+		&& let Some(hair) = &picks.hair
+	{
 		keys.push(("hair", hair));
 	}
 
 	keys.push(("build", physique.name()));
 
-	for (key, value) in [("brows", &picks.brows), ("nose", &picks.nose)] {
-		if let Some(value) = value {
+	for (key, value) in features {
+		let Some(value) = value else {
+			continue;
+		};
+
+		if brief.draw {
+			drawn.push(format!("{key} {}", quoted(value)));
+		} else if key != "hair" {
 			keys.push((key, value));
 		}
 	}
@@ -2637,6 +2648,15 @@ fn cast_entry(brief: &CharacterBrief, picks: &Picks, physique: Physique) -> Stri
 	if !brief.extras.is_empty() {
 		let extras: Vec<String> = brief.extras.iter().map(|extra| quoted(extra)).collect();
 		lines.push(format!("extras = [{}]", extras.join(", ")));
+	}
+
+	if !drawn.is_empty() {
+		lines.push(format!(
+			"# Drawn in {puppet}: {}. To change one, redraw its parts there (`fables puppet parts \
+			 {}`).",
+			drawn.join(", "),
+			brief.id
+		));
 	}
 
 	lines.join("\n") + "\n"
@@ -3044,9 +3064,28 @@ mod tests {
 		let cast = std::fs::read_to_string(world.cast_file()).unwrap();
 		assert!(!cast.contains("hair = "), "the file draws the hair: {cast}");
 		assert!(
+			cast.contains("# Drawn in puppets/nell.svg: hair \"bob\", brows \"thin\""),
+			"the cast file says which hair the part file started with: {cast}"
+		);
+		assert!(
+			check_notes(&world).is_empty(),
+			"a comment is not a field a drawn character ignores"
+		);
+		assert!(
 			cast.contains("build = "),
 			"the build is still the cast's: {cast}"
 		);
+	}
+
+	/// What `fables check` would note about a world's cast.
+	fn check_notes(world: &World) -> Vec<&'static str> {
+		world
+			.cast()
+			.unwrap()
+			.members
+			.values()
+			.flat_map(|member| member.unused_fields.clone())
+			.collect()
 	}
 
 	fn studio() -> (tempfile::TempDir, Studio) {

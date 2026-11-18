@@ -390,8 +390,11 @@ fn color(field: &str, value: Option<&String>, fallback: Color) -> Result<Color> 
 		Some(name) => {
 			Color::parse(name).with_context(|| {
 				let names: Vec<&str> = palette::NAMED.iter().map(|(name, _)| *name).collect();
+				let nearest = palette::suggest(name).map_or(String::new(), |nearest| {
+					format!("; the nearest palette name is `{nearest}`")
+				});
 				format!(
-					"`{field}` colour `{name}` is not a palette name ({}) or #rrggbb",
+					"`{field}` colour `{name}` is not a palette name ({}) or #rrggbb{nearest}",
 					names.join(", ")
 				)
 			})
@@ -728,6 +731,15 @@ colour = "#c9865a"
 			Cast::parse("[x]\nname = \"X\"\nskin = \"chartreuse\"\n").unwrap_err()
 		);
 		assert!(message.contains("chartreuse"), "{message}");
+
+		let message = format!(
+			"{:#}",
+			Cast::parse("[x]\nname = \"X\"\nskin = \"tan\"\n").unwrap_err()
+		);
+		assert!(
+			message.contains("the nearest palette name is `toffee`"),
+			"{message}"
+		);
 		assert!(message.contains("tangerine"), "{message}");
 	}
 

@@ -71,6 +71,7 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 // gets bigger before it gets funny.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: The reader sees the truth. Two pages, 20–30 words.
 // The truth is drawn where the reader sees it and the star does not: keep it on the

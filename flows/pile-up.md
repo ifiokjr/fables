@@ -64,6 +64,7 @@ note = "The opening framing, with one new arrival at the edge: the chain is read
 // The Pile-Up: one sound gathers a newcomer a page, then the whole street is in it.
 // Replace every [bracketed] line with the story, keep the directions that fit, and run
 // `fables proofs` to see it.
+// Every "quoted" line needs its speaker on the line above it: `@{{star}} talk`.
 
 // Beat 1: The quiet start, one actor. One page, 15–20 words.
 // One figure left of centre facing right; the empty right half is where the story will go.
