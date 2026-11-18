@@ -56,10 +56,59 @@ use crate::text::Ink;
 const CARD_W: f32 = 900.0;
 const CARD_H: f32 = 1300.0;
 const COLUMNS: usize = 4;
+/// Where every card's character stands, down the card.
+const CARD_GROUND: f32 = 1190.0;
+/// The margin kept clear inside a card's edges, and below its words.
+const CARD_MARGIN: f32 = 60.0;
+/// Where a card's name, birth name and habit are set. Words too long for it at their smallest
+/// run on over the character rather than shrink the character away.
+const CARD_WORDS: Area = Area {
+	x: 70.0,
+	y: 70.0,
+	w: CARD_W - 140.0,
+	h: 430.0,
+};
 
 /// Every cast member of the world called `world` on a card with their name, birth name and habit.
+///
+/// The characters fill the room the longest card's words leave, standing on one line, every
+/// person drawn the same height. Each is measured as drawn, waving hand and hair and all, so the
+/// tallest reaches the words and the widest the card's edges.
 pub fn cast_sheet(cast: &Cast, world: &str, style: Style) -> Result<Pixmap> {
 	let members: Vec<&Member> = cast.members.values().collect();
+	let words: Vec<text::Block> = members.iter().map(|member| card_words(member)).collect();
+	let top = words
+		.iter()
+		.map(|block| block.bounds.y + block.bounds.h)
+		.fold(0.0, f32::max)
+		.min(CARD_WORDS.y + CARD_WORDS.h)
+		+ CARD_MARGIN;
+	let mut puppets: Vec<Puppet> = members
+		.iter()
+		.map(|member| {
+			let mut puppet = sheet_puppet(member, pt(CARD_W / 2.0, CARD_GROUND));
+
+			if let Body::Figure(state) = &mut puppet.body {
+				state.mood = Mood::Grin;
+			}
+
+			puppet
+		})
+		.collect();
+	// Everyone comes 600 pixels tall, so they grow together: by as much as the one that
+	// reaches highest can.
+	let grow = puppets
+		.iter()
+		.filter(|puppet| matches!(puppet.body, Body::Figure(_)))
+		.map(|puppet| card_fit(puppet, top))
+		.fold(f32::INFINITY, f32::min);
+
+	for puppet in &mut puppets {
+		let by = card_fit(puppet, top).min(grow);
+		puppet.scale *= by;
+		puppet.at.y = CARD_GROUND - (CARD_GROUND - puppet.at.y) * by;
+	}
+
 	let rows = members.len().div_ceil(COLUMNS);
 	let width = CARD_W * COLUMNS as f32;
 	let height = CARD_H * rows as f32 + 260.0;
@@ -86,11 +135,11 @@ pub fn cast_sheet(cast: &Cast, world: &str, style: Style) -> Result<Pixmap> {
 		},
 	));
 
-	for (index, member) in members.iter().enumerate() {
+	for (index, ((member, words), puppet)) in members.iter().zip(&words).zip(&puppets).enumerate() {
 		let x = (index % COLUMNS) as f32 * CARD_W;
 		let y = 260.0 + (index / COLUMNS) as f32 * CARD_H;
 		svg.begin(&format!("translate({x} {y})"));
-		card(&mut svg, member, index);
+		card(&mut svg, member, words, puppet, index, top);
 		svg.end();
 	}
 
@@ -103,6 +152,17 @@ pub fn cast_sheet(cast: &Cast, world: &str, style: Style) -> Result<Pixmap> {
 	raster::finish(&mut pixmap, &style, 0.05, 0);
 
 	Ok(pixmap)
+}
+
+/// How many times bigger a card's puppet, standing on the card's ground, can be drawn and still
+/// keep below `top` and inside the card's margins.
+fn card_fit(puppet: &Puppet, top: f32) -> f32 {
+	let (x0, y0, x1, _) = puppet.extents().subject;
+	let middle = CARD_W / 2.0;
+	let up = (CARD_GROUND - y0).max(1.0);
+	let across = (middle - x0).max(x1 - middle).max(1.0);
+
+	((CARD_GROUND - top) / up).min((middle - CARD_MARGIN) / across)
 }
 
 /// The colour a character mostly reads as (skin for people).
@@ -134,7 +194,32 @@ fn contrasting(tints: &[Color], colour: Color) -> Color {
 		.unwrap_or(palette::MINT)
 }
 
-fn card(svg: &mut Svg, member: &Member, index: usize) {
+/// A member's name, birth name and habit, laid out at the top of their card.
+fn card_words(member: &Member) -> text::Block {
+	let mut lines = vec![format!("**{}**", member.name)];
+
+	if let Some(born) = &member.born {
+		lines.push(format!("*Born {born}*"));
+	}
+
+	if let Some(about) = &member.about {
+		lines.push(about.clone());
+	}
+
+	let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+	text::layout(&refs, CARD_WORDS, 40.0, Anchor::Top)
+}
+
+/// One member's card: their words at the top, and their puppet below, in the room from `top`
+/// down to the ground.
+fn card(
+	svg: &mut Svg,
+	member: &Member,
+	words: &text::Block,
+	puppet: &Puppet,
+	index: usize,
+	top: f32,
+) {
 	let tints = [
 		palette::MINT,
 		palette::SUNFLOWER,
@@ -155,52 +240,24 @@ fn card(svg: &mut Svg, member: &Member, index: usize) {
 		index as u64,
 	);
 	svg.inked(&inner, palette::PAPER);
+	// The backdrop sits behind the character, in the room below the words.
+	let room = CARD_GROUND - top;
 	let blob = Path::wobbly_ellipse(
-		pt(CARD_W / 2.0, 820.0),
-		330.0,
-		300.0,
+		pt(CARD_W / 2.0, top + room * 0.56),
+		(room * 0.42).min(CARD_W / 2.0 - 90.0),
+		room * 0.42,
 		0.06,
 		index as u64 + 50,
 	);
 	svg.fill(&blob, contrasting(&tints, main_colour(member)));
 
-	let ground = 1150.0;
-	let mut puppet = sheet_puppet(member, pt(CARD_W / 2.0, ground));
-
-	if let Body::Figure(state) = &mut puppet.body {
-		state.mood = Mood::Grin;
-	}
-
 	svg.begin_layer();
-	compose::draw_puppet(svg, &puppet);
+	compose::draw_puppet(svg, puppet);
 	svg.end();
-
-	let mut lines = vec![format!("**{}**", member.name)];
-
-	if let Some(born) = &member.born {
-		lines.push(format!("*Born {born}*"));
-	}
-
-	if let Some(about) = &member.about {
-		lines.push(about.clone());
-	}
-
-	let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-	let block = text::layout(
-		&refs,
-		Area {
-			x: 70.0,
-			y: 70.0,
-			w: CARD_W - 140.0,
-			h: 430.0,
-		},
-		40.0,
-		Anchor::Top,
-	);
-	svg.raw(&text::svg(&block, Ink::default()));
+	svg.raw(&text::svg(words, Ink::default()));
 }
 
-/// A puppet sized to fit a sheet card, standing at `at`.
+/// A puppet sized to fit a sheet card, standing at `at`: a person 600 pixels tall.
 fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 	let (body, scale, lift) = match &member.kind {
 		Kind::Figure(look) => {

@@ -173,9 +173,14 @@ pub const FIGURE_PARTS: &[PartSpec] = &[
 	part("sleeve-cuff", Space::Bone).optional(),
 	part("legwear-leg", Space::Bone).optional(),
 	part("legwear-leg-hem", Space::Bone).optional(),
+	// Creases on the trouser leg: an inseam, folds at the knee. Drawn for the page-right leg; the
+	// page-left one draws them mirrored, so an inseam stays on the inside of both.
+	part("legwear-leg-crease", Space::Bone).numbered(),
 	// Long trousers carry on down the shin, over the socks.
 	part("legwear-shin", Space::Bone).optional(),
 	part("legwear-shin-cuff", Space::Bone).optional(),
+	// The same down the shin: a pressed crease, the break where the trouser meets the shoe.
+	part("legwear-shin-crease", Space::Bone).numbered(),
 	// Long sleeves carry on down the forearm.
 	part("forearm-sleeve", Space::Bone).optional(),
 	part("forearm-sleeve-cuff", Space::Bone).optional(),
