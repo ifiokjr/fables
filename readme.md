@@ -42,6 +42,7 @@ A world needs only a name to start:
 
 ```toml
 name = "Kerfuffle"
+author = "Ifiok Jr."        # optional: the author `fables new` puts on the title page
 style = "cartoon"           # optional: the drawing style its folk are drawn in (default cartoon)
 light = "golden"            # optional: the light every page starts in (default day)
 
@@ -54,6 +55,9 @@ note = "Psst! Wormsley the worm is hiding on every page. Can you find him?"
 meet = ["Have you met the rest of **Kerfuffle**?"]
 draw = ["**Draw your own Kerfuffle folk!**"]
 ```
+
+`fables new` signs a new book with the `--author` you pass, else the world's `author` here. With
+neither it stops and says to pass one or set the field.
 
 ## Drawing styles
 

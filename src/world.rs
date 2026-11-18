@@ -49,6 +49,9 @@ pub struct World {
 	/// The folder the world lives in.
 	pub dir: PathBuf,
 	pub name: String,
+	/// The author `fables new` puts on the title page, unless `--author` names one
+	/// (`world.toml`: `author = "Ifiok Jr."`).
+	pub author: Option<String>,
 	/// The style pack its puppets are drawn in (see [`StylePack`]).
 	pub style: String,
 	/// A few sentences on the world: where it is, its rule, its tone.
@@ -87,6 +90,8 @@ impl Default for Matter {
 #[serde(deny_unknown_fields)]
 struct Entry {
 	name: String,
+	#[serde(default)]
+	author: Option<String>,
 	#[serde(default = "default_style")]
 	style: String,
 	#[serde(default)]
@@ -143,6 +148,7 @@ impl World {
 		Ok(World {
 			dir: dir.to_path_buf(),
 			name: entry.name,
+			author: entry.author,
 			style: entry.style,
 			about: entry.about,
 			light,
@@ -398,6 +404,16 @@ mod tests {
 		let odd = world(dir.path(), "odd", "style = \"vaporwave\"\n");
 		let error = format!("{:#}", World::load(&odd).unwrap_err());
 		assert!(error.contains("unknown drawing style"), "{error}");
+	}
+
+	#[test]
+	fn a_world_names_the_author_of_its_new_books() {
+		let dir = tempfile::tempdir().unwrap();
+		let plain = World::load(&world(dir.path(), "plain", "")).unwrap();
+		assert_eq!(plain.author, None);
+
+		let signed = World::load(&world(dir.path(), "signed", "author = \"Ifiok Jr.\"\n")).unwrap();
+		assert_eq!(signed.author.as_deref(), Some("Ifiok Jr."));
 	}
 
 	#[test]

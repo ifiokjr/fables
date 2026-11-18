@@ -54,8 +54,9 @@ enum Command {
 		/// The cast id of the star, from the world's cast.toml.
 		#[arg(long)]
 		star: String,
-		#[arg(long, default_value = "Ifiok Jr.")]
-		author: String,
+		/// The author on the title page. Defaults to the world's `author` in world.toml.
+		#[arg(long)]
+		author: Option<String>,
 		/// Where books live (default: the world's stories/ folder).
 		#[arg(long)]
 		dir: Option<PathBuf>,
@@ -273,7 +274,7 @@ fn run(cli: Cli) -> Result<()> {
 			star,
 			author,
 			dir,
-		} => new_story(&world()?, &title, &star, &author, dir.as_deref()),
+		} => new_story(&world()?, &title, &star, author.as_deref(), dir.as_deref()),
 		Command::Sheets { moods, out } => {
 			let world = world()?;
 
@@ -523,9 +524,12 @@ fn new_story(
 	world: &World,
 	title: &str,
 	star: &str,
-	author: &str,
+	author: Option<&str>,
 	dir: Option<&Path>,
 ) -> Result<()> {
+	let author = author.or(world.author.as_deref()).with_context(|| {
+		"no author for the title page: pass --author, or set author in the world's world.toml"
+	})?;
 	let recipe = world.recipe().with_context(|| {
 		format!(
 			"{} has no recipe.md to start a book from",
@@ -1027,4 +1031,61 @@ fn done(path: &Path, started: Instant) {
 		path.display(),
 		started.elapsed().as_secs_f32()
 	);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A minimal world whose recipe `fables new` can start a book from.
+	fn new_world(dir: &Path, extra: &str) -> World {
+		let home = dir.join("worlds/home");
+		std::fs::create_dir_all(home.join("stories")).unwrap();
+		std::fs::write(
+			home.join(fables::world::FILE),
+			format!("name = \"Home\"\n{extra}"),
+		)
+		.unwrap();
+		std::fs::write(
+			home.join("recipe.md"),
+			"+++\ntitle = \"{{title}}\"\nauthor = \"{{author}}\"\nstar = \"{{star}}\"\n+++\n# \
+			 plain\nOnce upon a time.\n",
+		)
+		.unwrap();
+		World::load(&home).unwrap()
+	}
+
+	/// Runs `new_story` and reads the book it wrote.
+	fn new_book(world: &World, author: Option<&str>) -> Result<String> {
+		let path = world.stories().join("a-new-tale/story.md");
+		new_story(world, "A New Tale", "mo", author, None)?;
+		Ok(std::fs::read_to_string(path)?)
+	}
+
+	#[test]
+	fn the_author_flag_wins_over_the_world() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, Some("Flag Author")).unwrap();
+		assert!(script.contains("author = \"Flag Author\""), "{script}");
+	}
+
+	#[test]
+	fn the_worlds_author_is_the_default() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("author = \"World Author\""), "{script}");
+	}
+
+	#[test]
+	fn no_author_is_an_error_that_says_what_to_do() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "");
+		let error = format!("{:#}", new_book(&world, None).unwrap_err());
+		assert!(
+			error.contains("--author") && error.contains("world.toml"),
+			"{error}"
+		);
+	}
 }
