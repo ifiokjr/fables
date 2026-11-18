@@ -4,6 +4,7 @@
 # restraint: gentle eases, little squash. Pages read best in the `clear` skin.
 name = "clear-line"
 description = "Clear line: one even line everywhere, flat vivid colour with no shading, simple characters with dot eyes, and restrained, eased motion."
+skin = "clear"
 
 [finish]
 line = 3.0              # one weight for every line

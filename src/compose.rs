@@ -589,8 +589,10 @@ mod tests {
 	/// A kid from a cast line — the parametric puppet, no authored parts — with a named
 	/// hairdo and pose, facing `heading`.
 	fn kid_of(hair: &str, pose: Pose, heading: f32) -> Puppet {
-		let cast = crate::cast::Cast::parse(&format!("[kid]\nname = \"Kid\"\nhair = \"{hair}\"\n"))
-			.unwrap();
+		let cast = crate::cast::Cast::parse(&format!(
+			"[kid]\nname = \"Kid\"\nhair = \"{hair}\"\npuppet = \"parametric\"\n"
+		))
+		.unwrap();
 		let Kind::Figure(look) = cast.members["kid"].kind.clone() else {
 			panic!("a cast kid is a figure");
 		};

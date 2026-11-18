@@ -14,6 +14,7 @@
 //! walking up from the script (or the current folder) to the nearest `world.toml`. From a
 //! folder that holds `worlds/`, a single world there is used without asking.
 
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use serde::Deserialize;
 
 use crate::art::light::Light;
@@ -43,14 +45,67 @@ fn folder_of(dir: &Path) -> &str {
 	dir.file_name().and_then(|name| name.to_str()).unwrap_or("")
 }
 
+/// The path with `.` and `..` folded in, without asking the file system: a world a script names
+/// reads and prints as the folder a person would write.
+fn fold(path: &Path) -> PathBuf {
+	let mut out = PathBuf::new();
+
+	for part in path.components() {
+		match part {
+			Component::CurDir => {}
+			Component::ParentDir => {
+				if !out.pop() {
+					out.push(part.as_os_str());
+				}
+			}
+			_ => out.push(part.as_os_str()),
+		}
+	}
+
+	out
+}
+
+/// A path under `root` named by a tool argument or by a value read from a file under the root.
+///
+/// The name must be a relative path of plain components: an empty name, an absolute path, or a
+/// `.`/`..` component is refused before the file system is touched, and the joined path is
+/// proved to still sit under `root`.
+pub fn under(root: &Path, what: &str, name: impl AsRef<Path>) -> Result<PathBuf> {
+	let name = name.as_ref();
+	let plain = !name.as_os_str().is_empty()
+		&& name
+			.components()
+			.all(|part| matches!(part, Component::Normal(_)));
+	ensure!(
+		plain,
+		"`{}` is not a {what} name: use a plain name, never a path",
+		name.display()
+	);
+
+	let path = root.join(name);
+	let inside = path.strip_prefix(root).is_ok_and(|rest| {
+		rest.components()
+			.all(|part| matches!(part, Component::Normal(_)))
+	});
+	ensure!(
+		inside,
+		"`{}` is not a {what} name: it leads outside {}",
+		name.display(),
+		root.display()
+	);
+
+	Ok(path)
+}
+
 /// A loaded world.
 #[derive(Clone, Debug)]
 pub struct World {
 	/// The folder the world lives in.
 	pub dir: PathBuf,
 	pub name: String,
-	/// The author `fables new` puts on the title page, unless `--author` names one
-	/// (`world.toml`: `author = "Ifiok Jr."`).
+	/// The author credited in the world's books, unless a script names its own, and the author
+	/// `fables new` puts on the title page, unless `--author` names one (`world.toml`:
+	/// `author = "Ifiok Jr."`).
 	pub author: Option<String>,
 	/// The style pack its puppets are drawn in (see [`StylePack`]).
 	pub style: String,
@@ -90,6 +145,8 @@ impl Default for Matter {
 #[serde(deny_unknown_fields)]
 struct Entry {
 	name: String,
+	/// The author credited in every book of the world, unless a script names its own; also the
+	/// author `fables new` signs a new book with.
 	#[serde(default)]
 	author: Option<String>,
 	#[serde(default = "default_style")]
@@ -213,7 +270,14 @@ impl World {
 	pub fn for_story(story: &Story, explicit: Option<&Path>) -> Result<World> {
 		match (explicit, story.meta.world.as_deref()) {
 			(Some(dir), _) => Self::load(dir),
-			(None, Some(dir)) => Self::load(&story.dir.join(dir)),
+			(None, Some(dir)) => {
+				let path = Path::new(dir);
+				ensure!(
+					!path.is_absolute(),
+					"a script's `world` must be a path relative to the script, not `{dir}`"
+				);
+				Self::load(&fold(&story.dir.join(path)))
+			}
 			(None, None) => Self::find(&story.dir),
 		}
 	}
@@ -289,6 +353,14 @@ impl World {
 					format!("the worlds beside {} are {}", self.name, folders.join(", "))
 				};
 
+				if folder == folder_of(&self.dir) {
+					bail!(
+						"`{invited}` invites somebody from {}'s own world; guests come from \
+						 another world under the same root ({beside})",
+						self.name
+					);
+				}
+
 				bail!("there is no world `{folder}` to invite a guest from; {beside}");
 			};
 
@@ -339,12 +411,21 @@ impl World {
 		let style = self.style()?;
 		story.matter.clone_from(&self.matter);
 		story.settings = self.settings()?;
+		story.drawing_style.clone_from(&style.name);
+		story.skin = Some(style.skin.clone());
 		story.drawing = Drawing {
 			fill: style.shade.fill,
 			tone: style.shade.tone,
 			palette: style.shade.palette,
 			motion: style.motion,
 		};
+
+		// The world's author credits its books unless the script names one.
+		if story.meta.author.is_empty()
+			&& let Some(author) = &self.author
+		{
+			story.meta.author.clone_from(author);
+		}
 
 		// The world's default light applies unless the book named its own.
 		if let Some(light) = &self.light
@@ -424,6 +505,78 @@ mod tests {
 	}
 
 	#[test]
+	fn a_script_may_name_its_world_but_only_by_a_relative_path() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = world(dir.path(), "home", "");
+		let book = home.join("stories/book");
+		std::fs::create_dir_all(&book).unwrap();
+		let script = book.join("story.md");
+
+		std::fs::write(
+			&script,
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nworld = \"../../../home\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		let story = Story::load(&script).unwrap();
+		let found = World::for_story(&story, None).unwrap();
+		assert_eq!(found.name, "home");
+		assert_eq!(
+			found.dir, home,
+			"the named world reads and prints as its folder"
+		);
+
+		std::fs::write(
+			&script,
+			format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\nworld = \"{}\"\n+++\n# plain\nHi.\n",
+				home.display()
+			),
+		)
+		.unwrap();
+		let story = Story::load(&script).unwrap();
+		let error = format!("{:#}", World::for_story(&story, None).unwrap_err());
+		assert!(
+			error.contains("relative") && error.contains("world"),
+			"{error}"
+		);
+	}
+
+	#[test]
+	fn a_joined_path_never_leaves_its_root() {
+		let root = Path::new("/studio/worlds");
+
+		assert_eq!(
+			under(root, "world", "kerfuffle").unwrap(),
+			root.join("kerfuffle")
+		);
+		assert_eq!(
+			under(root, "puppet", "puppets/nell.svg").unwrap(),
+			root.join("puppets/nell.svg")
+		);
+
+		for name in ["", ".", "..", "../outside", "/etc/passwd", "a/../../b"] {
+			let error = format!("{:#}", under(root, "world", name).unwrap_err());
+			assert!(error.contains("not a world name"), "{name:?}: {error}");
+		}
+	}
+
+	#[test]
+	fn inviting_your_own_world_says_guests_come_from_another() {
+		let dir = tempfile::tempdir().unwrap();
+		let home = two_worlds(dir.path());
+		let error = format!(
+			"{:#}",
+			home.cast_for(&story_with_guests("guests = [\"home/mo\"]\n"))
+				.unwrap_err()
+		);
+
+		assert!(
+			error.contains("home/mo") && error.contains("another world"),
+			"{error}"
+		);
+	}
+
+	#[test]
 	fn a_script_keeps_its_own_narrator() {
 		let dir = tempfile::tempdir().unwrap();
 		let home = World::load(&world(
@@ -470,6 +623,48 @@ mod tests {
 			error.contains("sunset") && error.contains("candle"),
 			"{error}"
 		);
+	}
+
+	#[test]
+	fn a_world_names_its_drawing_style_and_the_page_skin_that_suits_it() {
+		let dir = tempfile::tempdir().unwrap();
+		let clear = World::load(&world(dir.path(), "clear", "style = \"clear-line\"\n")).unwrap();
+		let story =
+			&mut crate::story::parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n")
+				.unwrap();
+		clear.furnish(story).unwrap();
+		assert_eq!(story.drawing_style, "clear-line");
+		assert_eq!(story.skin.as_deref(), Some("clear"));
+		assert_eq!(story.style().name.name(), "clear");
+
+		// A book's own page skin wins over the drawing style's suggestion.
+		let bold = &mut crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nstyle = \"bold\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		clear.furnish(bold).unwrap();
+		assert_eq!(bold.style().name.name(), "bold");
+		assert_eq!(
+			bold.drawing_style, "clear-line",
+			"the drawing style is reported whatever skin prints it"
+		);
+	}
+
+	#[test]
+	fn a_world_credits_the_author_of_its_books_unless_a_book_names_one() {
+		let dir = tempfile::tempdir().unwrap();
+		let credited =
+			World::load(&world(dir.path(), "credited", "author = \"A. Writer\"\n")).unwrap();
+		let plain = &mut crate::story::parse("+++\ntitle = \"T\"\n+++\n# plain\nHi.\n").unwrap();
+		credited.furnish(plain).unwrap();
+		assert_eq!(plain.meta.author, "A. Writer");
+
+		let own = &mut crate::story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"Someone Else\"\n+++\n# plain\nHi.\n",
+		)
+		.unwrap();
+		credited.furnish(own).unwrap();
+		assert_eq!(own.meta.author, "Someone Else");
 	}
 
 	/// Two worlds beside each other: `home` (cartoon) with a local `mo` and `tia`, and `away`

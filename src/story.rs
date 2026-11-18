@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use serde::Deserialize;
 
 use crate::art::dials::Fill;
@@ -33,6 +34,10 @@ use crate::art::style::Style;
 use crate::art::style::StyleName;
 pub use crate::video::voice::Voice;
 
+/// The longest beat of silence a script can ask for: a `@pause` beyond it is a mistake, not a
+/// pause, and a video's buffers are sized from the total.
+const MAX_PAUSE: f32 = 60.0;
+
 /// Book-level metadata from the front matter.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
@@ -40,6 +45,9 @@ pub struct Meta {
 	pub title: String,
 	#[serde(default)]
 	pub subtitle: Option<String>,
+	/// The author credited on the title page. A world can name the author of all its books,
+	/// and this fills in when a script leaves it out (see [`world`](crate::world)).
+	#[serde(default)]
 	pub author: String,
 	#[serde(default)]
 	pub illustrator: Option<String>,
@@ -85,7 +93,9 @@ pub struct Meta {
 	pub light: Option<String>,
 	#[serde(default)]
 	pub cover: Option<CoverSpec>,
-	/// The art style: riso, tv, bold, cut-paper, crayon, storybook or clear (default riso).
+	/// The page skin: riso, tv, bold, cut-paper, crayon, storybook or clear. This is the
+	/// printing look, not the drawing style; without it, the world's drawing style names the
+	/// skin that suits it (default riso).
 	#[serde(default)]
 	pub style: Option<String>,
 	/// The narrator; without one, the world's narrator reads (see [`Story::narrator`]).
@@ -340,6 +350,22 @@ impl Page {
 			.any(|beat| matches!(beat, Beat::Direct(directive) if directive.actor == "camera"))
 	}
 
+	/// Whether the heading names the page's light: `light=…`, or a bare light preset such as
+	/// `# street golden`. Bare `night` and `day` are weather, not a light, so a page that says
+	/// only `night` still takes its book's default light.
+	pub fn names_light(&self) -> bool {
+		self.options.iter().any(|token| {
+			token.key == "light"
+				|| (token.value.is_none()
+					&& crate::art::light::Preset::parse(&token.key).is_some_and(|preset| {
+						!matches!(
+							preset,
+							crate::art::light::Preset::Day | crate::art::light::Preset::Night
+						)
+					}))
+		})
+	}
+
 	/// Paragraphs printed in the book.
 	pub fn book_text(&self) -> Vec<&str> {
 		self.beats
@@ -376,8 +402,14 @@ pub struct Story {
 	pub slug: String,
 	/// The words its world writes into the front and back matter.
 	pub matter: crate::world::Matter,
+	/// The name of its world's drawing style (`chibi`, `clear-line`…), for reports. The
+	/// drawing style is the construction and finish every figure is drawn with.
+	pub drawing_style: String,
 	/// How its world's drawing style prints and moves.
 	pub drawing: Drawing,
+	/// The page skin its world's drawing style names (`style.toml`'s `skin`), used when neither
+	/// `--style` nor the script's own `style` names one.
+	pub skin: Option<String>,
 	/// The settings its pages can use: the built-in ones and its world's.
 	pub settings: Arc<Library>,
 	/// The light pages start in when their heading says nothing (`light = "dawn"` in front
@@ -402,13 +434,15 @@ impl Story {
 		self.meta.voice.as_ref().unwrap_or(&DEFAULT)
 	}
 
-	/// The book's art style.
-	/// The skin pages are drawn in, printed the way the world's drawing style prints.
+	/// The page skin pages are printed in, in order of precedence: `--style` (which the command
+	/// line writes into `meta.style`), the script's own `style` front matter, the world's
+	/// drawing style's `skin`, then `riso`.
 	pub fn style(&self) -> Style {
 		let mut style = self
 			.meta
 			.style
 			.as_deref()
+			.or(self.skin.as_deref())
 			.and_then(Style::parse)
 			.unwrap_or_default();
 		style.finish.tone = (self.drawing.fill == Fill::Screentone).then_some(self.drawing.tone);
@@ -440,7 +474,11 @@ pub fn parse(source: &str) -> Result<Story> {
 		let names: Vec<&str> = StyleName::ALL.iter().map(|(name, _)| *name).collect();
 
 		if StyleName::parse(name).is_none() {
-			bail!("unknown style `{name}`; use one of: {}", names.join(", "));
+			bail!(
+				"unknown page skin `{name}`; use one of: {} (for drawing styles such as chibi, \
+				 run `fables style list`)",
+				names.join(", ")
+			);
 		}
 	}
 
@@ -459,6 +497,10 @@ pub fn parse(source: &str) -> Result<Story> {
 		.unwrap_or_else(Light::day);
 
 	let slug = slugify(&meta.title);
+	ensure!(
+		!slug.is_empty(),
+		"the title needs at least one letter or digit: it names the book's output folder"
+	);
 
 	Ok(Story {
 		meta,
@@ -466,7 +508,9 @@ pub fn parse(source: &str) -> Result<Story> {
 		dir: std::path::PathBuf::new(),
 		slug,
 		matter: crate::world::Matter::default(),
+		drawing_style: crate::art::pack::DEFAULT.to_owned(),
 		drawing: Drawing::default(),
+		skin: None,
 		settings: Library::built_in(),
 		light,
 	})
@@ -498,6 +542,13 @@ fn parse_pages(body: &str, first_line: usize) -> Result<Vec<Page>> {
 	for (offset, raw) in body.lines().enumerate() {
 		let line_no = first_line + offset;
 		let line = raw.trim();
+
+		if line == "+++" {
+			bail!(
+				"line {line_no}: a stray `+++`; the front matter already closed with the `+++` \
+				 before the first page"
+			);
+		}
 
 		let is_text = !line.is_empty()
 			&& !line.starts_with('#')
@@ -595,6 +646,11 @@ fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
 				.with_context(|| {
 					format!("line {line}: `@pause` needs a number of seconds, e.g. `@pause 1.5`")
 				})?;
+
+			ensure!(
+				seconds.is_finite() && (0.0..=MAX_PAUSE).contains(&seconds),
+				"line {line}: `@pause` takes 0 to {MAX_PAUSE:.0} seconds, e.g. `@pause 1.5`"
+			);
 
 			Ok(Beat::Pause { seconds, line })
 		}
@@ -796,6 +852,61 @@ Hello.
 	}
 
 	#[test]
+	fn a_pause_is_a_short_beat_and_nothing_longer() {
+		for (value, accepted) in [
+			("0", true),
+			("0.4", true),
+			("60", true),
+			("60.1", false),
+			("1e9", false),
+			("-1", false),
+			("inf", false),
+			("nan", false),
+		] {
+			let script =
+				format!("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@pause {value}\n");
+			let parsed = parse(&script);
+
+			assert_eq!(
+				parsed.is_ok(),
+				accepted,
+				"@pause {value}: {:?}",
+				parsed.err().map(|error| format!("{error:#}"))
+			);
+
+			if !accepted {
+				let message = format!("{:#}", parsed.unwrap_err());
+				assert!(message.contains("line 6"), "{message}");
+				assert!(message.contains("60"), "{message}");
+			}
+		}
+	}
+
+	#[test]
+	fn a_title_needs_a_letter_or_digit_to_name_its_files() {
+		let error = parse("+++\ntitle = \"!!!\"\nauthor = \"A\"\n+++\n# park\nHi.\n").unwrap_err();
+		let message = format!("{error:#}");
+
+		assert!(
+			message.contains("title") && message.contains("letter or digit"),
+			"{message}"
+		);
+		assert_eq!(slugify("!!!"), "");
+	}
+
+	#[test]
+	fn a_stray_front_matter_fence_is_an_error_not_story_text() {
+		let error =
+			parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\nHi.\n+++\n").unwrap_err();
+		let message = format!("{error:#}");
+
+		assert!(
+			message.contains("line 7") && message.contains("+++"),
+			"{message}"
+		);
+	}
+
+	#[test]
 	fn splits_markup_into_runs() {
 		let parsed = runs("\"**NOPE**,\" said *Stanley* with a 5* grin");
 		assert_eq!(
@@ -830,6 +941,35 @@ Hello.
 	fn slugs_are_file_safe() {
 		assert_eq!(slugify("Stinky McStinkbreath!"), "stinky-mcstinkbreath");
 		assert_eq!(slugify("  The  End  "), "the-end");
+	}
+
+	#[test]
+	fn the_page_skin_resolves_cli_then_script_then_drawing_style() {
+		let mut story = parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\nHi.\n").unwrap();
+		assert_eq!(
+			story.style().name.name(),
+			"riso",
+			"nothing named anywhere is riso"
+		);
+
+		story.skin = Some("clear".into());
+		assert_eq!(
+			story.style().name.name(),
+			"clear",
+			"the drawing style's skin"
+		);
+
+		story.meta.style = Some("crayon".into());
+		assert_eq!(
+			story.style().name.name(),
+			"crayon",
+			"the script's own style wins over the drawing style's skin"
+		);
+
+		// `--style` is written into the script's front matter before it is loaded, so it wins
+		// over both.
+		story.meta.style = Some("bold".into());
+		assert_eq!(story.style().name.name(), "bold");
 	}
 
 	#[test]

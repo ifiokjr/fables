@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 
 use crate::art::Color;
 use crate::art::figure::Build;
@@ -19,6 +20,7 @@ use crate::art::figure::Pose;
 use crate::art::figure::Prop;
 use crate::art::figure::Teeth;
 use crate::art::light::Light;
+use crate::art::light::Preset;
 use crate::art::pack::StylePack;
 use crate::art::rig::Gait;
 use crate::art::rig::Stance;
@@ -333,8 +335,20 @@ impl Scene {
 
 		for token in &page.options {
 			match token.key.as_str() {
-				"text" | "video" | "book" => {}
-				// A page-level choice, not scene state: the timeline reads it from the heading.
+				// Page-level choices, not scene state: the book and the timeline read them
+				// from the heading.
+				"text" | "video" | "book" | "no-wormsley" => {}
+				"size" => {
+					let value = token.value.as_deref().with_context(|| {
+						format!("line {}: `size` needs a scale, e.g. `size=0.9`", page.line)
+					})?;
+					let scale = number(token, value, page.line)?;
+					ensure!(
+						scale > 0.0,
+						"line {}: `size` must be more than zero, e.g. `size=0.9`",
+						page.line
+					);
+				}
 				"transition" => {
 					transition(token.value.as_deref(), page.line)?;
 				}
@@ -414,17 +428,14 @@ impl Scene {
 			("mint", Some(v)) => self.weather.mint = number(token, v, line)?,
 			("light", Some(v)) => {
 				self.weather.light = Light::parse(v).ok_or_else(|| {
-					anyhow::anyhow!(
-						"line {line}: unknown light `{v}`; try {}",
-						crate::art::light::Preset::names()
-					)
+					anyhow::anyhow!("line {line}: unknown light `{v}`; try {}", Preset::names())
 				})?;
 			}
 			("tint", Some(v)) => self.weather.tint = colour(v, line)?,
 			("speed", Some(v)) => self.weather.speed = number(token, v, line)?,
 			("impact", Some(v)) => self.weather.impact = number(token, v, line)?,
 			("zoom", Some(v)) => self.camera.zoom = number(token, v, line)?.max(0.5),
-			("look", Some(v)) => self.camera.look = pair(v, line)?,
+			("look", Some(v)) => self.camera.look = pair(token, v, line)?,
 			("shot", Some(v)) => {
 				self.camera.shot = Some(ShotSize::parse(v).ok_or_else(|| {
 					anyhow::anyhow!(
@@ -459,11 +470,26 @@ impl Scene {
 			("ease", None) => self.camera.travel = Some(Travel::Glide),
 			("over", Some(v)) => self.camera.over = number(token, v, line)?.max(0.0),
 			("shake", Some(v)) => self.camera.shake = number(token, v, line)?.clamp(0.0, 1.0),
+			(key, None) => {
+				// A bare light preset means `light=<preset>`. `night` and `day` keep their
+				// existing bare weather meaning, above.
+				if let Some(preset) = Preset::parse(key) {
+					self.weather.light = Light::of(preset);
+				} else {
+					bail!(
+						"line {line}: `{token}` is not a scene option; use night, day, light=, a \
+						 light preset ({}), wilt=, stink=, mint=, tint=, speed=, impact=, zoom=, \
+						 look=x,y, shot=, on=, move=, over=, shake=, cut or ease",
+						Preset::names()
+					)
+				}
+			}
 			_ => {
 				bail!(
-					"line {line}: `{token}` is not a scene option; use night, day, light=, wilt=, \
-					 stink=, mint=, tint=, speed=, impact=, zoom=, look=x,y, shot=, on=, move=, \
-					 over=, shake=, cut or ease"
+					"line {line}: `{token}` is not a scene option; use night, day, light=, a \
+					 light preset ({}), wilt=, stink=, mint=, tint=, speed=, impact=, zoom=, \
+					 look=x,y, shot=, on=, move=, over=, shake=, cut or ease",
+					Preset::names()
 				)
 			}
 		}
@@ -500,12 +526,19 @@ impl Scene {
 }
 
 fn number(token: &Token, value: &str, line: usize) -> Result<f32> {
-	value.parse::<f32>().map_err(|_| {
+	let parsed = value.parse::<f32>().map_err(|_| {
 		anyhow::anyhow!(
 			"line {line}: `{token}` needs a number, e.g. `{}=0.5`",
 			token.key
 		)
-	})
+	})?;
+	ensure!(
+		parsed.is_finite(),
+		"line {line}: `{token}` needs a finite number, e.g. `{}=0.5`",
+		token.key
+	);
+
+	Ok(parsed)
 }
 
 /// The page transition named in a heading (`transition=wipe|cut|dissolve|fade|iris|push`).
@@ -530,34 +563,38 @@ fn colour(value: &str, line: usize) -> Result<Color> {
 		.ok_or_else(|| anyhow::anyhow!("line {line}: `{value}` is not a palette colour or #rrggbb"))
 }
 
-fn pair(value: &str, line: usize) -> Result<(f32, f32)> {
-	let parsed = value
-		.split_once(',')
-		.and_then(|(x, y)| Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?)));
+fn pair(token: &Token, value: &str, line: usize) -> Result<(f32, f32)> {
+	let parsed = value.split_once(',').map(|(x, y)| (x.trim(), y.trim()));
 
-	parsed.ok_or_else(|| {
-		anyhow::anyhow!("line {line}: `{value}` should be two numbers like `0.5,0.6`")
-	})
+	let (x, y) = parsed.with_context(|| {
+		anyhow::anyhow!("line {line}: `{token}` should be two numbers like `0.5,0.6`")
+	})?;
+
+	Ok((number(token, x, line)?, number(token, y, line)?))
 }
 
-fn position(value: &str, line: usize) -> Result<f32> {
-	Ok(match value {
-		"far-left" => 0.12,
-		"left" => 0.28,
-		"center" | "centre" | "middle" => 0.5,
-		"right" => 0.72,
-		"far-right" => 0.88,
-		"sky" => 0.32,
-		"high" => 0.2,
-		"low" => 0.55,
-		other => {
-			other.parse::<f32>().map_err(|_| {
-				anyhow::anyhow!(
-					"line {line}: position `{other}` should be a number (0 to 1) or far-left, \
-					 left, center, right, far-right, sky, high, low"
-				)
-			})?
-		}
+fn position(token: &Token, value: &str, line: usize) -> Result<f32> {
+	let named = match value {
+		"far-left" => Some(0.12),
+		"left" => Some(0.28),
+		"center" | "centre" | "middle" => Some(0.5),
+		"right" => Some(0.72),
+		"far-right" => Some(0.88),
+		"sky" => Some(0.32),
+		"high" => Some(0.2),
+		"low" => Some(0.55),
+		_ => None,
+	};
+
+	if let Some(x) = named {
+		return Ok(x);
+	}
+
+	number(token, value, line).map_err(|_| {
+		anyhow::anyhow!(
+			"line {line}: position `{value}` should be a finite number (0 to 1) or far-left, \
+			 left, center, right, far-right, sky, high, low"
+		)
 	})
 }
 
@@ -575,8 +612,8 @@ fn apply_actor_token(actor: &mut Actor, token: &Token, line: usize) -> Result<()
 	};
 
 	match token.key.as_str() {
-		"x" => actor.x = Some(position(value, line)?),
-		"y" => actor.y = Some(position(value, line)?),
+		"x" => actor.x = Some(position(token, value, line)?),
+		"y" => actor.y = Some(position(token, value, line)?),
 		"size" => actor.size = number(token, value, line)?,
 		"z" => {
 			actor.z = value
@@ -767,8 +804,9 @@ pub fn rehearse(story: &Story, cast: &Cast) -> Result<Vec<Rehearsal>> {
 	for (index, page) in story.pages.iter().enumerate() {
 		let mut scene = Scene::for_page(page, &story.settings)?;
 
-		// A page takes the book's (or world's) default light unless its heading names one.
-		if page.option("light").is_none() {
+		// A page takes the book's (or world's) default light unless its heading names one,
+		// either `light=` or a bare preset (`# street golden`).
+		if !page.names_light() {
 			scene.weather.light = story.light;
 		}
 
@@ -827,7 +865,7 @@ fn hide_wormsley(scene: &mut Scene, page: &Page, cast: &Cast, index: usize) {
 					d.tokens
 						.iter()
 						.find(|t| t.key == "x")
-						.and_then(|t| position(t.value.as_deref()?, 0).ok())
+						.and_then(|t| position(t, t.value.as_deref()?, 0).ok())
 				}
 				_ => None,
 			}
@@ -985,10 +1023,7 @@ mod tests {
 	#[test]
 	fn a_light_is_scene_state_that_can_change_mid_page() {
 		let scene = run("# park light=golden\n@stinky\n").unwrap();
-		assert_eq!(
-			scene.weather.light.preset,
-			crate::art::light::Preset::Golden
-		);
+		assert_eq!(scene.weather.light.preset, Preset::Golden);
 
 		// A bare `night` keeps today's behaviour: no light preset comes with it.
 		let night = run("# park night\n@stinky\n").unwrap();
@@ -996,10 +1031,7 @@ mod tests {
 		assert!(night.weather.light.is_day());
 
 		let eased = run("# park light=golden\n@stinky\n@scene light=moonlit\n").unwrap();
-		assert_eq!(
-			eased.weather.light.preset,
-			crate::art::light::Preset::Moonlit
-		);
+		assert_eq!(eased.weather.light.preset, Preset::Moonlit);
 	}
 
 	#[test]
@@ -1008,6 +1040,53 @@ mod tests {
 		assert!(
 			message.contains("line 5") && message.contains("candle") && message.contains("moonlit"),
 			"{message}"
+		);
+	}
+
+	#[test]
+	fn a_bare_light_preset_means_light_equals_it() {
+		for preset in Preset::ALL {
+			let word = preset.name();
+			let heading = run(&format!("# park {word}\n@stinky\n")).unwrap();
+			let scene = run(&format!("# park\n@stinky\n@scene {word}\n")).unwrap();
+
+			// `night` and `day` keep their existing bare meaning: weather, not a light.
+			if matches!(preset, Preset::Day | Preset::Night) {
+				let night = word == "night";
+
+				for scene in [&heading, &scene] {
+					assert_eq!(scene.weather.night, night, "a bare `{word}`");
+					assert_eq!(scene.weather.light.preset, Preset::Day);
+				}
+
+				continue;
+			}
+
+			assert_eq!(
+				heading.weather.light.preset, preset,
+				"a heading's bare `{word}`"
+			);
+			assert_eq!(scene.weather.light.preset, preset, "@scene's bare `{word}`");
+		}
+
+		let day = run("# park night\n@scene day\n@stinky\n").unwrap();
+		assert!(!day.weather.night);
+		assert_eq!(day.weather.light.preset, Preset::Day);
+	}
+
+	#[test]
+	fn a_bare_light_in_a_heading_beats_the_books_default_light() {
+		let story = story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\nlight = \"dawn\"\n+++\n# park golden\n@stinky\n# \
+			 plain\n@stinky\n",
+		)
+		.unwrap();
+		let rehearsals = rehearse(&story, &cast()).unwrap();
+		assert_eq!(rehearsals[0].opening.weather.light.preset, Preset::Golden);
+		assert_eq!(
+			rehearsals[1].opening.weather.light.preset,
+			Preset::Dawn,
+			"a page that names no light takes the book's"
 		);
 	}
 
@@ -1071,6 +1150,48 @@ mod tests {
 		assert_eq!(locked.meta.video.direction, Direction::Locked);
 		assert!(!locked.meta.video.depth_of_field);
 		assert_eq!(locked.meta.video.transition, Some(Transition::Dissolve));
+	}
+
+	#[test]
+	fn every_number_a_script_supplies_is_finite() {
+		for value in ["nan", "inf", "-inf"] {
+			for script in [
+				format!("# park\n@stinky size={value}"),
+				format!("# park\n@stinky x={value}"),
+				format!("# park wilt={value}"),
+				format!("# park size={value}"),
+				format!("# park\n@camera look={value},{value}"),
+				format!("# park\n@camera shake={value}"),
+			] {
+				let message = format!("{:#}", run(&script).unwrap_err());
+				assert!(
+					message.contains("line ") && message.contains("finite"),
+					"{script}: {message}"
+				);
+			}
+		}
+
+		// A page's text scale must also leave the type a size to set.
+		for value in ["0", "-1"] {
+			let message = format!("{:#}", run(&format!("# park size={value}")).unwrap_err());
+			assert!(message.contains("more than zero"), "{value}: {message}");
+		}
+	}
+
+	#[test]
+	fn page_options_that_are_not_scene_state_parse() {
+		let story = story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park size=0.9 no-wormsley\n@stinky\n",
+		)
+		.unwrap();
+		let page = &story.pages[0];
+
+		assert_eq!(
+			page.option("size").and_then(|token| token.value.as_deref()),
+			Some("0.9")
+		);
+		assert!(page.flag("no-wormsley"));
+		Scene::for_page(page, &story.settings).unwrap();
 	}
 
 	#[test]

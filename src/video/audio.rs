@@ -267,6 +267,7 @@ fn music_loop() -> (Vec<f32>, usize) {
 
 /// Renders the full soundtrack and writes it as 48 kHz 16-bit stereo WAV.
 pub fn write(timeline: &Timeline, path: &Path) -> Result<()> {
+	super::check_length(timeline.duration)?;
 	let total = len(timeline.duration + 0.5);
 	let mut voice = vec![0.0_f32; total];
 

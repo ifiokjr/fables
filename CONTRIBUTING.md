@@ -38,9 +38,10 @@ request carries one coherent change. Say what the change does and how you checke
 ## Proposing a style, setting or world
 
 Send a pull request that adds the folder, with a model sheet or a rendered page attached to the
-description — not committed. A style is a folder in [`styles/`](styles) that passes
-`fables style check <name>`; a setting is an SVG of named parts, built in under
-[`settings/`](settings) or in a world's own `settings/` folder; a world is a folder in
-[`worlds/`](worlds) with a `world.toml`, and [`worlds/mumbleton/`](worlds/mumbleton) is the
-smallest complete example. The example worlds double as tests, so any new world has to pass
-`fables check` and `check:worlds`.
+description — not committed. A world starts from `fables world new "Name" --style cartoon`;
+characters come from `fables character new <id> --name "…"`; a setting starts from
+`fables setting new <name> --from park` into a world's own `settings/`, or a new built-in SVG
+under [`settings/`](settings). A style is a folder in [`styles/`](styles): copy the closest one,
+read what it offers with `fables style describe <name>`, and make sure `fables style check <name>`
+passes. [`worlds/mumbleton/`](worlds/mumbleton) is the smallest complete example world, and the
+example worlds double as tests, so any new world has to pass `fables check` and `check:worlds`.
