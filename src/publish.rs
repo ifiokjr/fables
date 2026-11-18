@@ -66,6 +66,14 @@ pub fn book_dir(out: &Path, story: &Story) -> PathBuf {
 pub fn check(story: &Story, cast: &Cast) -> Result<CheckReport> {
 	let rehearsals = stage::rehearse(story, cast)?;
 	let pages = book::assemble(story, cast)?;
+	// The camera is planned too, so a shot that names somebody who is not on stage stops here
+	// rather than at the first review, storyboard or video.
+	crate::video::timeline::build(story, cast, &rehearsals, |line| {
+		Ok(crate::video::voice::silent(
+			line,
+			crate::video::voice::estimated_seconds(line),
+		))
+	})?;
 	let words = story
 		.pages
 		.iter()
@@ -400,6 +408,20 @@ mod tests {
 			check(&story, &parametric).unwrap().notes.is_empty(),
 			"the parametric puppet reads those fields"
 		);
+	}
+
+	#[test]
+	fn a_check_stops_at_a_shot_that_names_nobody_on_stage() {
+		let cast = Cast::parse("[pip]\nname = \"Pip\"\n").unwrap();
+		let story = story::parse(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# plain\n@pip\n@camera shot=close \
+			 on=nell\nHi.\n",
+		)
+		.unwrap();
+		let message = format!("{:#}", check(&story, &cast).unwrap_err());
+		// A direction above a page's first words lands with its heading, so that is the line named.
+		assert!(message.starts_with("line 5: "), "{message}");
+		assert!(message.contains("`on=nell` names nobody"), "{message}");
 	}
 
 	#[test]

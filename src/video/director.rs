@@ -1143,7 +1143,8 @@ pub(crate) fn arrives_from(travel: Travel, view: View, aspect: f32) -> View {
 	clamp(aspect, View { centre, height })
 }
 
-/// `on=` names must be on stage when the shot lands; anything else is a script error.
+/// `on=` names must be on stage when the shot lands; anything else is a script error, with the
+/// script line when the shot comes from one.
 fn validate(setups: &[Setup], shot: &Shot) -> Result<Vec<Setup>> {
 	let page = shot
 		.kind
@@ -1156,17 +1157,28 @@ fn validate(setups: &[Setup], shot: &Shot) -> Result<Vec<Setup>> {
 		};
 
 		let actors = &shot.scene_at(setup.anchor).actors;
+		let there: Vec<&str> = actors
+			.iter()
+			.filter(|actor| !actor.hidden)
+			.map(|actor| actor.id.as_str())
+			.collect();
 
 		for id in on {
-			if !actors.iter().any(|actor| &actor.id == id && !actor.hidden) {
+			if !there.contains(&id.as_str()) {
+				let line = if setup.line > 0 {
+					format!("line {}: ", setup.line)
+				} else {
+					String::new()
+				};
+				let who = if there.is_empty() {
+					"the stage is empty".to_owned()
+				} else {
+					format!("who is there: {}", there.join(", "))
+				};
+
 				bail!(
-					"{page}`on={id}` names nobody on stage when the shot lands; who is there: {}",
-					actors
-						.iter()
-						.filter(|actor| !actor.hidden)
-						.map(|actor| actor.id.as_str())
-						.collect::<Vec<_>>()
-						.join(", ")
+					"{line}{page}`on={id}` names nobody on stage when the shot lands; {who}{}",
+					crate::hint::did_you_mean(id, there.iter().copied())
 				);
 			}
 		}
@@ -1887,6 +1899,26 @@ mod tests {
 		let message = format!("{error:#}");
 		assert!(message.contains("on=ghost"), "{message}");
 		assert!(message.contains("page 1"), "{message}");
+		assert!(message.starts_with("line 6: "), "{message}");
+		assert!(message.contains("who is there: kid"), "{message}");
+		assert!(!message.contains("did you mean"), "{message}");
+	}
+
+	#[test]
+	fn a_near_miss_is_offered_the_actor_on_stage() {
+		let error = (|| {
+			let story = story::parse(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park\n@kid \
+				 x=0.3\n@bird.a x=0.7\n@camera shot=close on=bird\nHello.\n",
+			)?;
+			let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
+			let rehearsals = rehearse(&story, &cast)?;
+			crate::video::timeline::build(&story, &cast, &rehearsals, |line| Ok(silence(line)))
+		})()
+		.unwrap_err();
+
+		let message = format!("{error:#}");
+		assert!(message.contains("did you mean `bird.a`?"), "{message}");
 	}
 
 	#[test]
