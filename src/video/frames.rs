@@ -49,6 +49,7 @@ use crate::video::audio::Sound;
 use crate::video::director;
 use crate::video::director::View;
 use crate::video::timeline::Framing;
+use crate::video::timeline::Key;
 use crate::video::timeline::Line;
 use crate::video::timeline::Setup;
 use crate::video::timeline::Shot;
@@ -433,7 +434,11 @@ impl<'a> Renderer<'a> {
 					Some(old) if !fresh => acting::leap_start(old, puppet, &cx),
 					_ => 0.0,
 				};
-				acting::leap(&mut blended, since - start, motion.squash);
+				// Until the run-up ends the legs are the run's, not the leap's.
+				if since >= start {
+					acting::leap(&mut blended, since - start, motion.squash);
+				}
+
 				leaps.push((puppet.id.as_str(), start));
 			}
 
@@ -490,6 +495,7 @@ impl<'a> Renderer<'a> {
 			});
 
 		for puppet in &mut puppets {
+			puppet.held = mood_held(shot, index, &puppet.id, time);
 			acting::animate(puppet, &cx, time, speaking.as_ref());
 		}
 
@@ -735,7 +741,7 @@ impl<'a> Renderer<'a> {
 					*size,
 				);
 
-				director::shot_view(
+				director::film_view(
 					aspect,
 					self.format.action_band(),
 					*size,
@@ -1295,6 +1301,26 @@ fn sheet(svg: &mut Svg, h: f32, x0: f32, x1: f32) {
 	svg.stroke(&edge_line, palette::INK, svg.line * 1.5);
 }
 
+/// How long the actor has held the mood it has at key `index`, in seconds at `time`: since
+/// the key that changed it, or since the page opened.
+fn mood_held(shot: &Shot, index: usize, id: &str, time: f32) -> f32 {
+	let mood = |key: &Key| {
+		key.scene
+			.actors
+			.iter()
+			.find(|actor| actor.id == id)
+			.map(|actor| actor.mood)
+	};
+	let now = mood(&shot.keys[index]);
+	let since = (0..index)
+		.rev()
+		.take_while(|earlier| mood(&shot.keys[*earlier]) == now)
+		.last()
+		.unwrap_or(index);
+
+	time - shot.keys[since].time
+}
+
 /// Who is talking at `time` (lingering briefly after the line so listeners don't snap away).
 /// Whether the actor `id` is in a `jump` in `scene`.
 fn jumps(scene: &Scene, id: &str) -> bool {
@@ -1524,6 +1550,7 @@ mod tests {
 				text: text.to_owned(),
 				voiced_by: voiced_by.map(str::to_owned),
 				line: 0,
+				about: None,
 			}
 		};
 		let lines = vec![

@@ -383,7 +383,7 @@ const fn act_beat(
 }
 
 /// The acting routine: every rule in order, on two characters.
-const ACTING: [ActingBeat; 11] = [
+const ACTING: [ActingBeat; 14] = [
 	act_beat(
 		0.0,
 		"eyes lead · head follows",
@@ -437,9 +437,19 @@ const ACTING: [ActingBeat; 11] = [
 		None,
 		None,
 	),
+	act_beat(
+		27.2,
+		"take · hang · relax",
+		Pose::Shrug,
+		Mood::Shocked,
+		None,
+		None,
+	),
+	act_beat(31.0, "a proud shout", Pose::Hips, Mood::Proud, None, None),
+	act_beat(34.0, "a leap", Pose::Idle, Mood::Happy, None, None),
 ];
 
-const ACTING_LENGTH: f32 = 27.2;
+const ACTING_LENGTH: f32 = 36.4;
 /// Where the two test characters stand on the stage, in stage units.
 const ACTING_X: [f32; 2] = [700.0, 1750.0];
 
@@ -479,6 +489,7 @@ fn actor(look: &Look, id: &str, x: f32, beat: &ActingBeat) -> Puppet {
 		lift: 0.0,
 		smear: 0.0,
 		exerted: 0.0,
+		held: 0.0,
 	}
 }
 
@@ -541,6 +552,22 @@ fn acting_stage(
 		});
 	}
 
+	// A shouted line from both, for the eyes a proud face opens to deliver it.
+	let both = vec!["a".to_owned(), "b".to_owned()];
+
+	if beat.label == "a proud shout" {
+		lines.push(acting::Spoken {
+			start: beat.at + 0.9,
+			duration: 1.4,
+			speakers: &both,
+			text: "**I HAVE IT!**",
+			envelope: &speech,
+			track: &track,
+			peak: acting::peak_of(&speech),
+			question: false,
+		});
+	}
+
 	if beat.label == "listening · flinch" {
 		// A shout in the middle, for the flinch a beat later.
 		for (step, sample) in shout.iter_mut().enumerate() {
@@ -598,7 +625,14 @@ fn acting_stage(
 			now
 		};
 
-		// Held-pose life: speech, listening, breathing, business, blinking.
+		// A leap: a crouch, real air, a landing with squash, and standing again.
+		if beat.label == "a leap" {
+			acting::leap(&mut puppet, since - 0.7, motion.squash);
+		}
+
+		// Held-pose life: speech, listening, breathing, business, blinking. A strong mood has
+		// been held since its beat began, so it hangs and then relaxes.
+		puppet.held = since;
 		acting::animate(&mut puppet, &cx, time, speaker.as_ref());
 
 		if let Body::Figure(state) = &mut puppet.body {

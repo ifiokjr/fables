@@ -94,7 +94,10 @@ pub fn assemble(story: &Story, cast: &Cast) -> Result<Vec<BookPage>> {
 		}
 	}
 
-	pages.push(meet_the_folk(story, cast)?);
+	// A world with nobody but the star has no folk to meet; padding fills the page instead.
+	if let Some(page) = meet_the_folk(story, cast)? {
+		pages.push(page);
+	}
 
 	// Short books are padded to KDP's minimum: one activity page, then plain endpapers.
 	if pages.len() < MIN_PAGES || pages.len() % 2 == 1 {
@@ -113,10 +116,11 @@ pub fn assemble(story: &Story, cast: &Cast) -> Result<Vec<BookPage>> {
 }
 
 /// The plain endpapers [`assemble`] pads a book of `story_pages` story pages with: the pages
-/// a story could grow into without the printed book growing.
-pub fn blank_pages(story_pages: usize) -> usize {
+/// a story could grow into without the printed book growing. `folk` says whether the world has
+/// anybody for a "Meet the folk" page; without one, the book has a page more to fill.
+pub fn blank_pages(story_pages: usize, folk: bool) -> usize {
 	// The title, the copyright page and "Meet the folk", then the activity page.
-	let mut pages = story_pages + 3;
+	let mut pages = story_pages + 2 + usize::from(folk);
 
 	if pages < MIN_PAGES || pages % 2 == 1 {
 		pages += 1;
@@ -129,6 +133,9 @@ pub fn blank_pages(story_pages: usize) -> usize {
 fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 	let page = &story.pages[rehearsal.page];
 	let mut scene = rehearsal.finale().clone();
+	// A still is framed by its heading alone (`shot=`, `on=`, `zoom=`, `look=`): `@camera` moves
+	// the video's camera and never the book's, so pinning a camera plan leaves the page as it was.
+	scene.camera = rehearsal.opening.camera.clone();
 	let paragraphs = page.book_text();
 	let mut texts = Vec::new();
 
@@ -316,6 +323,15 @@ pub fn star_scene(
 		line: 0,
 	};
 	let mut scene = Scene::for_page(&page, &story.settings, &story.props)?;
+
+	if let Some(name) = &cover.light {
+		scene.weather.light = crate::art::light::Light::parse(name).ok_or_else(|| {
+			anyhow::anyhow!(
+				"[cover] light: unknown light `{name}`; use one of: {}",
+				crate::art::light::Preset::names()
+			)
+		})?;
+	}
 
 	if let Some(star) = &story.meta.star {
 		let directive = Directive {
@@ -631,8 +647,9 @@ fn copyright_page(story: &Story) -> BookPage {
 	}
 }
 
-/// A line-up of the book's cast members (excluding the star), naming each one.
-fn meet_the_folk(story: &Story, cast: &Cast) -> Result<BookPage> {
+/// A line-up of the book's cast members (excluding the star), naming each one, or `None` when
+/// there is nobody to meet.
+fn meet_the_folk(story: &Story, cast: &Cast) -> Result<Option<BookPage>> {
 	let mut scene = plain_scene(palette::MINT);
 	let star = story.meta.star.as_deref();
 	let folk: Vec<&crate::cast::Member> = cast
@@ -643,7 +660,12 @@ fn meet_the_folk(story: &Story, cast: &Cast) -> Result<BookPage> {
 		})
 		.take(4)
 		.collect();
-	let count = folk.len().max(1) as f32;
+
+	if folk.is_empty() {
+		return Ok(None);
+	}
+
+	let count = folk.len() as f32;
 	let mut captions = Vec::new();
 
 	for (i, member) in folk.iter().enumerate() {
@@ -707,14 +729,14 @@ fn meet_the_folk(story: &Story, cast: &Cast) -> Result<BookPage> {
 		});
 	}
 
-	Ok(BookPage {
+	Ok(Some(BookPage {
 		label: "meet-the-folk".into(),
 		alt: describe(&scene, cast),
 		scene,
 		texts,
 		decor: Decor::None,
 		style: Style::default(),
-	})
+	}))
 }
 
 /// An empty paper page (an endpaper).
@@ -984,6 +1006,7 @@ pub fn page_words(page: &BookPage) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::stage::ShotSize;
 	use crate::story;
 
 	fn sample() -> (Story, Cast) {
@@ -1021,10 +1044,12 @@ mod tests {
 			.count();
 		let story_pages = story.pages.iter().filter(|page| page.in_book()).count();
 
-		assert_eq!(blank_pages(story_pages), blanks);
-		assert_eq!(blank_pages(8), 12);
-		assert_eq!(blank_pages(20), 0);
-		assert_eq!(blank_pages(30), 0);
+		// The sample world has nobody but its star, so there is no "Meet the folk" page.
+		assert_eq!(blank_pages(story_pages, false), blanks);
+		assert_eq!(blank_pages(8, true), 12);
+		assert_eq!(blank_pages(8, false), 13);
+		assert_eq!(blank_pages(20, true), 0);
+		assert_eq!(blank_pages(30, true), 0);
 	}
 
 	#[test]
@@ -1078,6 +1103,75 @@ mod tests {
 		let (story, cast) = sample();
 		let pages = assemble(&story, &cast).unwrap();
 		assert_eq!(page_words(&pages[2]), "Hello there.");
+	}
+
+	#[test]
+	fn a_world_with_nobody_but_the_star_has_no_folk_page() {
+		let (story, cast) = sample();
+		let pages = assemble(&story, &cast).unwrap();
+		assert!(
+			pages.iter().all(|page| page.label != "meet-the-folk"),
+			"the worm is not a figure and the kid is the star: nobody to meet"
+		);
+		assert!(pages.len() >= MIN_PAGES && pages.len().is_multiple_of(2));
+
+		let cast = Cast::parse(
+			"[kid]\nname = \"Kid McKidface\"\nhabit = \"Testing\"\n[gran]\nname = \"Gran\"\nhabit \
+			 = \"Knitting\"\n",
+		)
+		.unwrap();
+		let pages = assemble(&story, &cast).unwrap();
+		assert!(pages.iter().any(|page| page.label == "meet-the-folk"));
+		assert!(pages.len() >= MIN_PAGES && pages.len().is_multiple_of(2));
+	}
+
+	#[test]
+	fn the_cover_takes_any_light_preset() {
+		let script = |light: &str| {
+			format!(
+				"+++\ntitle = \"Test Book\"\nstar = \"kid\"\n[cover]\nlight = \"{light}\"\n+++\n# \
+				 park\n@kid\nHi.\n"
+			)
+		};
+		let (_, cast) = sample();
+		let story = story::parse(&script("moonlit")).unwrap();
+		let cover = front_cover(&story, &cast).unwrap();
+		assert_eq!(
+			cover.scene.weather.light.preset,
+			crate::art::light::Preset::Moonlit
+		);
+
+		// Unset, the cover stays in daylight whatever the book's own light.
+		let (story, _) = sample();
+		let cover = front_cover(&story, &cast).unwrap();
+		assert_eq!(
+			cover.scene.weather.light.preset,
+			crate::art::light::Preset::Day
+		);
+
+		let error = story::parse(&script("spooky")).unwrap_err().to_string();
+		assert!(
+			error.contains("[cover] light")
+				&& error.contains("spooky")
+				&& error.contains("moonlit"),
+			"{error}"
+		);
+	}
+
+	#[test]
+	fn a_still_is_framed_by_its_heading_alone() {
+		let story = story::parse(
+			"+++\ntitle = \"Test Book\"\nstar = \"kid\"\n+++\n# park shot=wide\n@kid \
+			 x=0.4\nHi.\n@camera shot=close on=kid\nBye.\n",
+		)
+		.unwrap();
+		let (_, cast) = sample();
+		let pages = assemble(&story, &cast).unwrap();
+		assert_eq!(pages[2].scene.camera.shot, Some(ShotSize::Wide));
+		assert!(
+			pages[2].scene.camera.on.is_empty(),
+			"`@camera` is video-only"
+		);
 	}
 
 	#[test]

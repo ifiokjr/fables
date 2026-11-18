@@ -1237,7 +1237,21 @@ impl Posed {
 				HandShape::Point => Hand::Point,
 			}
 		};
-		let face = face(state.mood);
+		let mut face = face(state.mood);
+
+		// A mood with its eyes shut in a smile opens them to shout or to look at a speaker:
+		// the cheeks still push the lower lids up.
+		if state.eyes_open {
+			for eye in &mut face.eyes {
+				if matches!(eye, Eye::Smiling) {
+					*eye = Eye::Open {
+						upper: 0.06,
+						lower: 0.3,
+						tilt: 0.0,
+					};
+				}
+			}
+		}
 
 		Posed {
 			t,

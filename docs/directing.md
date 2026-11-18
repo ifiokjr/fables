@@ -177,14 +177,19 @@ One clear action per beat.
   pops them into the still; give the arrival a beat to land (a reaction, a line) before the
   page's business starts. Exits (`exit=right`) say goodbye the same way.
 - **Cause, then reaction.** Nobody gasps at what hasn't happened yet. A `shocked`,
-  `disgusted` or `fainted` directed above the paragraph before an entrance, a shout, a faint, a
-  hop or an `@sfx` that causes it plays the reaction first; move the take below the cause.
-  Directions in the same block as their paragraph land together, so a take beside its cause is
-  fine.
-- **Let a reaction land.** After a big line, the listener's face is the story. Give it a
-  second: `@pause 0.8`, or the next direction on a new line, before the next paragraph. A
-  `shocked` in the same `@` line as a `talk`, with no pause before the next line, is a
-  reaction nobody sees.
+  `disgusted` or `fainted` directed above the paragraph before a shout, a faint, a hop or an
+  `@sfx` that causes it plays the reaction first; move the take below the cause. Directions
+  in the same block as their paragraph land together, so a take beside its cause is fine.
+  An entrance is the one cause the video waits for by itself: a `shocked`, `disgusted` or
+  `laugh` directed before somebody (or something) arrives later on the page is held as a
+  mild worry, the eyes go to the side the newcomer comes from, and the take lands once they
+  are on stage. The book's page still shows the mood where the script put it, so the script
+  is clearer with the take beside the entrance.
+- **Let a reaction land.** After a big line, the listener's face is the story. In the middle
+  of a page, give it the length of a shot: `@pause 1.2`, or the next direction on a new line,
+  before the next paragraph. A `shocked` in the same `@` line as a `talk`, with no pause
+  before the next line, is a reaction nobody sees. At the end of a page no pause is needed:
+  the director stretches the page's tail so the reaction gets its close-up.
 - **Contrast between pages.** No two facing pages should look the same: change the setting,
   the `light=`, the distance (`shot=`), or the staging. A page whose stage is identical to
   the last one's has nothing to look at — the same setting, light and shot, everybody within
@@ -211,7 +216,8 @@ director already does this for you when the script says nothing.
 
 **The reaction shot.** The line is half the joke; the listener's face is the other half. On
 a page whose biggest event is spoken, frame the person who is *not* speaking:
-`@camera shot=close on=mo`.
+`@camera shot=close on=mo`. The automatic director does it whenever a strong mood lands on
+somebody silent, and makes room for it at the end of a page.
 
 **The establishing shot.** After any big change of place or time, let the reader see where
 they are before going in close. The automatic director opens every page wide or full for
@@ -232,8 +238,12 @@ favours close shots and high captions; the 16:9 landscape carries groups and mov
 Storyboard both before rendering video if the Shorts cut matters.
 
 **When to trust the automatic director.** `[video] direction = "auto"` (the default) already
-establishes, alternates shot and reverse shot, widens for entrances and walks, gives a close
-to a strong mood on somebody silent, and never cuts faster than one setup each 1.2 s. Trust
+establishes, alternates shot and reverse shot, widens for entrances, walks and anybody
+crossing the stage, gives a close to a strong mood on somebody silent, frames whoever a
+narrated line opens by naming ("Mo stood tall."), and never cuts faster than one setup each
+1.2 s. A paragraph that mixes a quoted line with narration about somebody else is one line
+of audio unless the speaker has a voice of their own (`cast-voices`): give the narration its
+own paragraph when the camera should move to its subject. Trust
 it for whole scenes; write `@camera` only where it cannot know better — a specific reveal, a
 held look, a shake on an impact. A page with any `@camera` direction is shot exactly as
 written, both modes. The shot list shows the whole plan; `storyboard_pin` (or
@@ -271,13 +281,19 @@ a line, at the moment it happens.
 - **Poses and stances that show the mood.** Do not narrate a feeling and draw an idle body:
   pair `worried` with `hold` or `droop`, `proud` with `cheer` or `hips`, `defiant` with
   `arms-crossed`. A stance can contradict a mood on purpose — `grin` over `sit` reads as
-  smug.
+  smug. The video gives a mood with no pose its own (the table is in
+  [animation.md](animation.md)); the book's page draws exactly what the script says, so
+  direct the pose when the page matters.
 - **The take.** A change to `shocked`, `disgusted` or `fainted` plays as a classic take in
   video: squash, stretch, settle. Give it room — a `@pause` before the next line, or the
-  direction on its own line — so the reader sees the face change.
+  direction on its own line — so the reader sees the face change. A take finishes: after
+  about a second at its peak the mouth closes most of the way and the face keeps a quieter
+  version of the feeling, so a `shocked` held for a whole page is not a nine-second gasp.
 - **Walking is intent.** `@mo x=0.7` from `x=0.3` is a walk across the stage on his own
   feet, facing where he is going, the camera widening to keep him. Entrances and exits walk.
-  The on-the-spot `walk` and `run` gaits are for treadmill shots: running without arriving.
+  `run` or `walk` with an `x` goes there; with no `x` it runs to the `x` the actor is given
+  next on the page, and stands when it arrives. Only a `run` with nowhere to go on the page
+  is a treadmill: running without arriving. `run jump` with an `x` runs up and leaps.
 - **What the engine adds unasked.** Eyes lead turns, overlapping arrival, arcs, anticipation
   and settle, takes, breathing and weight shifts, speech beats and brow lifts, listening
   nods and flinches, idle business on long holds. Leave room for it: a pause, a held look, a

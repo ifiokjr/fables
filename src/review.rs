@@ -921,7 +921,7 @@ fn reactions(story: &Story) -> Vec<Finding> {
 					Severity::Consider,
 					directive.line,
 					"A strong mood and a `talk` share one line, and the next line follows at once.",
-					"Put `@pause 0.8` after the line so the reaction lands before the next one.",
+					"Put `@pause 1.2` after the line so the reaction lands before the next one.",
 				));
 			}
 		}
@@ -1814,7 +1814,9 @@ fn wind_down(story: &Story, rehearsals: &[Rehearsal]) -> Vec<Finding> {
 /// the blanks they leave, and the room that gives.
 pub fn padding(story: &Story) -> Option<String> {
 	let story_pages = story.pages.iter().filter(|page| page.in_book()).count();
-	let blanks = crate::book::blank_pages(story_pages);
+	// A review reads the script alone, so it counts a "Meet the folk" page: a world with
+	// nobody else to meet prints one blank page more than this says.
+	let blanks = crate::book::blank_pages(story_pages, true);
 
 	if blanks == 0 {
 		return None;

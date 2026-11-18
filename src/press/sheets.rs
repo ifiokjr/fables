@@ -304,6 +304,7 @@ fn sheet_puppet(member: &Member, at: Pt) -> Puppet {
 		lift: 0.0,
 		smear: 0.0,
 		exerted: 0.0,
+		held: 0.0,
 	}
 }
 
@@ -407,6 +408,7 @@ pub fn props_sheet(
 				lift: 0.0,
 				smear: 0.0,
 				exerted: 0.0,
+				held: 0.0,
 			};
 			compose::draw_puppet(&mut svg, &puppet);
 		}

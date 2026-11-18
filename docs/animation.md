@@ -5,7 +5,8 @@ them using the rules animators have used since the thirties. This page says whic
 engine uses, what the script controls, what the engine adds on its own, and how to stage a
 beat so it reads.
 
-Everything here is video-only. A book's pages are stills and never change.
+Everything here is video-only. A book's pages are stills and never change: a page draws the
+moods, poses and facings its script directs, at their full strength.
 
 ## What the script controls
 
@@ -16,7 +17,8 @@ The writer stages. Every `@` direction lands as the narrator reaches it, and eac
   itself a performance — shock plays as a take, sadness sinks.
 - **Poses** (`wave`, `point`, `arms-crossed`…) place the arms; **stances** (`sit`, `crouch`,
   `tiptoe`…) place the legs and spine.
-- **Gaits** (`walk`, `run`) cycle on the spot for a treadmill shot.
+- **Gaits** (`walk`, `run`) go to the actor's `x`, or to the `x` it is given next on the
+  page. With nowhere to go they cycle on the spot for a treadmill shot.
 - **`x=`** places an actor on the stage. Moving an `x` is how you make someone cross it —
   they walk there on their own feet.
 - **`talk`** gives the next paragraph to an actor's mouth, lip-synced.
@@ -78,6 +80,52 @@ script's front matter turns the whole layer off and reproduces the plain tween.
     scratches, shifts, sighs or adjusts its stance — never during someone else's shouted
     line. Serves *appeal* and *secondary action*. Dial: `business = 1.0`.
 
+## What a plain script means
+
+Before any of those rules run, one pass reads each page's directions and works out what
+they mean on screen, so a script that only names moods and places still gets a performance.
+`[video] acting = "plain"` skips it with the rest.
+
+- **A take finishes.** `shocked`, `disgusted` and `laugh` hit, hold their peak for about a
+  second, then relax into a quieter version of the same feeling: the mouth closes most of
+  the way on a blink, the brows ease, and breathing, blinks and glances carry on. A faint
+  stays out cold. Dial: `hang = 1.0`, the seconds at the peak; `0` never relaxes.
+- **A reaction waits for its cause, and looks at it.** A `shocked`, `disgusted` or `laugh`
+  directed before somebody or something arrives later on the page is not played early. The
+  actor holds a mild version (`worried`, `grumpy`, `happy`), looks to the side the newcomer
+  comes from as they start to arrive (their `enter=` side, or at them), and takes about a
+  second later, when they are on stage. A take directed on the same line as an entrance
+  waits the same way. A page whose cause never arrives plays the take where it is directed.
+  This builds on the eyes-lead rule and on `notice`; a `see=` the script directs is kept.
+- **A run goes somewhere.** `run` or `walk` with no `x` runs to the `x` the actor is given
+  next on the page, setting off when it is directed (or as the page's first words start),
+  and the actor stands when it arrives. A directed `run` lasts at least 0.9 s, so the legs
+  are seen to go. A `jump` with an `x` runs up and leaps; a jump is a crouch, air, a landing
+  with squash, and standing again.
+- **Faces fit what is said.** A `**shouted**` line opens the eyes and the mouth whatever the
+  mood, so a `proud` shout is not delivered with the eyes shut. A line spoken `sad`,
+  `worried` or `sleepy` keeps the mouth small. A face whose eyes are shut in a smile
+  (`proud`, `laugh`, `dreamy`) opens them while somebody else is speaking.
+- **Two people talking face each other.** When a page has exactly two people and one of
+  them speaks, both turn most of the way towards each other for the page. A `face=` in the
+  script wins, and a lone speaker stays as staged.
+- **A pose that fits the mood.** A standing figure with no pose directed and nothing in its
+  hands takes its mood's pose:
+
+  | Mood | Pose when none is directed |
+  | --- | --- |
+  | `happy`, `grin`, `dreamy`, `dizzy`, `disgusted`, `fainted` | `idle` |
+  | `laugh` | `cheer` |
+  | `sad`, `sleepy` | `droop` |
+  | `grumpy`, `defiant` | `arms-crossed` |
+  | `cross`, `proud` | `hips` |
+  | `shocked` | `shrug` (both hands up and out) |
+  | `worried` | `think` |
+
+- **Nobody stands exactly alike.** Each figure carries its head a little differently, by
+  its seed, on top of its own breathing, blink and weight-shift timing. It rides the
+  `weight-shift` dial.
+
 ## The dials
 
 Every style sets its own values in `[motion]`; these are the defaults (the cartoon look):
@@ -99,6 +147,7 @@ Every style sets its own values in `[motion]`; these are the defaults (the carto
 | `overlap` | 1.0 | parts arriving one after another |
 | `arcs` | 1.0 | hands on arcs, heads nodding through turns |
 | `takes` | 1.0 | the depth of mood-change takes |
+| `hang` | 1.0 | seconds a strong mood holds its peak before it relaxes (0 never relaxes) |
 | `breath` | 1.0 | breathing |
 | `weight-shift` | 1.0 | weight moving foot to foot |
 | `gesture` | 1.0 | speech beats, brows, the shout lean |

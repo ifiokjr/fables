@@ -40,6 +40,7 @@ use crate::art::figure::FigureState;
 use crate::art::figure::HandShape;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
+use crate::art::figure::Viseme;
 use crate::art::lerp;
 use crate::art::props::Carry;
 use crate::art::props::Prop;
@@ -84,6 +85,8 @@ const OFFSTAGE: f32 = 400.0;
 const WALK_SPEED: f32 = 340.0;
 /// A run's pace, likewise.
 const RUN_SPEED: f32 = 560.0;
+/// The shortest a directed `run` lasts: long enough to see the legs go.
+const RUN_MIN: f32 = 0.9;
 
 /// Eases `t` (0 to 1) in and out: slow start, steady middle, slow end.
 pub(crate) fn smoothstep(t: f32) -> f32 {
@@ -666,7 +669,13 @@ pub fn plan_between(old: &Puppet, new: &Puppet, cx: &Cx) -> Option<Plan> {
 		};
 
 	let scale = new.scale.max(0.01);
-	let duration = (distance.abs() / (speed * scale)).clamp(TWEEN, if running { 1.3 } else { 1.8 });
+	// A run the script asks for is seen to be a run: it never flashes by in a few frames.
+	let (shortest, longest) = if running {
+		(RUN_MIN, 1.3)
+	} else {
+		(TWEEN, 1.8)
+	};
+	let duration = (distance.abs() / (speed * scale)).clamp(shortest, longest);
 	let leg = look.frame().limbs().leg_length();
 
 	// A whole number of steps, each covering one stride of the distance, so the walk starts
@@ -1235,6 +1244,7 @@ pub fn tossed(prop: &Arc<Prop>, grip: Pt, size: f32) -> Puppet {
 		lift: 0.0,
 		smear: 0.0,
 		exerted: 0.0,
+		held: 0.0,
 	}
 }
 
@@ -1329,6 +1339,7 @@ pub fn animate(puppet: &mut Puppet, cx: &Cx, time: f32, speaking: Option<&Speake
 
 		if cx.on {
 			speech_performance(state, spoken, t, mouth, shouting, puppet.heading, cx);
+			delivery(state, shouting, t, cx);
 		}
 	} else if cx.on
 		&& let Some(spoken) = finished.filter(|spoken| {
@@ -1356,9 +1367,22 @@ pub fn animate(puppet: &mut Puppet, cx: &Cx, time: f32, speaking: Option<&Speake
 			state.head_tilt += towards * 3.0;
 		}
 
+		// Eyes shut in a smile open to look at whoever is speaking.
+		if cx.on && cx.motion.listen > 0.0 && closes_eyes(state.mood) {
+			state.eyes_open = true;
+		}
+
 		if cx.on {
 			listening(state, cx, time, speaker, towards);
 		}
+	}
+
+	if cx.on && active.is_none() {
+		relax(state, puppet.held, cx);
+	}
+
+	if cx.on {
+		variety(state, seed, cx.motion.weight_shift.min(1.0));
 	}
 
 	if cx.on && !cx.hold {
@@ -1437,6 +1461,88 @@ fn speech_performance(
 
 	// Accents already nod the head through `mouth`; a strong peak gets a beat more.
 	state.head_tilt += heading * mouth * beat * 3.0 * dial;
+}
+
+/// Faces that fit what is said. A shouted line opens the eyes and the mouth whatever the mood
+/// (a `proud` shout is not delivered with the eyes shut), on a blink; a line spoken sad,
+/// worried or sleepy keeps the mouth small.
+fn delivery(state: &mut FigureState, shouting: bool, t: f32, cx: &Cx) {
+	if cx.motion.gesture <= 0.0 {
+		return;
+	}
+
+	if shouting {
+		if !state.eyes_open && closes_eyes(state.mood) {
+			state.blink = state.blink.max(bell(t, 0.0, 0.1));
+		}
+
+		state.eyes_open = true;
+		state.mouth_open = state.mouth_open.max(0.5);
+
+		if matches!(state.viseme, Some(Viseme::Open | Viseme::Teeth)) {
+			state.viseme = Some(Viseme::Wide);
+		}
+	} else if matches!(state.mood, Mood::Sad | Mood::Worried | Mood::Sleepy) {
+		state.mouth_open *= 0.6;
+
+		if state.viseme == Some(Viseme::Wide) {
+			state.viseme = Some(Viseme::Open);
+		}
+	}
+}
+
+/// Moods drawn with the eyes shut in a smile, which open them to shout or to listen.
+fn closes_eyes(mood: Mood) -> bool {
+	matches!(mood, Mood::Proud | Mood::Laugh | Mood::Dreamy)
+}
+
+/// How long a take plays before the mood's peak starts to hang.
+pub(crate) const TAKE: f32 = 0.6;
+/// How long a peak takes to ease into its quieter version.
+const RELAX: f32 = 0.5;
+
+/// How far a strong mood held for `held` seconds has relaxed: 0 at its peak, which lasts the
+/// take and then `hang` seconds, to 1. Only `shocked`, `disgusted` and `laugh` relax; a faint
+/// stays out cold, and `hang = 0` holds every peak for good.
+pub fn relaxed(mood: Mood, held: f32, motion: &Motion) -> f32 {
+	if motion.hang <= 0.0 || !matches!(mood, Mood::Shocked | Mood::Disgusted | Mood::Laugh) {
+		return 0.0;
+	}
+
+	smoothstep((held - TAKE - motion.hang) / RELAX)
+}
+
+/// A take that finishes: after its peak a strong mood settles into a quieter, living version
+/// of the same feeling. The mouth closes most of the way on a blink and the brows ease; the
+/// eyes keep the mood, and breathing, blinks and glances carry on.
+fn relax(state: &mut FigureState, held: f32, cx: &Cx) {
+	let w = relaxed(state.mood, held, &cx.motion);
+
+	if w <= 0.0 {
+		return;
+	}
+
+	state.brow_lift -= 0.1 * w;
+	state.blink = state.blink.max(bell(w, 0.5, 0.4));
+
+	if w > 0.5 {
+		state.viseme = Some(match state.mood {
+			Mood::Shocked => Viseme::Pucker,
+			Mood::Disgusted => Viseme::Mbp,
+			_ => Viseme::Open,
+		});
+	}
+}
+
+/// Variety by seed: no two figures hold a pose exactly alike. Each carries its head a little
+/// differently, within the pose's meaning. It rides the `weight-shift` dial: a style that
+/// stands stock still stands alike.
+fn variety(state: &mut FigureState, seed: u64, amount: f32) {
+	if state.lie > 0.5 || amount <= 0.0 {
+		return;
+	}
+
+	state.head_tilt += ((seed % 7) as f32 - 3.0) * 0.6 * amount;
 }
 
 /// Listening: nod once or twice through a long line, glance at whatever the speaker points at,
@@ -1633,6 +1739,7 @@ mod tests {
 			lift: 0.0,
 			smear: 0.0,
 			exerted: 0.0,
+			held: 0.0,
 		}
 	}
 
@@ -2513,5 +2620,149 @@ mod tests {
 		assert!((toss_arc(from, to, 0.0) - from).len() < 0.01);
 		assert!((toss_arc(from, to, 1.0) - to).len() < 0.01);
 		assert!(toss_arc(from, to, 0.5).y < 900.0);
+	}
+
+	/// The kid after `animate` at `time`, speaking or listening to `lines`.
+	fn acted(
+		mut puppet: Puppet,
+		lines: Vec<Spoken>,
+		time: f32,
+		speaker: Option<&Speaker>,
+	) -> FigureState {
+		let cx = Cx { lines, ..cx() };
+		animate(&mut puppet, &cx, time, speaker);
+		new_body(&puppet).clone()
+	}
+
+	#[test]
+	fn a_take_holds_its_peak_for_hang_then_the_mouth_closes() {
+		let motion = Motion::default();
+
+		assert!(
+			relaxed(Mood::Shocked, TAKE + motion.hang, &motion) < 1e-6,
+			"the peak hangs"
+		);
+		assert!(relaxed(Mood::Shocked, TAKE + motion.hang + RELAX, &motion) > 0.999);
+		assert!(
+			relaxed(Mood::Fainted, 30.0, &motion) < 1e-6,
+			"a faint stays out cold"
+		);
+		assert!(
+			relaxed(Mood::Happy, 30.0, &motion) < 1e-6,
+			"a quiet mood has no peak"
+		);
+
+		let frozen = Motion {
+			hang: 0.0,
+			..motion
+		};
+		assert!(
+			relaxed(Mood::Shocked, 30.0, &frozen) < 1e-6,
+			"hang = 0 holds the peak"
+		);
+
+		let mut at_peak = kid(1200.0, Pose::Idle, Mood::Shocked, 0.35, 0.4);
+		at_peak.held = TAKE + 0.5;
+		let peak = acted(at_peak, Vec::new(), 2.0, None);
+		assert_eq!(peak.viseme, None, "the mood's own open mouth");
+
+		let mut later = kid(1200.0, Pose::Idle, Mood::Shocked, 0.35, 0.4);
+		later.held = TAKE + motion.hang + RELAX + 0.5;
+		let quiet = acted(later, Vec::new(), 2.0, None);
+		assert_eq!(quiet.viseme, Some(Viseme::Pucker), "most of the way closed");
+		assert_eq!(quiet.mood, Mood::Shocked, "the same feeling");
+		assert!(quiet.brow_lift < peak.brow_lift, "the brows ease");
+
+		// A still never relaxes: it is drawn with nothing held.
+		let still = acted(
+			kid(1200.0, Pose::Idle, Mood::Shocked, 0.35, 0.4),
+			Vec::new(),
+			9.0,
+			None,
+		);
+		assert_eq!(still.viseme, None);
+	}
+
+	#[test]
+	fn a_shouted_proud_line_is_delivered_with_the_eyes_open() {
+		let speakers = vec!["kid".to_owned()];
+		let envelope = vec![0.6; 80];
+		let track = Track::default();
+		let shout = acted(
+			kid(1200.0, Pose::Idle, Mood::Proud, 0.35, 0.4),
+			vec![spoken(
+				0.0,
+				2.0,
+				&speakers,
+				"**I HAVE IT!**",
+				&envelope,
+				&track,
+			)],
+			1.0,
+			None,
+		);
+		assert!(shout.eyes_open, "a shout opens the eyes");
+		assert!(shout.mouth_open >= 0.5, "and the mouth");
+
+		let said = acted(
+			kid(1200.0, Pose::Idle, Mood::Proud, 0.35, 0.4),
+			vec![spoken(0.0, 2.0, &speakers, "I have it.", &envelope, &track)],
+			1.0,
+			None,
+		);
+		assert!(!said.eyes_open, "a quiet proud line keeps its smiling eyes");
+
+		let sad = acted(
+			kid(1200.0, Pose::Idle, Mood::Sad, 0.35, 0.4),
+			vec![spoken(0.0, 2.0, &speakers, "I have it.", &envelope, &track)],
+			1.0,
+			None,
+		);
+		assert!(
+			sad.mouth_open < said.mouth_open * 0.7,
+			"a sad line keeps the mouth small"
+		);
+	}
+
+	#[test]
+	fn smiling_eyes_open_to_look_at_whoever_speaks() {
+		let speaker = Speaker {
+			id: "mum".into(),
+			x: 1500.0,
+			heading: -1.0,
+			pointing: false,
+			looking: None,
+		};
+		let proud = acted(
+			kid(1200.0, Pose::Idle, Mood::Proud, 0.35, 0.4),
+			Vec::new(),
+			1.0,
+			Some(&speaker),
+		);
+		assert!(proud.eyes_open);
+
+		let alone = acted(
+			kid(1200.0, Pose::Idle, Mood::Proud, 0.35, 0.4),
+			Vec::new(),
+			1.0,
+			None,
+		);
+		assert!(!alone.eyes_open, "nobody to look at");
+	}
+
+	#[test]
+	fn two_figures_never_hold_a_pose_exactly_alike() {
+		let a = kid(1200.0, Pose::Hips, Mood::Proud, 0.35, 0.4);
+		let mut b = a.clone();
+		b.id = "other".into();
+		let (a, b) = (
+			acted(a, Vec::new(), 0.0, None),
+			acted(b, Vec::new(), 0.0, None),
+		);
+
+		assert!(
+			(a.head_tilt - b.head_tilt).abs() > 0.1,
+			"seeds carry the head differently"
+		);
 	}
 }

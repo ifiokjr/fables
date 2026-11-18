@@ -324,6 +324,9 @@ pub struct CoverSpec {
 	pub pose: Option<String>,
 	#[serde(default)]
 	pub tint: Option<String>,
+	/// The cover's light, any preset (`"moonlit"`); day when unset.
+	#[serde(default)]
+	pub light: Option<String>,
 }
 
 /// How the video is performed.
@@ -755,6 +758,14 @@ pub fn parse(source: &str) -> Result<Story> {
 		})
 		.transpose()?
 		.unwrap_or_else(Light::day);
+
+	if let Some(name) = meta.cover.as_ref().and_then(|cover| cover.light.as_deref()) {
+		ensure!(
+			Light::parse(name).is_some(),
+			"[cover] light: unknown light `{name}`; use one of: {}",
+			crate::art::light::Preset::names()
+		);
+	}
 
 	let slug = slugify(&meta.title);
 	let age = meta.age;
