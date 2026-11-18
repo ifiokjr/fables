@@ -2857,7 +2857,7 @@ pub fn joins(puppet: &Authored, build: Build) -> Vec<Finding> {
 		{
 			Some(gap) if width > gap.width => {
 				gap.width = width;
-				gap.pose = pose.to_owned();
+				pose.clone_into(&mut gap.pose);
 			}
 			Some(_) => {}
 			None => {
@@ -2947,15 +2947,14 @@ pub fn joins(puppet: &Authored, build: Build) -> Vec<Finding> {
 
 				let (hip, knee, _) = solved.leg(side);
 				let thigh = puppet.part("legwear-leg", t);
-				let root = match &thigh {
-					Some(cover) => on_bone(cover.clone(), hip, knee),
-					None => {
-						let width = body
-							.leg_profile
-							.filter(|_| !hose)
-							.map_or(body.leg_width.0, |widths| widths[0]);
-						Shape::ellipse(hip, width / 2.0, width / 2.0)
-					}
+				let root = if let Some(cover) = &thigh {
+					on_bone(cover.clone(), hip, knee)
+				} else {
+					let width = body
+						.leg_profile
+						.filter(|_| !hose)
+						.map_or(body.leg_width.0, |widths| widths[0]);
+					Shape::ellipse(hip, width / 2.0, width / 2.0)
 				};
 				measure(
 					if thigh.is_some() {
@@ -3227,7 +3226,7 @@ mod tests {
 
 		// The same drawing joins up on the kid's body it was drawn for, and the style's grown-up
 		// template joins up on the grown-up's.
-		assert!(joins(&crumpet, Build::Kid).is_empty());
+		assert_eq!(joins(&crumpet, Build::Kid), Vec::<Finding>::new());
 		let template = Authored::from_parts(
 			FilePath::new("template"),
 			style.template_figure(Build::Grownup),
