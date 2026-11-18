@@ -13,6 +13,7 @@ use anyhow::Result;
 use crate::book;
 use crate::cast::Cast;
 use crate::cast::Kind;
+use crate::stage::Camera;
 use crate::stage::Rehearsal;
 use crate::stage::Scene;
 use crate::stage::ShotSize;
@@ -418,8 +419,16 @@ impl<S: Speaker> Builder<'_, S> {
 		let mut lines = Vec::new();
 		let mut t = start + LEAD_IN;
 		let mut opening = true;
+		let mut pending: Vec<Pending> = Vec::new();
+		let mut camera = keys[0].scene.camera.clone();
+		camera.after = None;
 
 		for (beat, scene) in page.beats.iter().zip(&rehearsal.after) {
+			// A camera change written with `after=` lands later than its line. Land it once
+			// the page's clock reaches it, in time order, so a key never jumps backwards over
+			// an action that happens first.
+			land(&mut keys, &mut pending, start, t, &mut camera);
+
 			match beat {
 				Beat::Direct(directive)
 					if opening
@@ -434,6 +443,9 @@ impl<S: Speaker> Builder<'_, S> {
 					if directive.actor == "camera" {
 						keys[0].after = scene.camera.after;
 					}
+
+					camera = keys[0].scene.camera.clone();
+					camera.after = None;
 				}
 				Beat::Direct(directive) => {
 					let after = if directive.actor == "camera" {
@@ -443,6 +455,20 @@ impl<S: Speaker> Builder<'_, S> {
 					};
 					let at = after.map_or(t, |after| (start + after).max(t));
 
+					if directive.actor == "camera" && at > t + 1e-3 {
+						let mut held = scene.clone();
+						held.camera = camera.clone();
+						held.apply_camera(directive)?;
+						held.camera.after = None;
+
+						pending.push(Pending {
+							at,
+							line: directive.line,
+							camera: held.camera,
+						});
+						continue;
+					}
+
 					// A camera direction moves no one, so it never makes a sound of its own.
 					if directive.actor != "camera"
 						&& let Some(previous) = keys.last()
@@ -450,40 +476,24 @@ impl<S: Speaker> Builder<'_, S> {
 						auto_cues(&previous.scene, scene, at, &mut self.timeline.cues);
 					}
 
-					// A camera change that lands later takes the state the page has reached by
-					// then, so it never wipes an action it lands after.
-					let mut state = if after.is_some() {
-						keys.iter()
-							.rev()
-							.find(|key| key.time <= at + 1e-3)
-							.map_or_else(|| scene.clone(), |key| key.scene.clone())
-					} else {
-						scene.clone()
-					};
+					// A stage direction does not move the camera: only the camera that has
+					// actually landed carries, and a move, its length and a shake were
+					// written for the camera's own line. A camera direction builds on that
+					// camera and applies only its own tokens.
+					let mut state = scene.clone();
+					state.camera = camera.clone();
 
-					if after.is_some() {
+					if directive.actor == "camera" {
 						state.apply_camera(directive)?;
+						state.camera.after = None;
+						camera = state.camera.clone();
+					} else {
+						state.camera.travel = None;
+						state.camera.over = 0.0;
+						state.camera.shake = 0.0;
 					}
 
-					state.camera.after = None;
-
-					match keys.last_mut() {
-						Some(last) if (last.time - at).abs() < 1e-3 => {
-							last.scene = state;
-
-							if directive.actor == "camera" {
-								last.after = after;
-							}
-						}
-						_ => {
-							keys.push(Key {
-								time: at,
-								scene: state,
-								line: directive.line,
-								after,
-							});
-						}
-					}
+					push(&mut keys, at, state, directive.line, after, start);
 				}
 				Beat::Say {
 					medium: Medium::BookOnly,
@@ -504,6 +514,8 @@ impl<S: Speaker> Builder<'_, S> {
 				}
 			}
 		}
+
+		land(&mut keys, &mut pending, start, f32::INFINITY, &mut camera);
 
 		let end = (t - GAP + TAIL).max(start + LEAD_IN + TAIL);
 
@@ -618,14 +630,76 @@ fn after(directive: &crate::story::Directive) -> Option<f32> {
 		.and_then(|value| value.parse::<f32>().ok())
 }
 
-/// When a camera direction lands, in seconds after the page opens, when it says `after=`.
-fn after(directive: &crate::story::Directive) -> Option<f32> {
-	directive
-		.tokens
+/// A camera change written with `after=`, waiting for its moment on the page's clock.
+struct Pending {
+	/// When it lands, in seconds from the start of the video.
+	at: f32,
+	/// The script line that wrote it.
+	line: usize,
+	/// The camera it changes to.
+	camera: Camera,
+}
+
+/// Lands every pending camera change due by `until`, earliest first. A landing takes the scene
+/// the page has reached by then, so it never wipes an action it lands after.
+fn land(
+	keys: &mut Vec<Key>,
+	pending: &mut Vec<Pending>,
+	start: f32,
+	until: f32,
+	camera: &mut Camera,
+) {
+	while let Some(index) = pending
 		.iter()
-		.find(|token| token.key == "after")
-		.and_then(|token| token.value.as_deref())
-		.and_then(|value| value.parse::<f32>().ok())
+		.enumerate()
+		.filter(|(_, change)| change.at <= until + 1e-3)
+		.min_by(|(_, a), (_, b)| a.at.total_cmp(&b.at))
+		.map(|(index, _)| index)
+	{
+		let change = pending.remove(index);
+		let mut scene = keys
+			.iter()
+			.rev()
+			.find(|key| key.time <= change.at + 1e-3)
+			.map_or_else(|| keys[0].scene.clone(), |key| key.scene.clone());
+		scene.camera = change.camera;
+		scene.camera.after = None;
+		*camera = scene.camera.clone();
+
+		push(
+			keys,
+			change.at,
+			scene,
+			change.line,
+			Some(change.at - start),
+			start,
+		);
+	}
+}
+
+/// Adds a key, or rewrites the one already at `at`: a direction and an action at one moment are
+/// one state. Only a landing that waits carries `after`; it names the setup's exact time.
+fn push(keys: &mut Vec<Key>, at: f32, scene: Scene, line: usize, after: Option<f32>, start: f32) {
+	// Only a landing that waits names its own time; `after=0` or an inherited value is
+	// already where the key sits.
+	let after = after.filter(|after| *after > 1e-3 && (start + after - at).abs() < 1e-3);
+
+	match keys.last_mut() {
+		Some(last) if (last.time - at).abs() < 1e-3 => {
+			// An action landing on a pinned camera change keeps the change's exact time:
+			// the action carries no `after`, so it cannot say when the camera should land.
+			last.after = after.or(last.after);
+			last.scene = scene;
+		}
+		_ => {
+			keys.push(Key {
+				time: at,
+				scene,
+				line,
+				after,
+			})
+		}
+	}
 }
 
 fn has_quotes(text: &str) -> bool {

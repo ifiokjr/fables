@@ -408,9 +408,9 @@ impl Scene {
 		Ok(())
 	}
 
-	/// Applies a camera direction's tokens to this state, for a camera change that lands later
-	/// than the line it is written before. The state is where the page has reached by then, so
-	/// an action the camera lands after stays on stage.
+	/// Applies a camera direction's tokens to this state, on top of the camera that has already
+	/// landed: a change written after an action keeps the action, and its own tokens replace
+	/// only the fields it names.
 	pub fn apply_camera(&mut self, directive: &Directive) -> Result<()> {
 		for token in &directive.tokens {
 			self.apply_scene_token(token, directive.line)?;
