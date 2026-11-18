@@ -26,11 +26,11 @@ Otto Angle measured everything. He measured his toast, his shadow, and the width
 
 # plaza day shot=full on=otto
 @otto x=0.35 hips talk
-At the fair he set out his stall with a ruler, a pencil, and a very straight queue of customers.
+At the fair he set out his stall with a ruler, a pencil, and a very straight queue of customers, not one of them out of line.
 
 # park day shot=medium on=mochi
 @mochi x=0.65 grin
-Two streets away, Mochi Mae measured nothing at all. She put cakes where they landed.
+Two streets away, Mochi Mae measured nothing at all. She put cakes where they landed, and licked her fingers.
 
 # park day shot=full on=mochi
 @mochi x=0.6 cheer happy
