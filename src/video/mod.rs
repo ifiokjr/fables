@@ -354,20 +354,20 @@ mod tests {
 	}
 
 	/// A timeline longer than fables will make, built without recording a word.
-	fn long_video() -> (crate::story::Story, Timeline) {
+	fn long_video() -> (Story, Timeline) {
 		let pages: String = (0..31).map(|_| "# park\n@pause 60\n").collect();
 		let story = crate::story::parse(&format!(
 			"+++\ntitle = \"Long\"\nauthor = \"A\"\n+++\n{pages}"
 		))
 		.unwrap();
-		let cast = crate::cast::Cast::default();
-		let rehearsals = crate::stage::rehearse(&story, &cast).unwrap();
-		let timeline = crate::video::timeline::build(&story, &cast, &rehearsals, |_| {
-			Ok(crate::video::voice::Speech {
+		let cast = Cast::default();
+		let rehearsals = rehearse(&story, &cast).unwrap();
+		let timeline = timeline::build(&story, &cast, &rehearsals, |_| {
+			Ok(voice::Speech {
 				text: String::new(),
 				samples: Vec::new(),
 				envelope: Vec::new(),
-				track: crate::video::lipsync::Track::default(),
+				track: lipsync::Track::default(),
 			})
 		})
 		.unwrap();
