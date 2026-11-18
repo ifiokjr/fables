@@ -23,6 +23,7 @@
       cargo clippy --all-targets -- -D warnings
       cargo test
     '';
+    "check:worlds".exec = ''./scripts/check-worlds.sh'';
     "check:epub".exec = ''epubcheck "$@"'';
   };
 

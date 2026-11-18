@@ -2,6 +2,9 @@
 # kerfuffle.md, the cast is cast.toml, and every book lives in stories/.
 name = "Kerfuffle"
 
+# The author `fables new` puts on the title page. `--author` overrides it.
+author = "Ifiok Jr."
+
 # How its folk are drawn: a style pack from styles/.
 style = "cartoon"
 

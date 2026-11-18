@@ -384,8 +384,8 @@ fn run_command(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
 fn api_key(variable: &str) -> Result<String> {
 	std::env::var(variable).with_context(|| {
 		format!(
-			"{variable} is not set; run the build with the key in its environment, e.g. `msr \
-			 --reason \"narrate videos\" fables video …`"
+			"{variable} is not set; set it in the environment for this run, e.g. `{variable}=… \
+			 fables video …`"
 		)
 	})
 }
