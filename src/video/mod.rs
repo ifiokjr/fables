@@ -363,7 +363,10 @@ pub fn animatic(
 		rows.iter().zip(&views).zip(&bounds).enumerate()
 	{
 		let (union, plate_aspect) = union_view(*start, *end, format.aspect());
-		let plate_h = (f64::from(height) * 1.6).round() as u32;
+		// A still shot is cropped one to one. Only a move needs a larger plate to crop from,
+		// and drawing the rest at output size keeps an animatic to a handful of seconds.
+		let supersample = if row.movement.is_some() { 1.6 } else { 1.0 };
+		let plate_h = (f64::from(height) * supersample).round() as u32;
 		let plate_w = (f64::from(plate_h) * f64::from(plate_aspect)).round() as u32;
 		let renderer =
 			Renderer::new(timeline, story, format, plate_w, plate_h).with_aspect(plate_aspect);
