@@ -91,14 +91,18 @@ A drawing style is a folder in `styles/` that characters are drawn from, so a ne
 styles/cartoon/
   style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page skin that suits the look
   kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
-  template.svg    a plain character's own parts, which new characters are drawn from
+  template.svg    a plain kid's own parts, which new kids are drawn from
+  template-grown-up.svg
+                  a plain grown-up's own parts, cut for the grown-up body, which new grown-ups are drawn from
 ```
+
+Every style has two bodies, `kid` and `grown-up`, and a template for each, so a grown-up is drawn with the style's adult proportions instead of a kid's torso, sleeves and legwear stretched over a taller skeleton.
 
 | Command | What it does |
 | --- | --- |
-| `fables style list` | The drawing styles, with a sentence on each look and the page skin it prints in. |
-| `fables style check <name>` | Checks the template over the kit draws a whole figure, and every body stands up. |
-| `fables style describe <name>` | Every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
+| `fables style list` | The drawing styles, with a sentence on each look, the bodies it draws (kid, grown-up) and the page skin it prints in. |
+| `fables style check <name>` | Checks each body's template over the kit draws a whole figure whose parts join, and every body stands up. Joins are measured standing, cheering and sitting, front-on and three-quarters: the head or its neck must touch the torso, each arm must start inside the torso or its sleeve, each leg inside the torso or the legwear, and a sleeve or trouser leg drawn in two pieces must meet at the elbow or knee. |
+| `fables style describe <name>` | The bodies the style draws and the template each starts from, every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
 | `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet) and `<name>-parts.png` (every kit and template part). |
 
 | Drawing style | Look |
@@ -372,11 +376,13 @@ name = "Eddy (English (UK))"
 style = "A friendly, slightly mumbly six-year-old boy."
 ```
 
-A person with **no `puppet` line** is drawn from their world's drawing style's template, in their own colours, exactly as if `fables puppet template` had written the file and it had never been touched. That is how a new character is ready in one command.
+A person with **no `puppet` line** is drawn from their world's drawing style's template for their body, in their own colours, exactly as if `fables puppet template` had written the file and it had never been touched. That is how a new character is ready in one command.
 
 - `fables puppet template <id>` writes `puppets/<id>.svg` from the template and adds the `puppet = "puppets/<id>.svg"` line itself, so a part can be redrawn with `fables puppet set <id> <part> --d "M…"`.
 - `fables character new <id> --name "…" --draw` writes both the table and the part file in one step.
 - `puppet = "parametric"` draws the older parametric puppet instead, the one that reads `hair`, `head`, `body`, `nose` and `mouth` (`mouth_size` in code). Those five fields do nothing on a character drawn from parts, and `fables check` says so once per member.
+
+A person is `kind = "kid"` (the default) or `kind = "grown-up"`, and the kind picks the body they stand on and the template they are drawn from. Every drawing style has a kid template and a grown-up one cut for adult proportions, so a grown-up with no `puppet` line, or one started with `puppet template` or `character new --draw`, is a grown-up of that style rather than a kid stretched tall. `fables puppet check <id>` fails a figure whose parts come apart on its body, naming the part, the gap and the pose, and `fables puppet set` refuses a change that opens a join.
 
 Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book. The full command-line vocabulary for a character is `fables puppet parts <id>` (their parts as path data) and `fables style describe <drawing style>` (every part, its space and the drawing rules).
 

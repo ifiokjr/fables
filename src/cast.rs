@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -69,19 +68,15 @@ impl Kind {
 
 /// A plain character drawn by a style's template, for showing the style itself.
 pub fn template_look(style: &Arc<StylePack>, build: Build) -> Result<Look> {
-	let kind = match build {
-		Build::Kid => "kid",
-		Build::Grownup => "grown-up",
-	};
 	let entry: Entry = toml::from_str(&format!(
-		"name = \"Template\"\nkind = \"{kind}\"\nskin = \"#f6d7c3\"\nhair-colour = \
-		 \"#3d3a5c\"\ntop = \"#eef1f8\"\ntrim = \"#d6455d\"\nbottom = \"#3a4a7a\"\nshoes = \
-		 \"#2c2c3a\"\neyes = \"#4a7ad0\"\n"
+		"name = \"Template\"\nkind = \"{}\"\nskin = \"#f6d7c3\"\nhair-colour = \"#3d3a5c\"\ntop = \
+		 \"#eef1f8\"\ntrim = \"#d6455d\"\nbottom = \"#3a4a7a\"\nshoes = \"#2c2c3a\"\neyes = \
+		 \"#4a7ad0\"\n",
+		crate::art::pack::body_name(build)
 	))?;
-	let mut look = build_look("template", &entry, Path::new(""), style)?;
-	let file = PathBuf::from(format!("styles/{}/template.svg", style.name));
-	look.puppet = Some(Authored::from_parts(&file, style.template_figure(), style)?);
-	Ok(look)
+
+	// With no part file, a person is drawn from the template for their body.
+	build_look("template", &entry, Path::new(""), style)
 }
 
 /// A character from the cast file.
@@ -465,7 +460,7 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 				style,
 			)?)
 		}
-		None => Some(Authored::from_template(style)?),
+		None => Some(Authored::from_template(style, build)?),
 	};
 
 	Ok(Look {

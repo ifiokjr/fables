@@ -130,12 +130,13 @@ shoulder-y = -448.0
 shoulder-half = 44.0
 shoulders-turned = [-40.0, 32.0]
 hips-turned = [-16.0, 22.0]
-hem-y = -280.0
-body-radius = 66.0
+hem-y = -270.0
+body-radius = 80.0
 leg-width = [18.0, 18.0]
 forearm-width = [17.0, 17.0]
 hand-scale = 1.5
 reach = [72.0, 190.0]
+foot-scale = 1.3
 floor = true
 
 [bodies.grown-up.limbs]

@@ -5,10 +5,31 @@
 use std::path::Path;
 use std::process::Command;
 
+use fables::art::figure::Build;
+use fables::art::pack::StylePack;
+use fables::art::parts::Parts;
+use fables::art::puppet::joins;
+use fables::art::shape::Shape;
 use fables::cast::Kind;
 use fables::world::World;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fables");
+
+/// A part set's names, sorted.
+fn names(parts: &Parts) -> Vec<String> {
+	let mut names: Vec<String> = parts.iter().map(|(name, _)| name.to_owned()).collect();
+	names.sort();
+	names
+}
+
+/// Whether two outlines are the same drawing, allowing for the rounding a written file does.
+fn same_drawing(a: &Shape, b: &Shape) -> bool {
+	let (a, b) = (a.polygon(1), b.polygon(1));
+	a.len() == b.len()
+		&& a.iter()
+			.zip(&b)
+			.all(|(p, q)| (p.x - q.x).abs() < 0.05 && (p.y - q.y).abs() < 0.05)
+}
 
 /// Runs the CLI in `dir`, with its output in the failure message.
 fn run(dir: &Path, args: &[&str]) -> String {
@@ -122,6 +143,15 @@ fn a_scratch_world_in_each_drawing_style_draws_both_characters_in_it() {
 			"a character without --draw needs no file"
 		);
 
+		// Mum is a grown-up, so `--draw` wrote the grown-up's template, not a kid's.
+		let pack = StylePack::named(style).unwrap();
+		let mum = Parts::load(&root.join("worlds/puddle-lane/puppets/mum.svg")).unwrap();
+		assert_eq!(
+			names(&mum),
+			names(&pack.template_for(Build::Grownup)),
+			"mum's parts in {style}"
+		);
+
 		// A book with both of them, a bare light and a bare scene preset, checks and renders.
 		let story = root.join("worlds/puddle-lane/stories/pip-and-the-puddle/story.md");
 		std::fs::create_dir_all(story.parent().unwrap()).unwrap();
@@ -161,5 +191,102 @@ fn a_scratch_world_in_each_drawing_style_draws_both_characters_in_it() {
 		assert!(sheet.is_file(), "{proofs}");
 		let png = std::fs::read(&sheet).unwrap();
 		assert!(png.starts_with(b"\x89PNG"), "{} is a PNG", sheet.display());
+	}
+}
+
+#[test]
+fn a_grown_up_is_drawn_from_the_grown_up_template_on_every_path() {
+	let dir = tempfile::tempdir().unwrap();
+	let root = dir.path();
+	run(
+		root,
+		&[
+			"world",
+			"new",
+			"Hoop Lane",
+			"--style",
+			"rubber-hose",
+			"--author",
+			"An Author",
+		],
+	);
+
+	// Gran has no part file, Pop is drawn with `--draw`, Nan is given one by `puppet template`,
+	// and Ada gets hers from her first redraw.
+	for (id, extra) in [
+		("gran", None),
+		("pop", Some("--draw")),
+		("nan", None),
+		("ada", None),
+	] {
+		let mut args = vec!["character", "new", id, "--name", id, "--kind", "grown-up"];
+		args.extend(extra);
+		let added = run(root, &args);
+
+		if extra.is_none() {
+			assert!(
+				added.contains("drawn from the rubber-hose grown-up template"),
+				"{added}"
+			);
+		}
+	}
+	run(root, &["puppet", "template", "nan"]);
+
+	let pack = StylePack::named("rubber-hose").unwrap();
+	let grown_up = pack.template_for(Build::Grownup);
+	let torso = grown_up.get("torso.front").unwrap();
+	run(
+		root,
+		&[
+			"puppet",
+			"set",
+			"ada",
+			"torso.front",
+			"--d",
+			torso.path().as_str(),
+		],
+	);
+
+	// Gran resolves to the grown-up template, and joins up on the grown-up body.
+	let world = World::load(&root.join("worlds/hoop-lane")).unwrap();
+	let cast = world.cast().unwrap();
+	let Kind::Figure(look) = cast.resolve("gran").unwrap() else {
+		panic!("gran is a person");
+	};
+	let puppet = look.puppet.as_ref().expect("gran is drawn from parts");
+	assert!(puppet.template, "gran has no part file of her own");
+	assert_eq!(look.build, Build::Grownup);
+	assert_eq!(
+		names(&puppet.parts),
+		names(&pack.template_figure(Build::Grownup)),
+		"gran is the grown-up template over the kit"
+	);
+	assert_eq!(joins(puppet, look.build), Vec::new());
+
+	let checked = run(root, &["puppet", "check", "gran"]);
+	assert!(
+		checked.contains("from the rubber-hose grown-up template"),
+		"{checked}"
+	);
+	let parts = run(root, &["puppet", "parts", "gran", "torso.front"]);
+	assert!(parts.contains(torso.path().as_str()), "{parts}");
+
+	// Every file written for a grown-up holds the grown-up's parts: no kid's tuft, and the
+	// grown-up's torso.
+	for id in ["pop", "nan", "ada"] {
+		let file = root.join(format!("worlds/hoop-lane/puppets/{id}.svg"));
+		let parts = Parts::load(&file).unwrap();
+		assert_eq!(names(&parts), names(&grown_up), "{id}'s parts");
+		assert!(
+			same_drawing(parts.get("torso.front").unwrap(), torso),
+			"{id} has the grown-up's torso"
+		);
+		run(root, &["puppet", "check", id]);
+	}
+
+	// With no id the check covers everyone drawn from parts, Gran's template included.
+	let everyone = run(root, &["puppet", "check"]);
+	for id in ["gran", "pop", "nan", "ada"] {
+		assert!(everyone.contains(&format!("{id}: ")), "{everyone}");
 	}
 }
