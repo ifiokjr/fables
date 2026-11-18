@@ -13,6 +13,7 @@ use crate::art::Bounds;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
 use crate::art::light::Preset;
+use crate::cast::Kind;
 use crate::compose;
 use crate::stage::Actor;
 use crate::stage::Rehearsal;
@@ -112,7 +113,7 @@ pub fn review(story: &Story, rehearsals: &[Rehearsal], timeline: &Timeline) -> V
 	findings.extend(word_budget(story));
 	findings.extend(close_shots(story));
 	findings.extend(flat_light(story, rehearsals));
-	findings.extend(idle_arrivals(story));
+	findings.extend(idle_arrivals(story, rehearsals));
 	findings.extend(crowding(story, rehearsals));
 	findings.extend(under_the_card(story, rehearsals));
 	findings.extend(video_length(story, timeline));
@@ -675,15 +676,26 @@ fn flat_light(story: &Story, rehearsals: &[Rehearsal]) -> Vec<Finding> {
 }
 
 /// An actor who is directed but never does anything or speaks: every direction they get is
-/// placement.
-fn idle_arrivals(story: &Story) -> Vec<Finding> {
+/// placement. A prop standing on the stage is a thing, and a thing is only ever placed.
+fn idle_arrivals(story: &Story, rehearsals: &[Rehearsal]) -> Vec<Finding> {
 	const PLACEMENT: [&str; 9] = [
 		"x", "y", "size", "z", "face", "enter", "exit", "colour", "color",
 	];
 
+	let props: HashSet<&str> = rehearsals
+		.iter()
+		.flat_map(scenes)
+		.flat_map(|scene| &scene.actors)
+		.filter(|actor| matches!(actor.kind, Kind::Prop(_)))
+		.map(|actor| base(&actor.id))
+		.collect();
 	let mut findings = Vec::new();
 
 	for id in cast_ids(story) {
+		if props.contains(id.as_str()) {
+			continue;
+		}
+
 		let mut does_something = false;
 		let mut first_line = None;
 
@@ -2069,6 +2081,13 @@ mod tests {
 			"# park\n@mo x=0.3 talk\n@hana x=0.7 wave\n\"Hello,\" said Mo.\n",
 		);
 		assert!(!has(&busy, "idle-arrival"), "{:?}", rules(&busy));
+
+		// A prop put down on the stage is a thing: nobody expects it to act.
+		let thing = review_script(
+			"",
+			"# park\n@mo x=0.3 talk\n@parcel x=0.7\n\"Hello,\" said Mo.\n",
+		);
+		assert!(!has(&thing, "idle-arrival"), "{:?}", rules(&thing));
 	}
 
 	#[test]
