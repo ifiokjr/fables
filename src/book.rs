@@ -171,9 +171,9 @@ fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 /// Keeps actors placed by name clear of the page's text cards (see [`Clear`]), measured from
 /// their drawings. One in the sky that would sit under a card stays as high as it can: beside
 /// the card at the height it was put, if there is room, or else just below it — never under
-/// it, and never over a face. A flyer that landed under a card walks along the ground to the
-/// nearer side clear of it. Actors placed with a number, and actors no card covers, stay
-/// exactly where they were put.
+/// it — and one that would sit on a face moves aside along the sky. A flyer that landed under
+/// a card walks along the ground to the nearer side clear of it. Actors placed with a number,
+/// and actors no card or face is in the way of, stay exactly where they were put.
 fn keep_clear(scene: &mut Scene, cards: &[Bounds]) {
 	if cards.is_empty() || scene.actors.iter().all(|actor| actor.clear.is_none()) {
 		return;
@@ -194,47 +194,48 @@ fn keep_clear(scene: &mut Scene, cards: &[Bounds]) {
 			continue;
 		};
 		let drawn = puppet.extents().subject;
-		let Some(lowest) = cards
+		let under = cards
 			.iter()
 			.filter(|card| overlaps(drawn, **card))
 			.map(|card| card.3)
-			.reduce(f32::max)
-		else {
-			continue;
-		};
+			.reduce(f32::max);
+		let faces: Vec<Bounds> = heads
+			.iter()
+			.filter(|(id, _)| *id != puppet.id)
+			.map(|(_, head)| *head)
+			.collect();
 
 		match clear {
 			Clear::Sky => {
+				if under.is_none() && !faces.iter().any(|face| overlaps(drawn, *face)) {
+					continue;
+				}
+
 				// Faces count as much as cards for something in the sky, with room around
 				// them so a kite does not sit on an ear.
 				let mut avoid = cards.to_vec();
-				avoid.extend(
-					heads
-						.iter()
-						.filter(|(id, _)| *id != puppet.id)
-						.map(|(_, head)| {
-							(
-								head.0 - FACE_ROOM,
-								head.1 - FACE_ROOM,
-								head.2 + FACE_ROOM,
-								head.3 + FACE_ROOM,
-							)
-						}),
-				);
+				avoid.extend(faces.iter().map(|face| {
+					(
+						face.0 - FACE_ROOM,
+						face.1 - FACE_ROOM,
+						face.2 + FACE_ROOM,
+						face.3 + FACE_ROOM,
+					)
+				}));
 
 				if let Some(across) = beside(drawn, &avoid) {
 					actor.x = Some((puppet.at.x + across) / STAGE);
 					continue;
 				}
 
-				let drop = lowest + CARD_GAP - drawn.1;
+				let drop = under.map_or(0.0, |lowest| lowest + CARD_GAP - drawn.1);
 				let dropped = (drawn.0, drawn.1 + drop, drawn.2, drawn.3 + drop);
 				let across = beside(dropped, &avoid).unwrap_or(0.0);
 				actor.y = Some((puppet.at.y + drop) / STAGE);
 				actor.x = Some((puppet.at.x + across) / STAGE);
 			}
 			Clear::Ground => {
-				if let Some(across) = beside(drawn, cards) {
+				if let (Some(_), Some(across)) = (under, beside(drawn, cards)) {
 					actor.x = Some((puppet.at.x + across) / STAGE);
 				}
 			}
@@ -1075,7 +1076,7 @@ mod tests {
 		let story = story::parse(&format!(
 			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@kid x=0.35\n@mum x=0.65\n@kite \
 			 x=0.5 y=sky\n{line}\n# park text=bottom\n@kite x=0.36 y=sky\n{line}\n# park\n@kite \
-			 x=0.5 y=0.1\n{line}\n"
+			 x=0.5 y=0.1\n{line}\n# park\n@kid x=0.5\n@mum x=0.8\n@kite x=0.5 y=sky\nUp it went.\n"
 		))
 		.unwrap();
 		let cast =
@@ -1084,7 +1085,7 @@ mod tests {
 		let pages = assemble(&story, &cast).unwrap();
 		let page = |label: &str| pages.iter().find(|page| page.label == label).unwrap();
 
-		for label in ["story-01", "story-02"] {
+		for label in ["story-01", "story-02", "story-04"] {
 			let page = page(label);
 			let drawn = drawn(page);
 			let (_, kite, _) = drawn.iter().find(|(id, ..)| id == "kite").unwrap();
