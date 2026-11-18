@@ -124,6 +124,11 @@ pub struct Proportions {
 	/// foot lifted off it while standing points its toe down to it.
 	#[serde(default)]
 	pub floor: bool,
+	/// How far an arm may stretch, as a share of its length. Below 1 the elbow never locks: a hand
+	/// reaching further (a cheer, a wave, a point) keeps a slight bend in the arm, the way arms
+	/// drawn with anatomy read best.
+	#[serde(default = "one")]
+	pub elbow: f32,
 }
 
 fn one() -> f32 {
@@ -131,6 +136,36 @@ fn one() -> f32 {
 }
 
 impl Proportions {
+	/// A shoulder joint at rest, `side` -1 near and 1 far, turned by `t`.
+	fn shoulder(&self, side: f32, t: f32) -> Pt {
+		let (near, far) = self.shoulders_turned;
+		let x = lerp(
+			side * self.shoulder_half,
+			if side < 0.0 { near } else { far },
+			t,
+		);
+		pt(x, self.shoulder_y)
+	}
+
+	/// The elbow and wrist of an arm from `shoulder` reaching for `target`, `side` -1 near and 1
+	/// far. A body whose elbows never lock reaches no further than `elbow` of its arm, so the
+	/// arm keeps a bend.
+	fn arm(&self, side: f32, shoulder: Pt, target: Pt) -> (Pt, Pt) {
+		let longest = (self.limbs.upper_arm + self.limbs.forearm) * self.elbow;
+		let target = if self.elbow < 1.0 && (target - shoulder).len() > longest {
+			shoulder + (target - shoulder).norm() * longest
+		} else {
+			target
+		};
+		rig::two_bone(
+			shoulder,
+			target,
+			self.limbs.upper_arm,
+			self.limbs.forearm,
+			pt(side * 0.6, 0.8),
+		)
+	}
+
 	/// A hip joint's x, `side` -1 near and 1 far, turned by `t`.
 	fn hip_x(&self, side: f32, t: f32) -> f32 {
 		let (near, far) = self.hips_turned;
@@ -167,7 +202,8 @@ impl Proportions {
 		)
 	}
 
-	/// Checks the construction dials: every width, scale and the splay must be positive.
+	/// Checks the construction dials: every width and scale must be positive, and the knee splay
+	/// and elbow in range.
 	pub fn problems(&self) -> Vec<String> {
 		let mut problems = Vec::new();
 
@@ -186,6 +222,10 @@ impl Proportions {
 
 		if !(self.knee_splay > 0.0 && self.knee_splay <= 1.0) {
 			problems.push("knee-splay must be more than 0 and at most 1".to_owned());
+		}
+
+		if !(self.elbow >= 0.8 && self.elbow <= 1.0) {
+			problems.push("elbow must be from 0.8 to 1".to_owned());
 		}
 
 		problems
@@ -939,13 +979,7 @@ impl Solved {
 	}
 
 	fn shoulder(&self, side: f32) -> Pt {
-		let (near, far) = self.body.shoulders_turned;
-		let x = lerp(
-			side * self.body.shoulder_half,
-			if side < 0.0 { near } else { far },
-			self.t,
-		);
-		self.torso(pt(x, self.body.shoulder_y))
+		self.torso(self.body.shoulder(side, self.t))
 	}
 
 	fn leg(&self, side: f32) -> (Pt, Pt, Pt) {
@@ -1016,13 +1050,7 @@ impl Solved {
 		} else {
 			(posed.hands.1, self.swing.1)
 		};
-		let (elbow, wrist) = rig::two_bone(
-			shoulder,
-			self.torso(target) + swing,
-			self.limbs.upper_arm,
-			self.limbs.forearm,
-			pt(side * 0.6, 0.8),
-		);
+		let (elbow, wrist) = self.body.arm(side, shoulder, self.torso(target) + swing);
 		(shoulder, elbow, wrist)
 	}
 }
@@ -3183,6 +3211,44 @@ mod tests {
 			};
 			assert!(waving.x.abs() >= 115.0, "facing {facing}: {waving:?}");
 		}
+	}
+
+	#[test]
+	fn an_arm_whose_elbow_never_locks_keeps_a_bend_however_far_it_reaches() {
+		let anime = StylePack::named("anime").unwrap();
+		let bodies = [*anime.body(Build::Kid), *anime.body(Build::Grownup), kid()];
+
+		for body in bodies {
+			let length = body.limbs.upper_arm + body.limbs.forearm;
+			let shoulder = body.shoulder(1.0, 0.0);
+			let (elbow, wrist) = body.arm(1.0, shoulder, shoulder + pt(30.0, -2.0 * length));
+			let reach = (wrist - shoulder).len();
+			assert!(
+				(reach - length * body.elbow).abs() < 0.5,
+				"{reach} of {length}"
+			);
+			// How far the elbow stands off the line from the shoulder to the wrist.
+			let bend = to_line(elbow, shoulder, wrist);
+
+			if body.elbow < 1.0 {
+				assert!(bend > length * 0.05, "a bend of {bend}");
+			} else {
+				assert!(bend < 1.0, "a locked elbow, {bend} off straight");
+			}
+		}
+
+		let bent = Proportions {
+			elbow: 0.7,
+			..kid()
+		};
+		assert_eq!(bent.problems(), ["elbow must be from 0.8 to 1"]);
+	}
+
+	/// How far `p` is from the line through `a` and `b`.
+	fn to_line(p: Pt, a: Pt, b: Pt) -> f32 {
+		let d = (b - a).norm();
+		let off = p - a;
+		(off.x * d.y - off.y * d.x).abs()
 	}
 
 	fn stinky() -> Look {

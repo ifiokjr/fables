@@ -110,6 +110,8 @@ reach = [120.0, 300.0]
 leg-profile = [110.0, 100.0, 82.0, 68.0, 78.0, 60.0, 38.0]
 arm-profile = [64.0, 58.0, 48.0, 40.0, 46.0, 37.0, 29.0]
 knee-splay = 0.45
+# Arms keep a slight bend at the elbow, however far they reach.
+elbow = 0.96
 floor = true
 
 [bodies.kid.limbs]
@@ -139,6 +141,8 @@ leg-profile = [140.0, 126.0, 100.0, 82.0, 94.0, 70.0, 46.0]
 arm-profile = [84.0, 74.0, 62.0, 52.0, 60.0, 48.0, 38.0]
 foot-scale = 1.25
 knee-splay = 0.45
+# Arms keep a slight bend at the elbow, however far they reach.
+elbow = 0.96
 floor = true
 
 [bodies.grown-up.limbs]
