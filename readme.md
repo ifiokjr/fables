@@ -399,7 +399,7 @@ id = "<voice id>"
 
 `fables voice providers` shows which providers can speak right now, `fables voice list` the macOS voices, and `fables voice audition <id> "<line>" --mood cross` speaks a line in a character's voice (or `narrator`) into `out/voices/`. Over MCP, `voice_providers`, `voice_list`, `voice_cast` and `voice_audition` do the same, and auditions come back as audio.
 
-Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Resolve keys with Monosecret once per batch: `msr --reason "voice the books" fables all worlds/kerfuffle`.
+Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Give the run the provider's key in its environment, for one batch: `ELEVENLABS_API_KEY=<key> fables all worlds/kerfuffle`.
 
 Sourcing voices, provider prices and policies, local models, human actors and keeping characters consistent are all in [`docs/tv-show.md`](docs/tv-show.md).
 

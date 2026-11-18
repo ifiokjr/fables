@@ -3,3 +3,6 @@
 /.devenv
 /.devenv.flake.nix
 .direnv
+
+# macOS leaves these in folders it has looked at.
+.DS_Store
