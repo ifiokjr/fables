@@ -4,6 +4,7 @@
 # template, so a character can move between anime and every manga style.
 name = "manga-colour"
 description = "Colour manga: full anime colour with a heavy brushed manga line, hard two-tone cel shading and a rim light, speed lines and limited animation on threes."
+skin = "riso"
 
 [finish]
 line = 4.2

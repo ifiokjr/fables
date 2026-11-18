@@ -4,6 +4,7 @@
 # units (the origin between the eyes).
 name = "anime"
 description = "Slender anime characters: big layered eyes with two highlights, spiky hair, a tiny nose and mouth, thin even lines and hard two-tone cel shading."
+skin = "riso"
 
 [finish]
 line = 2.8              # thin, even outlines

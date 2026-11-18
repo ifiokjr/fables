@@ -1,10 +1,12 @@
 //! Authored puppets: characters drawn from hand-made part files, on the same rig as everyone.
 //!
-//! The parametric puppet in [`figure`](super::figure) builds every character from one template.
-//! An authored puppet is drawn the way TV cut-out characters are: every part (head, hair,
-//! torso, sleeves, hands, the mouth chart) is a drawing from the character's part file and
-//! their style's kit (see [`parts`](super::parts)), hung on the bones of [`rig`](super::rig).
-//! The style pack ([`pack`](super::pack)) sets the finish, the face cylinder and the bodies.
+//! Every character is drawn this way: from their own part file, or from their drawing style's
+//! template until they have one. The older parametric puppet in [`figure`](super::figure) is
+//! still available when a cast entry asks for it by name (`puppet = "parametric"`). An authored
+//! puppet is drawn the way TV cut-out characters are: every part (head, hair, torso, sleeves,
+//! hands, the mouth chart) is a drawing from the character's part file and their style's kit
+//! (see [`parts`](super::parts)), hung on the bones of [`rig`](super::rig). The style pack
+//! ([`pack`](super::pack)) sets the finish, the face cylinder and the bodies.
 //!
 //! It takes the same [`FigureState`] as the parametric puppet, so stories, staging, lip-sync
 //! and video drive it unchanged:
@@ -217,12 +219,25 @@ pub struct Authored {
 	/// The style whose `[line]` and `[shade]` dials ink this figure when it is a guest drawn
 	/// in its host's finish; `None` inks it with its own style.
 	pub ink_style: Option<Arc<StylePack>>,
+	/// Whether the parts are still the style's template, drawn without a file of their own.
+	/// A character is drawn this way until they are given (or write) a part file.
+	pub template: bool,
 }
 
 impl Authored {
 	/// Reads a part file over its style's kit, refusing parts that can't draw a figure.
 	pub fn load(file: &FilePath, style: &Arc<StylePack>) -> Result<Authored> {
 		Self::from_parts(file, Parts::load_puppet(file, &style.kit)?, style)
+	}
+
+	/// A character drawn straight from their style's template over its kit, before they have a
+	/// part file of their own. Their cast colours still paint it, exactly as if the template had
+	/// been written to a file and left untouched.
+	pub fn from_template(style: &Arc<StylePack>) -> Result<Authored> {
+		let file = PathBuf::from(format!("styles/{}/template.svg", style.name));
+		let mut puppet = Self::from_parts(&file, style.template_figure(Build::Kid), style)?;
+		puppet.template = true;
+		Ok(puppet)
 	}
 
 	/// A puppet from parts already read (over the kit), refusing parts that can't draw a
@@ -246,6 +261,7 @@ impl Authored {
 			parts: Arc::new(parts),
 			style: Arc::clone(style),
 			ink_style: None,
+			template: false,
 		})
 	}
 

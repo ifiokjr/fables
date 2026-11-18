@@ -3,6 +3,7 @@
 # puts the anime head on a small round body.
 name = "chibi"
 description = "Chibi: tiny characters about two heads tall with big sparkling eyes, mitten hands, stubby limbs and bouncy motion."
+skin = "riso"
 
 [finish]
 line = 3.4

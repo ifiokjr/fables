@@ -5,20 +5,22 @@
 //! ```text
 //! styles/cartoon/
 //!   style.toml      the finish (line weights, light, cel shadow), the face cylinder, the kit's
-//!                   shared inks and the bodies characters are built on (kid, grown-up)
+//!                   shared inks, the bodies characters are built on (kid, grown-up), and the
+//!                   page skin that suits the look
 //!   kit.svg         parts every character in the style starts with: hands, eyes, mouths, props
-//!   template.svg    a plain kid's own parts, which new kids are started from
+//!   template.svg    a plain kid's own parts, which new kids are drawn from
 //!   template-grown-up.svg
 //!                   a plain grown-up's own parts, cut for the grown-up body
 //! ```
 //!
 //! An authored puppet ([`puppet`](super::puppet)) draws its part file over its style's kit and
-//! reads every number from its style, so a new look is a new folder rather than new code. The
-//! built-in packs are compiled into fables, so a world anywhere on disk can name one in its
-//! `world.toml`.
+//! reads every number from its style, so a new look is a new folder rather than new code. A
+//! character with no part file is drawn from the template, so a new world needs no drawing at
+//! all to render. The built-in packs are compiled into fables, so a world anywhere on disk can
+//! name one in its `world.toml`.
 //!
-//! These are not the six skins in [`style`](super::style) (riso, tv, bold…), which restyle
-//! the older parametric puppet and the settings.
+//! These are not the page skins in [`style`](super::style) (riso, tv, bold…), which print the
+//! page; a style pack names the skin that suits it in `style.toml`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -140,6 +142,9 @@ pub struct StylePack {
 	pub name: String,
 	/// One sentence on the look, for people and for agents choosing a style.
 	pub description: String,
+	/// The page skin that suits the look (riso, clear, tv…): the skin a book drawn in this
+	/// style prints in unless the script or `--style` names another.
+	pub skin: String,
 	pub finish: Finish,
 	pub face: Face,
 	pub features: Features,
@@ -282,6 +287,8 @@ pub struct KitInks {
 struct Entry {
 	name: String,
 	description: String,
+	/// The page skin the look prints in (see [`style`](super::style)).
+	skin: String,
 	finish: Finish,
 	face: Face,
 	features: Features,
@@ -359,9 +366,21 @@ impl StylePack {
 			);
 		}
 
+		let skins: Vec<&str> = super::style::StyleName::ALL
+			.iter()
+			.map(|(name, _)| *name)
+			.collect();
+		ensure!(
+			skins.contains(&entry.skin.as_str()),
+			"style.toml's skin `{}` is not a page skin; use one of: {}",
+			entry.skin,
+			skins.join(", ")
+		);
+
 		Ok(StylePack {
 			name: entry.name,
 			description: entry.description,
+			skin: entry.skin,
 			finish: entry.finish,
 			face: entry.face,
 			features: entry.features,

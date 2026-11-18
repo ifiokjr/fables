@@ -6,6 +6,7 @@
 # stretch and overshoot, with everyone bobbing to the beat on twos.
 name = "rubber-hose-1930s"
 description = "Rubber hose in a 1930s print: the same bendy, bouncy characters in soft blacks, greys and old paper white."
+skin = "riso"
 
 [finish]
 line = 6.0              # one thick, even black line

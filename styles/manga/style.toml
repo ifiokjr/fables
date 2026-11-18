@@ -4,6 +4,7 @@
 # anime style's (styles/anime/kit.svg and template.svg), so a character can move between them.
 name = "manga"
 description = "Black-and-white manga: anime anatomy in heavy ink with screentone dots for every colour, high-contrast eyes, speed lines and impact bursts, animated on threes with long holds."
+skin = "riso"
 
 [finish]
 line = 4.4              # a heavy, tapered outer line, as a manga inker's pen

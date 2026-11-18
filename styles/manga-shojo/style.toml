@@ -3,6 +3,7 @@
 # with lingering holds that drift. It shares the anime kit and template.
 name = "manga-shojo"
 description = "Shojo manga: delicate self-coloured lines, very large sparkling eyes with long lashes, soft shading with a rim light, and gentle drifting motion."
+skin = "riso"
 
 [finish]
 line = 2.4

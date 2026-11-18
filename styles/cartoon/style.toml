@@ -3,6 +3,7 @@
 # Every number here is in figure units (a kid is about 500 tall, the soles at y = 0).
 name = "cartoon"
 description = "Round, friendly picture-book characters: big heads, brushed outlines that swell on the shadow side, one tone of cel shadow."
+skin = "riso"
 
 [finish]
 line = 4.2              # silhouettes, pressed harder like an inker's outside edge

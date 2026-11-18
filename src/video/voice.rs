@@ -205,13 +205,22 @@ impl Speech {
 	}
 }
 
+/// The key a take is cached under: the voice, how the line is delivered, and the words.
+///
+/// This is the exact string cached takes were first written under, so it is deliberately kept
+/// byte for byte: changing it would re-record every line of every book, and adding a field to
+/// [`Voice`] means deciding here whether old takes stay valid.
+pub fn cache_key(voice: &Voice, delivery: Delivery, text: &str) -> String {
+	format!("{voice:?}|{delivery:?}|{text}")
+}
+
 /// Speaks a line, reusing a cached take when nothing about it has changed.
 pub fn speak(utterance: &Utterance<'_>, cache: &Path) -> Result<Speech> {
 	std::fs::create_dir_all(cache)
 		.with_context(|| format!("could not create {}", cache.display()))?;
 
 	let voice = utterance.voice;
-	let key = format!("{voice:?}|{:?}|{}", utterance.delivery, utterance.text);
+	let key = cache_key(voice, utterance.delivery, utterance.text);
 	let stem = cache.join(format!("{:016x}", seed_of(&key)));
 	let wav = stem.with_extension("wav");
 	let alignment_file = stem.with_extension("align.json");
@@ -866,6 +875,20 @@ mod tests {
 					end: 0.25
 				}
 			]
+		);
+	}
+
+	#[test]
+	fn a_take_is_cached_under_the_key_it_was_first_written_with() {
+		let voice = Voice::default();
+		let delivery = Delivery {
+			mood: Some(Mood::Cross),
+			shout: false,
+		};
+
+		assert_eq!(
+			cache_key(&voice, delivery, "Stop that."),
+			r#"Voice { provider: "say", name: "Daniel", rate: 165, command: None, id: None, model: None, style: None }|Delivery { mood: Some(Cross), shout: false }|Stop that."#
 		);
 	}
 

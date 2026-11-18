@@ -4,6 +4,7 @@
 # key on twos. Abstract settings suit it, and its pages read best in the riso skin.
 name = "mid-century"
 description = "Mid-century modern: angular geometric characters, a small flat palette, clean angular lines with the colour printed off them by one fixed slip, and held poses that snap between keys."
+skin = "riso"
 
 [finish]
 line = 3.2
