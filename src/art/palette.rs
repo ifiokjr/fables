@@ -277,9 +277,83 @@ pub const NAMED: &[(&str, Color)] = &[
 	("cream", CREAM),
 ];
 
+/// The palette colours that read as skin, light to dark. Any colour may be a skin; these are the
+/// ones to reach for first.
+pub const SKIN_TONES: [&str; 4] = ["cream", "sand", "toffee", "cocoa"];
+
+/// Everyday colour words a palette name is not, with the colour each usually means.
+const EVERYDAY: &[(&str, u32)] = &[
+	("red", 0xE0_30_30),
+	("orange", 0xFF_8C_1A),
+	("yellow", 0xFF_D9_33),
+	("gold", 0xFF_C8_2E),
+	("green", 0x4C_B0_50),
+	("lime", 0xA6_DC_5A),
+	("olive", 0x7A_80_2A),
+	("blue", 0x4A_78_E0),
+	("navy", 0x26_2C_6E),
+	("turquoise", 0x26_B8_B0),
+	("cyan", 0x40_C8_D8),
+	("purple", 0x80_58_D0),
+	("violet", 0x80_58_D0),
+	("lavender", 0xC8_A8_F0),
+	("pink", 0xFF_78_B0),
+	("coral", 0xFF_7F_6A),
+	("salmon", 0xFA_90_80),
+	("peach", 0xFF_D8_B0),
+	("beige", 0xF2_DC_B0),
+	("tan", 0xD2_A0_70),
+	("brown", 0x8A_58_40),
+	("maroon", 0x60_28_50),
+	("black", 0x20_20_28),
+	("grey", 0x60_6A_80),
+	("gray", 0x60_6A_80),
+	("silver", 0xC8_D0_D8),
+];
+
+/// The palette name nearest to a word that is not one: a misspelt palette name, or the palette
+/// colour closest to an everyday colour word (`coral`, `tan`, `gold`).
+pub fn suggest(word: &str) -> Option<&'static str> {
+	// An everyday word first: `tan` is a colour of its own before it is the start of
+	// `tangerine`.
+	let lower = word.trim().to_lowercase();
+
+	if let Some((_, rgb)) = EVERYDAY.iter().find(|(name, _)| *name == lower) {
+		let wanted = Color(*rgb).oklab();
+		let distance = |color: Color| {
+			let lab = color.oklab();
+			(lab.l - wanted.l).powi(2) + (lab.a - wanted.a).powi(2) + (lab.b - wanted.b).powi(2)
+		};
+
+		return NAMED
+			.iter()
+			.min_by(|(_, a), (_, b)| distance(*a).total_cmp(&distance(*b)))
+			.map(|(name, _)| *name);
+	}
+
+	crate::hint::nearest(word, NAMED.iter().map(|(name, _)| *name))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn an_everyday_colour_word_finds_its_nearest_palette_name() {
+		assert_eq!(suggest("tan"), Some("toffee"));
+		assert_eq!(suggest("gold"), Some("sunflower"));
+		assert_eq!(suggest("Brown"), Some("cocoa"));
+		assert_eq!(suggest("tomatoe"), Some("tomato"));
+		assert_eq!(suggest("xyzzy"), None);
+		assert!(suggest("coral").is_some());
+	}
+
+	#[test]
+	fn the_skin_tones_are_palette_names() {
+		for name in SKIN_TONES {
+			assert!(Color::parse(name).is_some(), "{name}");
+		}
+	}
 
 	#[test]
 	fn parses_names_and_hex() {
