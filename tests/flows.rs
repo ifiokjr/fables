@@ -282,9 +282,23 @@ fn flow_list_and_flow_show_print_the_shape() {
 	let show = fables(root.path(), &["flow", "show", "three-tries"]);
 	let text = stdout(&show);
 	assert!(show.status.success(), "{}", stderr(&show));
+	assert!(text.contains("good for:"), "{text}");
 	assert!(text.contains("Home and the want, said aloud"), "{text}");
 	assert!(text.contains("Try 4 succeeds"), "{text}");
 	assert!(text.contains("pages"), "{text}");
+
+	for flow in flow::built_in_flows().unwrap() {
+		let output = fables(root.path(), &["flow", "show", &flow.slug]);
+		let text = stdout(&output);
+
+		assert!(output.status.success(), "{}", stderr(&output));
+		assert!(text.contains(&flow.beats[0].name), "{}: {text}", flow.slug);
+		assert!(
+			text.contains(&flow.beats[flow.beats.len() - 1].name),
+			"{}: {text}",
+			flow.slug
+		);
+	}
 }
 
 /// Every example world's story that names a flow, in a stable order.
