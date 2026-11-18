@@ -179,8 +179,13 @@ enum PuppetAction {
 	},
 	/// Start a cast member's part file to redraw part by part, from the style's template or
 	/// another puppet's drawings.
+	///
+	/// Every style has two bodies, a kid and a grown-up, and a template drawn for each: a cast
+	/// member with `kind = "grown-up"` starts from the grown-up's torso, sleeves and legwear, cut
+	/// for the taller body; anyone else starts from the kid's.
 	Template {
-		/// The cast id the file is for, e.g. bogey.
+		/// The cast id the file is for, e.g. bogey. Its `kind` in the cast file (`kid` or
+		/// `grown-up`) picks the body the template is drawn for.
 		id: String,
 		/// The puppet whose drawings to start from (default: the style's template).
 		#[arg(long)]
@@ -833,7 +838,15 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 	for id in ids {
 		let path = puppet_file(world, &cast, id)?;
 		let parts = Parts::load_puppet(&path, &style.kit)?;
-		let findings = parts.check();
+		let mut findings = parts.check();
+
+		// Whether the parts join up on the character's own body, posed.
+		if let Some(fables::cast::Kind::Figure(look)) = cast.member(id).map(|member| &member.kind)
+			&& let Some(puppet) = &look.puppet
+		{
+			findings.extend(fables::art::puppet::joins(puppet, look.build));
+		}
+
 		let count = parts.iter().count();
 		println!(
 			"{id}: {count} parts from {} over the {} kit",
@@ -878,9 +891,19 @@ fn puppet_template(world: &World, id: &str, from: Option<&str>) -> Result<()> {
 			)
 		}
 		None => {
+			// The template drawn for the character's body: a grown-up's torso, sleeves and
+			// legwear are cut for a grown-up.
+			let fables::cast::Kind::Figure(look) = &member.kind else {
+				anyhow::bail!("`{id}` is not a person, so has no puppet");
+			};
+			let body = match look.build {
+				fables::art::figure::Build::Kid => "",
+				fables::art::figure::Build::Grownup => " grown-up",
+			};
+
 			(
-				style.template.clone(),
-				format!("the {} template", style.name),
+				style.template_for(look.build),
+				format!("the {}{body} template", style.name),
 			)
 		}
 	};

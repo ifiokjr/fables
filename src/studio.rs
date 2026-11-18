@@ -1489,7 +1489,7 @@ impl Studio {
 
 		let parts = sheets::parts_sheet(
 			&format!("The {name} style: kit and template"),
-			&pack.template_figure(),
+			&pack.template_figure(crate::art::figure::Build::Kid),
 		)?;
 
 		Ok(vec![

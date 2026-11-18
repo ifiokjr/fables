@@ -38,10 +38,12 @@ use super::dials::Joints;
 use super::figure::Build;
 use super::figure::Extra;
 use super::figure::FigureState;
+use super::figure::Frame;
 use super::figure::HandShape;
 use super::figure::Look;
 use super::figure::Mood;
 use super::figure::Pattern;
+use super::figure::Pose;
 use super::figure::Prop;
 use super::figure::Teeth;
 use super::figure::Viseme;
@@ -55,6 +57,7 @@ use super::pack::Finish;
 use super::pack::KitInks;
 use super::pack::StylePack;
 use super::palette;
+use super::parts::Finding;
 use super::parts::Level;
 use super::parts::Parts;
 use super::pt;
@@ -62,6 +65,7 @@ use super::rig;
 use super::rig::Gait;
 use super::rig::Legs;
 use super::rig::Limbs;
+use super::rig::Stance;
 use super::shape::Shape;
 
 /// The body an authored puppet is drawn on: where its joints sit, how long its bones are and how
@@ -2811,6 +2815,195 @@ fn dimples(
 	}
 }
 
+/// The poses a figure's joins are measured in: standing, both arms raised and seated, each
+/// front-on and three-quarters turned.
+const JOIN_POSES: [(&str, Pose, Stance); 3] = [
+	("standing", Pose::Idle, Stance::Stand),
+	("cheering", Pose::Cheer, Stance::Stand),
+	("sitting", Pose::Idle, Stance::Sit),
+];
+
+/// How wide a gap between two parts that should join may be, as a fraction of the figure's
+/// height from the soles to the middle of the head: about a line's width.
+const JOIN_TOLERANCE: f32 = 0.015;
+
+/// One measured join: the part it is reported against, what should touch, and the widest gap
+/// found with the pose it was found in.
+struct Gap {
+	part: &'static str,
+	what: String,
+	width: f32,
+	pose: String,
+}
+
+/// Measures whether a figure's drawn parts join up on `build`'s body, in each of
+/// [`JOIN_POSES`]: the head (or its neck) must touch the top and the top the legwear; each arm
+/// must start inside the top (its sleeve, or a bare or rubber-hose arm at the shoulder); each leg
+/// must start inside the top or the legwear (its trouser leg, or the bare leg at the hip); and a
+/// sleeve or trouser leg whose lower half carries on down the forearm or shin must reach the
+/// elbow or knee. Each join that opens wider than [`JOIN_TOLERANCE`] allows is an error naming
+/// the parts, the pose and the gap.
+pub fn joins(puppet: &Authored, build: Build) -> Vec<Finding> {
+	let style = &puppet.style;
+	let body = style.body(build);
+	let frame = Frame::authored(style, build);
+	let tolerance = JOIN_TOLERANCE * (body.head_above_neck - body.neck.y);
+	let hose = style.motion.limbs == Joints::Hose;
+	let mut gaps: Vec<Gap> = Vec::new();
+	let mut measure = |part: &'static str, what: String, width: f32, pose: &str| {
+		match gaps
+			.iter_mut()
+			.find(|gap| gap.part == part && gap.what == what)
+		{
+			Some(gap) if width > gap.width => {
+				gap.width = width;
+				gap.pose = pose.to_owned();
+			}
+			Some(_) => {}
+			None => {
+				gaps.push(Gap {
+					part,
+					what,
+					width,
+					pose: pose.to_owned(),
+				});
+			}
+		}
+	};
+
+	for (label, pose, stance) in JOIN_POSES {
+		for (view, facing) in [("front-on", 0.0), ("three-quarters", STAGED_FACING)] {
+			let pose_name = format!("{label} {view}");
+			let mut state = FigureState::new(&frame);
+			state.hands = frame.hands(pose, facing);
+			state.hand_shapes = pose.hand_shapes();
+			state.legs = frame.limbs().stance(stance, facing);
+			state.facing = facing;
+			let posed = Posed::of(&state, style, build);
+			let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
+			let t = posed.t;
+			let on_body = |shape: Shape| shape.map(|p| solved.torso(p));
+			let on_bone = |shape: Shape, from: Pt, to: Pt| {
+				let d = to - from;
+				let angle = (-d.x).atan2(d.y).to_degrees();
+				shape.map(|p| from + p.rotate(angle))
+			};
+
+			let torso = on_body(puppet.required("torso", t));
+			let legwear = puppet.required("legwear", t);
+			let legwear = on_body(if body.floor && puppet.part("legwear-leg", t).is_none() {
+				legwear.map(|p| solved.skirt(p))
+			} else {
+				legwear
+			});
+			let neck = on_body(match puppet.part("neck", t) {
+				Some(neck) => neck.shift(body.neck),
+				None => capsule(30.0, 30.0, 30.0).shift(pt(lerp(0.0, 6.0, t), body.neck.y - 24.0)),
+			});
+			let head =
+				on_body(puppet.required("head", t).map(|p| {
+					body.neck + (p + pt(0.0, -body.head_above_neck)).rotate(posed.head_tilt)
+				}));
+			let necked = head.gap(&neck).max(neck.gap(&torso));
+			measure(
+				"head",
+				"the head and its neck are clear of the torso".to_owned(),
+				head.gap(&torso).min(necked),
+				&pose_name,
+			);
+			measure(
+				"legwear",
+				"the legwear is clear of the torso".to_owned(),
+				torso.gap(&legwear),
+				&pose_name,
+			);
+
+			for (side, name) in [(-1.0, "near"), (1.0, "far")] {
+				let (shoulder, elbow, _) = solved.arm(&posed, side);
+				let root = if hose {
+					let radius = body.forearm_width.0 / 2.0;
+					Shape::ellipse(shoulder, radius, radius)
+				} else {
+					on_bone(puppet.required("sleeve", t), shoulder, elbow)
+				};
+				measure(
+					if hose { "arm" } else { "sleeve" },
+					format!("the {name} arm starts clear of the torso"),
+					root.gap(&torso),
+					&pose_name,
+				);
+
+				if !hose && puppet.part("forearm-sleeve", t).is_some() {
+					measure(
+						"sleeve",
+						format!(
+							"the {name} sleeve stops short of the elbow, where the forearm sleeve \
+							 starts"
+						),
+						root.distance(elbow),
+						&pose_name,
+					);
+				}
+
+				let (hip, knee, _) = solved.leg(side);
+				let thigh = puppet.part("legwear-leg", t);
+				let root = match &thigh {
+					Some(cover) => on_bone(cover.clone(), hip, knee),
+					None => {
+						let width = body
+							.leg_profile
+							.filter(|_| !hose)
+							.map_or(body.leg_width.0, |widths| widths[0]);
+						Shape::ellipse(hip, width / 2.0, width / 2.0)
+					}
+				};
+				measure(
+					if thigh.is_some() {
+						"legwear-leg"
+					} else {
+						"leg"
+					},
+					format!("the {name} leg starts clear of the torso and the legwear"),
+					root.gap(&torso).min(root.gap(&legwear)),
+					&pose_name,
+				);
+
+				if thigh.is_some() && puppet.part("legwear-shin", t).is_some() {
+					measure(
+						"legwear-leg",
+						format!(
+							"the {name} trouser leg stops short of the knee, where the trouser's \
+							 shin starts"
+						),
+						root.distance(knee),
+						&pose_name,
+					);
+				}
+			}
+		}
+	}
+
+	let body_name = match build {
+		Build::Kid => "kid",
+		Build::Grownup => "grown-up",
+	};
+
+	gaps.into_iter()
+		.filter(|gap| gap.width > tolerance)
+		.map(|gap| {
+			Finding {
+				level: Level::Error,
+				part: gap.part.to_owned(),
+				message: format!(
+					"on the {body_name} body, {} by {:.0} units when {} (a join may open by {:.0} \
+					 at most)",
+					gap.what, gap.width, gap.pose, tolerance
+				),
+			}
+		})
+		.collect()
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -2998,6 +3191,67 @@ mod tests {
 					matches!(puppet.parts.turn(turning), Some(Turn::Blend { .. })),
 					"{name}'s {turning} should blend between its two views"
 				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_kid_drawn_on_a_grown_up_body_comes_apart_and_the_grown_up_template_holds() {
+		// Captain Crumpet: a rubber-hose grown-up started from the style's kid template before it
+		// had a grown-up one. On the grown-up body the head floats over a kid's torso with no neck
+		// between, and the hose arms start in mid-air above it.
+		let style = StylePack::named("rubber-hose").unwrap();
+		let parts = Parts::parse(include_str!("../../tests/fixtures/crumpet-grown-up.svg"))
+			.unwrap()
+			.over(style.kit.clone());
+		let crumpet = Authored::from_parts(FilePath::new("crumpet.svg"), parts, &style).unwrap();
+		let errors: Vec<String> = joins(&crumpet, Build::Grownup)
+			.iter()
+			.map(ToString::to_string)
+			.collect();
+		let gap = |part: &str, what: &str| {
+			errors.iter().any(|error| {
+				error.starts_with(&format!("error: {part}: on the grown-up body, {what} by "))
+					&& error.contains(" units when ")
+			})
+		};
+		assert!(
+			gap("head", "the head and its neck are clear of the torso"),
+			"{errors:#?}"
+		);
+		assert!(
+			gap("arm", "the near arm starts clear of the torso")
+				&& gap("arm", "the far arm starts clear of the torso"),
+			"{errors:#?}"
+		);
+
+		// The same drawing joins up on the kid's body it was drawn for, and the style's grown-up
+		// template joins up on the grown-up's.
+		assert!(joins(&crumpet, Build::Kid).is_empty());
+		let template = Authored::from_parts(
+			FilePath::new("template"),
+			style.template_figure(Build::Grownup),
+			&style,
+		)
+		.unwrap();
+		let errors = joins(&template, Build::Grownup);
+		assert!(errors.is_empty(), "{errors:#?}");
+	}
+
+	#[test]
+	fn every_puppet_in_the_repository_joins_up_on_its_own_body() {
+		let worlds = FilePath::new(env!("CARGO_MANIFEST_DIR")).join("worlds");
+
+		for entry in std::fs::read_dir(worlds).unwrap() {
+			let world = crate::world::World::load(&entry.unwrap().path()).unwrap();
+
+			for member in world.cast().unwrap().members.values() {
+				if let crate::cast::Kind::Figure(look) = &member.kind
+					&& let Some(puppet) = &look.puppet
+				{
+					let errors = joins(puppet, look.build);
+					assert!(errors.is_empty(), "{}: {errors:#?}", member.id);
+				}
 			}
 		}
 	}

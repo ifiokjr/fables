@@ -80,7 +80,11 @@ pub fn template_look(style: &Arc<StylePack>, build: Build) -> Result<Look> {
 	))?;
 	let mut look = build_look("template", &entry, Path::new(""), style)?;
 	let file = PathBuf::from(format!("styles/{}/template.svg", style.name));
-	look.puppet = Some(Authored::from_parts(&file, style.template_figure(), style)?);
+	look.puppet = Some(Authored::from_parts(
+		&file,
+		style.template_figure(build),
+		style,
+	)?);
 	Ok(look)
 }
 
