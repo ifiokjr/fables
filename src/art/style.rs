@@ -29,10 +29,15 @@ pub enum StyleName {
 	Storybook,
 	/// Clear line: one even outline everywhere, flat colour, no shading or texture.
 	Clear,
+	/// Shadow theatre: the setting is ink shadows on a lit screen, paler the farther away.
+	Shadow,
+	/// Paper theatre: every shape is card with a white cut edge and a hard shadow, and each
+	/// layer of the setting stands in front of the last as a sheet of its own.
+	Card,
 }
 
 impl StyleName {
-	pub const ALL: [(&'static str, StyleName); 7] = [
+	pub const ALL: [(&'static str, StyleName); 9] = [
 		("riso", StyleName::Riso),
 		("tv", StyleName::Tv),
 		("bold", StyleName::Bold),
@@ -40,6 +45,8 @@ impl StyleName {
 		("crayon", StyleName::Crayon),
 		("storybook", StyleName::Storybook),
 		("clear", StyleName::Clear),
+		("shadow", StyleName::Shadow),
+		("card", StyleName::Card),
 	];
 
 	pub fn parse(name: &str) -> Option<StyleName> {
@@ -103,6 +110,39 @@ pub struct Finish {
 	pub palette: Option<Palette>,
 }
 
+/// What a page's words sit on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Card {
+	/// A cream paper card with a wobbly edge, inked the way the page skin inks.
+	#[default]
+	Paper,
+	/// A plain dark band with light letters, as a caption sits under a film.
+	Caption,
+}
+
+impl Card {
+	pub const ALL: [(&'static str, Card); 2] = [("paper", Card::Paper), ("caption", Card::Caption)];
+
+	pub fn parse(name: &str) -> Option<Card> {
+		Self::ALL
+			.iter()
+			.find(|(key, _)| *key == name)
+			.map(|(_, card)| *card)
+	}
+
+	pub fn name(self) -> &'static str {
+		match self {
+			Card::Paper => "paper",
+			Card::Caption => "caption",
+		}
+	}
+}
+
+/// The shadow theatre's screen in flat daylight, top and bottom: lamplight through paper.
+/// Under a scene light the screen is the light's own sky.
+pub const SCREEN: (Color, Color) = (Color(0xF2_C2_7C), Color(0xFB_E8_BE));
+
 /// Everything that decides how ink meets paper.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Style {
@@ -115,8 +155,17 @@ pub struct Style {
 	/// Fill offset from the outline.
 	pub registration: Pt,
 	pub fill_opacity: f32,
+	/// The colour of silhouette outlines, if not the ink: the white core of cut card.
+	pub edge: Option<Color>,
 	/// Shadow cast by every shape: offset and opacity.
 	pub shadow: Option<(Pt, f32)>,
+	/// The shadow each layer of a setting casts on the one behind it, as sheets of card
+	/// standing apart: offset and opacity.
+	pub planes: Option<(Pt, f32)>,
+	/// Settings are painted as ink shadows on a lit screen (see [`Solid`](super::Solid)).
+	pub silhouette: bool,
+	/// What the words sit on.
+	pub card: Card,
 	pub shading: Shading,
 	pub texture: Texture,
 	/// Sketchy lines: extra passes and how far they wander.
@@ -166,6 +215,10 @@ impl Style {
 					halftone: true,
 					roughen: 0.0,
 					roughen_frequency: 0.0,
+					edge: None,
+					planes: None,
+					silhouette: false,
+					card: Card::Paper,
 					finish: plain,
 				}
 			}
@@ -185,6 +238,10 @@ impl Style {
 					halftone: false,
 					roughen: 0.0,
 					roughen_frequency: 0.0,
+					edge: None,
+					planes: None,
+					silhouette: false,
+					card: Card::Paper,
 					finish: Finish {
 						grain: 0.0,
 						saturation: 1.08,
@@ -208,6 +265,10 @@ impl Style {
 					halftone: false,
 					roughen: 0.0,
 					roughen_frequency: 0.0,
+					edge: None,
+					planes: None,
+					silhouette: false,
+					card: Card::Paper,
 					finish: Finish {
 						grain: 0.0,
 						saturation: 1.18,
@@ -231,6 +292,10 @@ impl Style {
 					halftone: false,
 					roughen: 3.2,
 					roughen_frequency: 0.011,
+					edge: None,
+					planes: None,
+					silhouette: false,
+					card: Card::Paper,
 					finish: Finish {
 						grain: 0.9,
 						mottle: 0.35,
@@ -257,6 +322,10 @@ impl Style {
 					halftone: false,
 					roughen: 1.7,
 					roughen_frequency: 0.045,
+					edge: None,
+					planes: None,
+					silhouette: false,
+					card: Card::Paper,
 					finish: Finish {
 						grain: 2.2,
 						mottle: 0.25,
@@ -283,6 +352,10 @@ impl Style {
 					halftone: false,
 					roughen: 1.5,
 					roughen_frequency: 0.018,
+					edge: None,
+					planes: None,
+					silhouette: false,
+					card: Card::Paper,
 					finish: Finish {
 						grain: 1.1,
 						mottle: 0.7,
@@ -310,11 +383,48 @@ impl Style {
 					halftone: false,
 					roughen: 0.0,
 					roughen_frequency: 0.0,
+					edge: None,
+					planes: None,
+					silhouette: false,
+					card: Card::Paper,
 					finish: Finish {
 						grain: 0.0,
 						saturation: 1.06,
 						..plain
 					},
+				}
+			}
+			StyleName::Shadow => {
+				Style {
+					name,
+					outline: 0.0,
+					silhouette: true,
+					shading: Shading::Flat,
+					halftone: false,
+					registration: pt(0.0, 0.0),
+					finish: Finish {
+						grain: 0.6,
+						..plain
+					},
+					..Style::named(StyleName::Riso)
+				}
+			}
+			StyleName::Card => {
+				Style {
+					name,
+					outline: 1.15,
+					edge: Some(palette::WHITE),
+					registration: pt(0.0, 0.0),
+					shadow: Some((pt(8.0, 12.0), 0.26)),
+					planes: Some((pt(22.0, 30.0), 0.24)),
+					texture: Texture::Paper,
+					shading: Shading::Flat,
+					halftone: false,
+					finish: Finish {
+						grain: 0.5,
+						..plain
+					},
+					..Style::named(StyleName::Riso)
 				}
 			}
 		}

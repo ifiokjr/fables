@@ -17,7 +17,9 @@ use crate::art::pt;
 use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::cast::Cast;
+use crate::cast::Kind;
 use crate::compose;
+use crate::stage::Clear;
 use crate::stage::Rehearsal;
 use crate::stage::Scene;
 use crate::stage::Traits;
@@ -40,6 +42,12 @@ pub const SAFE: f32 = STAGE * 0.375 / 8.5;
 
 /// Body text size in stage units (about 30 pt on an 8.5" page).
 const BODY_SIZE: f32 = 116.0;
+
+/// The gap kept between a text card and an actor placed clear of it, in stage units.
+const CARD_GAP: f32 = 40.0;
+
+/// The room kept around a face by something placed in the sky beside it, in stage units.
+const FACE_ROOM: f32 = 90.0;
 
 /// A block of text on a page.
 #[derive(Clone, Debug)]
@@ -107,6 +115,21 @@ pub fn assemble(story: &Story, cast: &Cast) -> Result<Vec<BookPage>> {
 	Ok(pages)
 }
 
+/// The plain endpapers [`assemble`] pads a book of `story_pages` story pages with: the pages
+/// a story could grow into without the printed book growing. `folk` says whether the world has
+/// anybody for a "Meet the folk" page; without one, the book has a page more to fill.
+pub fn blank_pages(story_pages: usize, folk: bool) -> usize {
+	// The title, the copyright page and "Meet the folk", then the activity page.
+	let mut pages = story_pages + 2 + usize::from(folk);
+
+	if pages < MIN_PAGES || pages % 2 == 1 {
+		pages += 1;
+	}
+
+	let printed = pages.max(MIN_PAGES).next_multiple_of(2);
+	printed - pages
+}
+
 fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 	let page = &story.pages[rehearsal.page];
 	let mut scene = rehearsal.finale().clone();
@@ -153,6 +176,8 @@ fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 		});
 	}
 
+	keep_clear(&mut scene, &cards(&texts));
+
 	BookPage {
 		// Named after the script page so proofs map straight back to the script.
 		label: format!("story-{:02}", rehearsal.page + 1),
@@ -162,6 +187,110 @@ fn story_page(story: &Story, cast: &Cast, rehearsal: &Rehearsal) -> BookPage {
 		decor: Decor::None,
 		style: Style::default(),
 	}
+}
+
+/// Keeps actors placed by name clear of the page's text cards (see [`Clear`]), measured from
+/// their drawings. One in the sky that would sit under a card stays as high as it can: beside
+/// the card at the height it was put, if there is room, or else just below it — never under
+/// it — and one that would sit on a face moves aside along the sky. A flyer that landed under
+/// a card walks along the ground to the nearer side clear of it. Actors placed with a number,
+/// and actors no card or face is in the way of, stay exactly where they were put.
+fn keep_clear(scene: &mut Scene, cards: &[Bounds]) {
+	if cards.is_empty() || scene.actors.iter().all(|actor| actor.clear.is_none()) {
+		return;
+	}
+
+	let puppets = compose::puppets(scene, 0.0, true);
+	let heads: Vec<(&str, Bounds)> = puppets
+		.iter()
+		.filter(|puppet| matches!(puppet.kind, Kind::Figure(_)))
+		.map(|puppet| (puppet.id.as_str(), puppet.extents().head))
+		.collect();
+
+	for puppet in &puppets {
+		let Some(actor) = scene.actors.iter_mut().find(|actor| actor.id == puppet.id) else {
+			continue;
+		};
+		let Some(clear) = actor.clear else {
+			continue;
+		};
+		let drawn = puppet.extents().subject;
+		let under = cards
+			.iter()
+			.filter(|card| overlaps(drawn, **card))
+			.map(|card| card.3)
+			.reduce(f32::max);
+		let faces: Vec<Bounds> = heads
+			.iter()
+			.filter(|(id, _)| *id != puppet.id)
+			.map(|(_, head)| *head)
+			.collect();
+
+		match clear {
+			Clear::Sky => {
+				if under.is_none() && !faces.iter().any(|face| overlaps(drawn, *face)) {
+					continue;
+				}
+
+				// Faces count as much as cards for something in the sky, with room around
+				// them so a kite does not sit on an ear.
+				let mut avoid = cards.to_vec();
+				avoid.extend(faces.iter().map(|face| {
+					(
+						face.0 - FACE_ROOM,
+						face.1 - FACE_ROOM,
+						face.2 + FACE_ROOM,
+						face.3 + FACE_ROOM,
+					)
+				}));
+
+				if let Some(across) = beside(drawn, &avoid) {
+					actor.x = Some((puppet.at.x + across) / STAGE);
+					continue;
+				}
+
+				let drop = under.map_or(0.0, |lowest| lowest + CARD_GAP - drawn.1);
+				let dropped = (drawn.0, drawn.1 + drop, drawn.2, drawn.3 + drop);
+				let across = beside(dropped, &avoid).unwrap_or(0.0);
+				actor.y = Some((puppet.at.y + drop) / STAGE);
+				actor.x = Some((puppet.at.x + across) / STAGE);
+			}
+			Clear::Ground => {
+				if let (Some(_), Some(across)) = (under, beside(drawn, cards)) {
+					actor.x = Some((puppet.at.x + across) / STAGE);
+				}
+			}
+		}
+	}
+}
+
+/// How far a box must move across the page to sit clear of every box in `avoid` it overlaps,
+/// inside the page's safe margins: the shortest way, or `None` if there is no room. It tries
+/// the near edge of each box it would have to pass, so it finds a gap between two faces as
+/// well as the side of a card. A box that overlaps nothing stays (`Some(0.0)`).
+fn beside(drawn: Bounds, avoid: &[Bounds]) -> Option<f32> {
+	let fits = |across: f32| {
+		let moved = (drawn.0 + across, drawn.1, drawn.2 + across, drawn.3);
+		moved.0 >= SAFE
+			&& moved.2 <= STAGE - SAFE
+			&& !avoid.iter().any(|other| overlaps(moved, *other))
+	};
+	let band = |other: &&Bounds| other.1 < drawn.3 && drawn.1 < other.3;
+
+	std::iter::once(0.0)
+		.chain(
+			avoid
+				.iter()
+				.filter(band)
+				.flat_map(|other| [other.0 - CARD_GAP - drawn.2, other.2 + CARD_GAP - drawn.0]),
+		)
+		.filter(|across| fits(*across))
+		.min_by(|a, b| a.abs().total_cmp(&b.abs()))
+}
+
+/// Whether two boxes share any area.
+fn overlaps(a: Bounds, b: Bounds) -> bool {
+	a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
 }
 
 /// The cover star on the cover background, posed by `pose` (e.g. `"x=0.5 grin wave"`).
@@ -193,7 +322,7 @@ pub fn star_scene(
 		beats: Vec::new(),
 		line: 0,
 	};
-	let mut scene = Scene::for_page(&page, &story.settings)?;
+	let mut scene = Scene::for_page(&page, &story.settings, &story.props)?;
 
 	if let Some(name) = &cover.light {
 		scene.weather.light = crate::art::light::Light::parse(name).ok_or_else(|| {
@@ -316,6 +445,7 @@ pub fn back_cover(story: &Story, cast: &Cast) -> Result<BookPage> {
 					teeth: actor.teeth,
 					stink: actor.stink,
 					mint: actor.mint,
+					see: actor.eyes.see.clone(),
 				},
 			);
 		}
@@ -417,8 +547,12 @@ fn plain_scene(tint: crate::art::Color) -> Scene {
 		beats: Vec::new(),
 		line: 0,
 	};
-	let mut scene = Scene::for_page(&page, &Library::built_in())
-		.unwrap_or_else(|error| unreachable!("a bare plain page always builds: {error}"));
+	let mut scene = Scene::for_page(
+		&page,
+		&Library::built_in(),
+		&crate::art::props::Library::built_in(),
+	)
+	.unwrap_or_else(|error| unreachable!("a bare plain page always builds: {error}"));
 	scene.weather.tint = tint;
 	scene
 }
@@ -802,13 +936,12 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 	}
 
 	for (x, top, right, bottom) in card_rects(page) {
-		let card = Path::wobbly_poly(
+		svg.text_card(
 			&[pt(x, top), pt(right, top), pt(right, bottom), pt(x, bottom)],
 			46.0,
 			5.0,
 			crate::art::seed_of(&page.label),
 		);
-		svg.inked(&card, palette::PAPER);
 	}
 }
 
@@ -816,10 +949,15 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 /// card's padding. Still framing reads this to keep its subject in the part of the page the
 /// card leaves clear, so the rectangle here is the rectangle the drawn card covers.
 pub fn card_rects(page: &BookPage) -> Vec<Bounds> {
+	cards(&page.texts)
+}
+
+/// The cards behind `texts` that have one (see [`card_rects`]).
+fn cards(texts: &[TextSpec]) -> Vec<Bounds> {
 	const PAD_X: f32 = 80.0;
 	const PAD_Y: f32 = 60.0;
 
-	page.texts
+	texts
 		.iter()
 		.filter(|spec| spec.card && !spec.block.pieces.is_empty())
 		.map(|spec| {
@@ -837,7 +975,12 @@ pub fn card_rects(page: &BookPage) -> Vec<Bounds> {
 /// The lettering layer.
 pub fn draw_text(svg: &mut Svg, page: &BookPage) {
 	for spec in &page.texts {
-		svg.raw(&text::svg(&spec.block, spec.ink));
+		let ink = if spec.card {
+			spec.ink.on(page.style.card)
+		} else {
+			spec.ink
+		};
+		svg.raw(&text::svg(&spec.block, ink));
 	}
 }
 
@@ -889,6 +1032,24 @@ mod tests {
 		assert_eq!(pages.len() % 2, 0);
 		assert_eq!(pages[0].label, "title");
 		assert_eq!(pages[1].label, "copyright");
+	}
+
+	#[test]
+	fn blank_pages_counts_the_padding_assemble_adds() {
+		let (story, cast) = sample();
+		let pages = assemble(&story, &cast).unwrap();
+		let blanks = pages
+			.iter()
+			.filter(|page| page.decor == Decor::Blank)
+			.count();
+		let story_pages = story.pages.iter().filter(|page| page.in_book()).count();
+
+		// The sample world has nobody but its star, so there is no "Meet the folk" page.
+		assert_eq!(blank_pages(story_pages, false), blanks);
+		assert_eq!(blank_pages(8, true), 12);
+		assert_eq!(blank_pages(8, false), 13);
+		assert_eq!(blank_pages(20, true), 0);
+		assert_eq!(blank_pages(30, true), 0);
 	}
 
 	#[test]
@@ -952,16 +1113,16 @@ mod tests {
 			pages.iter().all(|page| page.label != "meet-the-folk"),
 			"the worm is not a figure and the kid is the star: nobody to meet"
 		);
-		assert!(pages.len() >= MIN_PAGES && pages.len() % 2 == 0);
+		assert!(pages.len() >= MIN_PAGES && pages.len().is_multiple_of(2));
 
 		let cast = Cast::parse(
-			"[kid]\nname = \"Kid McKidface\"\nhabit = \"Testing\"\n[gran]\nname = \
-			 \"Gran\"\nhabit = \"Knitting\"\n",
+			"[kid]\nname = \"Kid McKidface\"\nhabit = \"Testing\"\n[gran]\nname = \"Gran\"\nhabit \
+			 = \"Knitting\"\n",
 		)
 		.unwrap();
 		let pages = assemble(&story, &cast).unwrap();
 		assert!(pages.iter().any(|page| page.label == "meet-the-folk"));
-		assert!(pages.len() >= MIN_PAGES && pages.len() % 2 == 0);
+		assert!(pages.len() >= MIN_PAGES && pages.len().is_multiple_of(2));
 	}
 
 	#[test]
@@ -983,11 +1144,16 @@ mod tests {
 		// Unset, the cover stays in daylight whatever the book's own light.
 		let (story, _) = sample();
 		let cover = front_cover(&story, &cast).unwrap();
-		assert_eq!(cover.scene.weather.light.preset, crate::art::light::Preset::Day);
+		assert_eq!(
+			cover.scene.weather.light.preset,
+			crate::art::light::Preset::Day
+		);
 
 		let error = story::parse(&script("spooky")).unwrap_err().to_string();
 		assert!(
-			error.contains("[cover] light") && error.contains("spooky") && error.contains("moonlit"),
+			error.contains("[cover] light")
+				&& error.contains("spooky")
+				&& error.contains("moonlit"),
 			"{error}"
 		);
 	}
@@ -1002,7 +1168,10 @@ mod tests {
 		let (_, cast) = sample();
 		let pages = assemble(&story, &cast).unwrap();
 		assert_eq!(pages[2].scene.camera.shot, Some(ShotSize::Wide));
-		assert!(pages[2].scene.camera.on.is_empty(), "`@camera` is video-only");
+		assert!(
+			pages[2].scene.camera.on.is_empty(),
+			"`@camera` is video-only"
+		);
 	}
 
 	#[test]
@@ -1011,5 +1180,96 @@ mod tests {
 		assert!(x.abs() < f32::EPSILON && (w - (STAGE + BLEED)).abs() < 0.01);
 		let (x, ..) = view_box(Side::Verso);
 		assert!((x + BLEED).abs() < 0.01);
+	}
+
+	/// The drawn bounds of each puppet on a page, by id.
+	fn drawn(page: &BookPage) -> Vec<(String, compose::Extents, bool)> {
+		compose::puppets(&page.scene, 0.0, true)
+			.iter()
+			.map(|puppet| {
+				(
+					puppet.id.clone(),
+					puppet.extents(),
+					matches!(puppet.kind, Kind::Figure(_)),
+				)
+			})
+			.collect()
+	}
+
+	#[test]
+	fn a_sky_prop_keeps_clear_of_the_card_and_the_faces_on_a_page() {
+		let line = "The kite flew high over the two of them, up and up and away over the hill. It \
+		            flew over the trees and over the houses, and over the bridge by the river. It \
+		            flew all morning and all afternoon, and nobody could catch it at all.";
+		let story = story::parse(&format!(
+			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@kid x=0.35\n@mum x=0.65\n@kite \
+			 x=0.5 y=sky\n{line}\n# park text=bottom\n@kite x=0.36 y=sky\n{line}\n# park\n@kite \
+			 x=0.5 y=0.1\n{line}\n# park\n@kid x=0.5\n@mum x=0.8\n@kite x=0.5 y=sky\nUp it went.\n"
+		))
+		.unwrap();
+		let cast =
+			Cast::parse("[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n")
+				.unwrap();
+		let pages = assemble(&story, &cast).unwrap();
+		let page = |label: &str| pages.iter().find(|page| page.label == label).unwrap();
+
+		for label in ["story-01", "story-02", "story-04"] {
+			let page = page(label);
+			let drawn = drawn(page);
+			let (_, kite, _) = drawn.iter().find(|(id, ..)| id == "kite").unwrap();
+			let cards = card_rects(page);
+			let card = cards
+				.first()
+				.unwrap_or_else(|| panic!("{label} has a card"));
+			assert!(card.3 > card.1);
+
+			for card in &cards {
+				assert!(
+					!overlaps(kite.subject, *card),
+					"{label}: the kite {:?} is under the card {card:?}",
+					kite.subject
+				);
+			}
+
+			for (id, extents, figure) in &drawn {
+				assert!(
+					!*figure || !overlaps(kite.subject, extents.head),
+					"{label}: the kite {:?} covers {id}'s face {:?}",
+					kite.subject,
+					extents.head
+				);
+			}
+
+			assert!(
+				kite.subject.1 >= SAFE - 1.0 && kite.subject.2 <= STAGE - SAFE + 1.0,
+				"{label}: on the page {:?}",
+				kite.subject
+			);
+		}
+
+		// With the card at the bottom, the kite keeps the sky it was given.
+		let actor = |label: &str| {
+			page(label)
+				.scene
+				.actors
+				.iter()
+				.find(|actor| actor.id == "kite")
+				.unwrap()
+				.clone()
+		};
+		let moved = actor("story-01");
+		assert!(
+			moved.x != Some(0.5) || moved.y.unwrap() > 0.59,
+			"the long page's card moved the kite: {:?}, {:?}",
+			moved.x,
+			moved.y
+		);
+		let high = actor("story-02");
+		assert!(high.y.unwrap() < 0.6, "still in the sky: {:?}", high.y);
+
+		// A number is where the kite goes, card or no card.
+		let literal = actor("story-03");
+		assert_eq!(literal.y, Some(0.1));
+		assert_eq!(literal.x, Some(0.5));
 	}
 }

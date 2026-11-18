@@ -1,0 +1,51 @@
+# The folk of Foldaway Square. Every table is one character.
+#
+# A person has a `kind` of kid or grown-up, and colours from the palette (or #rrggbb).
+# Without a `puppet` line they are drawn from the paper-theatre style's template in their own
+# colours. `fables character new <id> --name "…"` writes this table for you.
+#
+# [pip]
+# name = "Pip Pocket"
+# kind = "kid"
+# skin = "tangerine"
+# hair-colour = "plum"
+# top = "teal"
+# trim = "cream"
+# bottom = "night"
+# shoes = "ink"
+# eyes = "cocoa"
+# pattern = "plain"
+
+[pim]
+name = "Pim Scissor"
+about = "A small cut-out with a red kite and no patience at all."
+habit = "Runs everywhere, even when it is only two steps."
+kind = "kid"
+hair = "spikes"
+build = "plain"
+brows = "thin"
+nose = "button"
+skin = "#f2c9a0"
+hair-colour = "#3a3350"
+top = "tomato"
+trim = "cream"
+bottom = "#2f4f7a"
+shoes = "ink"
+eyes = "cocoa"
+
+[dot]
+name = "Dot Paste"
+about = "The stage hand of Foldaway Square, who glues back whatever comes loose."
+habit = "Keeps a pot of paste in every pocket, just in case."
+kind = "grown-up"
+hair = "bun"
+build = "slim"
+brows = "bold"
+nose = "round"
+skin = "#b9774f"
+hair-colour = "#2b2a2e"
+top = "#3f8f8a"
+trim = "sunflower"
+bottom = "#e0b53f"
+shoes = "cocoa"
+eyes = "cocoa"

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-32 -76 82 112" data-grip="38 2" data-hands="one" data-about="A cream mug of hot cocoa with a teal stripe, steaming.">
+  <title>A mug of cocoa</title>
+  <path id="steam-1" d="M-9 -40 C-16 -50 -2 -57 -9 -70" fill="none" stroke="#5e6a84" stroke-width="4" data-opacity="0.4"/>
+  <path id="steam-2" d="M8 -42 C1 -53 15 -60 8 -74" fill="none" stroke="#5e6a84" stroke-width="4" data-opacity="0.4"/>
+  <path id="handle" d="M24 -18 C50 -20 52 20 24 18 L24 8 C40 9 40 -9 24 -8 Z" fill="teal" data-shade="1"/>
+  <path id="mug" d="M-28 -30 L28 -30 C28 -10 28 10 26 26 C24 33 -24 33 -26 26 C-28 10 -28 -10 -28 -30 Z" fill="cream" data-shade="1"/>
+  <path id="stripe" d="M-28 -2 L28 -2 C28 2 28 6 27.7 10 L-27.7 10 C-28 6 -28 2 -28 -2 Z" fill="teal" data-line="detail"/>
+  <path id="cocoa" d="M-28 -30 C-28 -33.3 -15.5 -36 0 -36 C15.5 -36 28 -33.3 28 -30 C28 -26.7 15.5 -24 0 -24 C-15.5 -24 -28 -26.7 -28 -30 Z" fill="cocoa" data-line="detail"/>
+  <path id="shine" d="M-19 -20 L-19 20" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.55"/>
+</svg>

@@ -14,6 +14,7 @@ pub mod light;
 pub mod pack;
 pub mod palette;
 pub mod parts;
+pub mod props;
 pub mod puppet;
 pub mod rig;
 pub mod settings;
@@ -486,6 +487,8 @@ pub struct Svg {
 	/// What is being painted, which decides how much of the light it takes: the setting by
 	/// default, a figure while an actor is drawn (see [`Svg::set_plane`]).
 	plane: Plane,
+	/// Shadow theatre: while set, everything painted is one ink (see [`Solid`]).
+	solid: Option<Solid>,
 	/// How each open group's units map to the document's, innermost last, so an offset can be
 	/// kept the same on the page however a part is turned.
 	frames: Vec<Linear>,
@@ -628,6 +631,45 @@ impl Linear {
 	}
 }
 
+/// Shadow theatre's one ink. While an [`Svg`] holds one, every colour it paints becomes `ink`,
+/// whatever it was, except `cut`: what is cut out of the shadow, which stays the colour of the
+/// light behind the screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Solid {
+	pub ink: Color,
+	pub cut: Color,
+	/// What the ink fades towards with distance, and how far: a setting's planes stand
+	/// behind one another as paler shadows.
+	pub haze: Color,
+	pub fade: f32,
+	/// How much a colour's own lightness lifts its shadow, so a window still shows in a wall.
+	pub vary: f32,
+}
+
+impl Solid {
+	/// A figure's shadow: `ink` everywhere, with `cut` showing through.
+	pub fn figure(ink: Color, cut: Color) -> Solid {
+		Solid {
+			ink,
+			cut,
+			haze: cut,
+			fade: 0.0,
+			vary: 0.0,
+		}
+	}
+
+	fn paint(&self, colour: Color) -> Color {
+		if colour == self.cut {
+			return colour;
+		}
+
+		let (r, g, b) = colour.rgb();
+		let light = (f32::from(r) * 0.3 + f32::from(g) * 0.59 + f32::from(b) * 0.11) / 255.0;
+		self.ink
+			.mix(self.haze, (self.fade + self.vary * light).clamp(0.0, 1.0))
+	}
+}
+
 /// The line and shade dials as the brushed finish uses them (see [`dials`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Brush {
@@ -697,6 +739,7 @@ impl Svg {
 			brush: Brush::default(),
 			light: None,
 			plane: Plane::Ground(0.0),
+			solid: None,
 			frames: Vec::new(),
 			measuring: false,
 			measure: Vec::new(),
@@ -725,6 +768,10 @@ impl Svg {
 	/// active.
 	#[must_use]
 	pub fn graded(&self, colour: Color) -> Color {
+		if let Some(solid) = self.solid {
+			return solid.paint(colour);
+		}
+
 		self.light
 			.map_or(colour, |light| light.grade(colour, self.plane))
 	}
@@ -734,6 +781,26 @@ impl Svg {
 	#[must_use]
 	pub fn glowing(&self, colour: Color) -> Color {
 		self.light.map_or(colour, |light| light.glow(colour))
+	}
+
+	/// Paints what follows in one ink (or stops, with `None`) and returns what it replaces, to
+	/// put back with another call.
+	pub fn set_solid(&mut self, solid: Option<Solid>) -> Option<Solid> {
+		std::mem::replace(&mut self.solid, solid)
+	}
+
+	/// What is being painted in one ink, if anything is.
+	#[must_use]
+	pub fn solid(&self) -> Option<Solid> {
+		self.solid
+	}
+
+	/// The colour of the light behind a shadow theatre's screen, which shows wherever a
+	/// shadow is cut out: the scene light's horizon, or warm paper in flat daylight.
+	#[must_use]
+	pub fn backlight(&self) -> Color {
+		self.light
+			.map_or(style::SCREEN.1, |light| light.horizon.lighten(0.3))
 	}
 
 	/// Picks up `brush` for what's drawn from here on, measuring its register offset in the
@@ -751,11 +818,17 @@ impl Svg {
 	/// however the group is turned, scaled or mirrored. The register is an offset, not a
 	/// point, so it moves with each frame's turn and scale but never with its place.
 	fn register_here(&self) -> Pt {
+		self.offset_here(self.brush.frame, self.brush.line.register)
+	}
+
+	/// An offset measured in `frame`, in the current group's units: the same slip on the page
+	/// however the group is turned, scaled or mirrored.
+	fn offset_here(&self, frame: Linear, offset: Pt) -> Pt {
 		let moved = |frame: Linear, offset: Pt| frame.apply(offset) - frame.apply(Pt::default());
-		let register = moved(self.brush.frame, self.brush.line.register);
+		let on_page = moved(frame, offset);
 		self.frame()
 			.inverse()
-			.map_or(self.brush.line.register, |into| moved(into, register))
+			.map_or(offset, |into| moved(into, on_page))
 	}
 
 	/// Switches style for everything drawn from now on.
@@ -974,7 +1047,7 @@ impl Svg {
 			return;
 		}
 
-		let ink = self.style.ink;
+		let ink = self.style.edge.unwrap_or(self.style.ink);
 		let weight = width * self.style.outline;
 		self.sketchy(path, ink, weight, 1.0);
 	}
@@ -1033,6 +1106,23 @@ impl Svg {
 			self.end();
 		}
 
+		if self.brush.line.stroke == dials::Stroke::Cut {
+			// A piece of card: its hard shadow falls on whatever is under it, the same way
+			// on the page however the part is turned, and its cut edge shows the white core.
+			let drop = self.offset_here(self.brush.frame, pt(weight * 1.3, weight * 2.0));
+			self.begin(&format!("translate({:.2} {:.2})", drop.x, drop.y));
+			self.note(path, Pt::default(), weight);
+			let shadow = self.graded(palette::INK);
+			let _ = write!(
+				self.body,
+				r#"<path d="{}" opacity="0.3" fill="{shadow}" stroke="{shadow}" stroke-width="{:.1}" stroke-linejoin="round"/>"#,
+				path.as_str(),
+				weight * 2.0
+			);
+			self.end();
+			self.plain_stroke(path, palette::WHITE, weight * 2.0, 1.0);
+		}
+
 		if self.brush.line.register == pt(0.0, 0.0) {
 			self.fill(path, fill);
 		} else {
@@ -1043,12 +1133,27 @@ impl Svg {
 		}
 	}
 
+	/// A line that is a thing rather than an outline: a kite's string, a flower's stalk. A style
+	/// with no drawn line still has to show it, so there it is a plain stroke, and on a shadow
+	/// puppet it is the shadow's ink, never the light cut out of it.
+	pub fn thread(&mut self, path: &Path, line: Color, weight: f32) {
+		match self.brush.line.stroke {
+			dials::Stroke::None | dials::Stroke::Cut => {
+				let line = self
+					.solid
+					.map_or_else(|| self.brush_ink(line), |solid| solid.ink);
+				self.plain_stroke(path, line, weight, 1.0);
+			}
+			_ => self.brush_line(path, line, weight),
+		}
+	}
+
 	/// The brushed finish, last step: the line on top.
 	pub fn brush_line(&mut self, path: &Path, line: Color, weight: f32) {
 		let line = self.brush_ink(line);
 
 		match self.brush.line.stroke {
-			dials::Stroke::None => {}
+			dials::Stroke::None | dials::Stroke::Cut => {}
 			dials::Stroke::Broken => {
 				self.note(path, Pt::default(), weight / 2.0);
 				let _ = write!(
@@ -1163,6 +1268,26 @@ impl Svg {
 		self.brush_line(&path, line, weight);
 	}
 
+	/// The card a page's words sit on, as the style asks for it: `corners` clockwise from the
+	/// top left, rounded by `round` and wobbled by `wobble` where it is paper.
+	pub fn text_card(&mut self, corners: &[Pt; 4], round: f32, wobble: f32, seed: u64) {
+		match self.style.card {
+			style::Card::Paper => {
+				self.inked(
+					&Path::wobbly_poly(corners, round, wobble, seed),
+					palette::PAPER,
+				);
+			}
+			style::Card::Caption => {
+				self.fill_alpha(
+					&Path::wobbly_poly(corners, round * 0.6, 0.0, seed),
+					palette::INK,
+					0.86,
+				);
+			}
+		}
+	}
+
 	/// A filled shape with an outline: the basic stroke of every illustration.
 	pub fn inked(&mut self, path: &Path, fill: Color) {
 		let line = self.line;
@@ -1261,7 +1386,7 @@ impl Svg {
 		}
 
 		if self.style.outline > 0.0 {
-			let ink = self.style.ink;
+			let ink = self.style.edge.unwrap_or(self.style.ink);
 			let edge = width + self.line * 2.0 * self.style.outline;
 			self.sketchy(path, ink, edge, 1.0);
 		}
@@ -1665,5 +1790,56 @@ mod tests {
 			escape(r#"<"Hi" & bye>"#),
 			"&lt;&quot;Hi&quot; &amp; bye&gt;"
 		);
+	}
+
+	#[test]
+	fn a_solid_paints_everything_one_ink_but_what_is_cut_out() {
+		let (ink, cut) = (Color(0x2B_1D_2E), Color(0xFF_E9_B8));
+		let mut svg = Svg::new();
+		assert_eq!(svg.graded(Color(0xE2_56_4E)), Color(0xE2_56_4E));
+
+		let before = svg.set_solid(Some(Solid::figure(ink, cut)));
+		assert_eq!(before, None);
+		assert_eq!(svg.graded(Color(0xE2_56_4E)), ink);
+		assert_eq!(svg.graded(palette::WHITE), ink);
+		assert_eq!(svg.graded(cut), cut, "the light shows through a hole");
+
+		// A setting's planes fade towards the screen, a pale part further than a dark one.
+		let far = Solid {
+			ink,
+			cut,
+			haze: cut,
+			fade: 0.5,
+			vary: 0.4,
+		};
+		let brightness = |colour: Color| {
+			let (r, g, b) = colour.rgb();
+			u32::from(r) + u32::from(g) + u32::from(b)
+		};
+		svg.set_solid(Some(far));
+		let (dark, pale) = (svg.graded(palette::INK), svg.graded(palette::PAPER));
+		assert!(brightness(ink) < brightness(dark) && brightness(dark) < brightness(pale));
+		assert!(brightness(pale) <= brightness(cut));
+
+		svg.set_solid(None);
+		assert_eq!(svg.graded(palette::WHITE), palette::WHITE);
+	}
+
+	#[test]
+	fn a_text_card_is_paper_or_a_caption_band() {
+		let corners = [pt(0.0, 0.0), pt(100.0, 0.0), pt(100.0, 40.0), pt(0.0, 40.0)];
+		let mut style = Style::named(style::StyleName::Clear);
+
+		let mut svg = Svg::styled(style);
+		svg.text_card(&corners, 10.0, 2.0, 1);
+		assert!(svg.body.contains(&format!("fill=\"{}\"", palette::PAPER)));
+
+		style.card = style::Card::Caption;
+		let mut svg = Svg::styled(style);
+		svg.text_card(&corners, 10.0, 2.0, 1);
+		assert!(svg.body.contains(&format!("fill=\"{}\"", palette::INK)));
+		assert!(!svg.body.contains("stroke="), "a caption has no outline");
+		assert_eq!(style::Card::parse("caption"), Some(style::Card::Caption));
+		assert_eq!(style::Card::parse("none"), None);
 	}
 }

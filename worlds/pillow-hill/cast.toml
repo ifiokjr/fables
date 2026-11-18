@@ -1,0 +1,51 @@
+# The folk of Pillow Hill. Every table is one character.
+#
+# A person has a `kind` of kid or grown-up, and colours from the palette (or #rrggbb).
+# Without a `puppet` line they are drawn from the soft-flat style's template in their own
+# colours. `fables character new <id> --name "…"` writes this table for you.
+#
+# [pip]
+# name = "Pip Pocket"
+# kind = "kid"
+# skin = "tangerine"
+# hair-colour = "plum"
+# top = "teal"
+# trim = "cream"
+# bottom = "night"
+# shoes = "ink"
+# eyes = "cocoa"
+# pattern = "plain"
+
+[bo]
+name = "Bo Button"
+about = "A round, cheerful kid who rolls down Pillow Hill at least once a day."
+habit = "Rolls down Pillow Hill at least once a day."
+kind = "kid"
+hair = "tuft"
+build = "stout"
+brows = "thin"
+nose = "button"
+skin = "#f6cfb0"
+hair-colour = "#7a4a2e"
+top = "#ffb84d"
+trim = "cream"
+bottom = "#4a9d8f"
+shoes = "#e8604c"
+eyes = "cocoa"
+
+[plum]
+name = "Nana Plum"
+about = "Bo's nana, who knits hats for everything on the hill, snails included."
+habit = "Knits a hat for everything on the hill, snails included."
+kind = "grown-up"
+hair = "bun"
+build = "plain"
+brows = "arched"
+nose = "button"
+skin = "#c98d6b"
+hair-colour = "#e9e4ee"
+top = "#8e6bb0"
+trim = "cream"
+bottom = "#5a4a6c"
+shoes = "plum"
+eyes = "cocoa"

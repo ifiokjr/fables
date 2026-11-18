@@ -1,0 +1,168 @@
+# The silhouette style: shadow theatre. Every figure is one ink, a puppet cut from card and held
+# against a lit screen: the eyes and an open mouth are holes the light comes through, brows and
+# a shut mouth are slits, and a pin shows at every joint, so the cut-out rig is the look. It
+# moves the way a jointed puppet does: on twos, with no squash or stretch. Its figures are cut
+# from the clear-line templates (styles/clear-line/), whose knees and elbows read in shadow.
+# Pages read best in the `shadow` skin under the `dusk` and `moonlit` lights.
+name = "silhouette"
+description = "Shadow theatre: every figure one ink with a pin at each joint, eyes and mouth cut out to the light, moving on twos with no squash; best under dusk and moonlit lights."
+
+# The page the look sits on. A world's books inherit it; a book's own front matter overrides.
+[page]
+skin = "shadow"         # settings as shadows on a lit screen, paler the farther away
+card = "caption"        # words on a dark band, light letters
+transition = "dissolve" # one shadow melts into the next
+
+[finish]
+line = 3.0
+detail = 3.0            # the width of a slit, and the size of a pin
+light = [-8.0, -8.0]
+cel-shadow = "#d4cbe0"
+far = "#6e6a80"
+
+[line]
+stroke = "none"         # a shadow has an edge, not a line
+
+[shade]
+tones = 0
+fill = "silhouette"     # every part ink; eyes, mouth and pins cut out
+
+# A jointed puppet: drawings held for two frames, no squash or stretch, small wind-ups, and
+# limbs that swing from their pins.
+[motion]
+timing = "twos"
+anticipation = 0.4
+overshoot = 0.3
+squash = 0.0
+follow-through = 0.3
+takes = 0.3
+overlap = 0.6
+breath = 0.0            # card does not breathe
+weight-shift = 0.3
+business = 0.5
+blink-every = 4.0
+
+[face]
+turn = 0.42
+radius = 108.0
+slide = 128.0
+
+# Big eye holes set wide; a big nose and a wide mouth, which have to read as shapes.
+[features]
+eye = [34.0, -2.0]
+brow = [35.0, -36.0]
+brow-weight = 2.2
+blush = [50.0, 40.0]
+blush-size = [9.0, 5.0]
+nose = [4.0, 30.0]
+nose-scale = 0.75
+nose-shine = false
+mouth = [0.0, 62.0]
+mouth-scale = 0.9
+
+# An almond hole with a round ink pupil that moves a long way, so the gaze reads from afar.
+[eyes]
+size = [15.0, 13.0]
+iris = [7.0, 8.0]
+iris-dark = 1.0
+iris-band = 0.0
+pupil = [0.0, 0.0]
+rim = 0.0
+shines = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+gaze = [7.0, 4.0]
+lash = 0.0
+lower-lid = 0.0
+lower-lash = 0.0
+lashes = false
+
+[inks]
+blush = "#ee6a5a"
+eye = "#fffcf5"
+maw = "#6a2034"
+tongue = "#e9747c"
+sock = "#f8f1e4"
+sole = "#f2e4c8"
+clean-teeth = "#fff5da"
+jam = "#b8323a"
+cream = "#f6eacf"
+brush = "#4fb3a9"
+bristles = "#fffcf5"
+paste = "#9be3cf"
+kraft = "#c99a6b"
+string = "#c84a3d"
+lens = "#e8f4f8"
+bogey = "#8dbf4a"
+cap = "#c9473d"
+badge = "#f2c24b"
+satchel = "#a85a3c"
+apron = "#f8f1e4"
+mud = "#6e4a30"
+
+# What the templates and kit draw of their own, by the names a cast picks them with. The
+# templates and kit draw their other hair, brows and noses beside them as variants.
+[own]
+kid-hair = "short"
+grown-up-hair = "short"
+brows = "bold"
+nose = "button"
+
+# A kid: a big round head on a slim body, about three and a half heads tall, held up on a short
+# neck. The limbs taper gently, with a knee and an elbow you can see.
+[bodies.kid]
+neck = [0.0, -420.0]
+head-above-neck = 128.0
+shoulder-y = -398.0
+shoulder-half = 42.0
+shoulders-turned = [-38.0, 30.0]
+hips-turned = [-14.0, 20.0]
+hem-y = -262.0
+body-radius = 56.0
+leg-width = [24.0, 16.0]
+forearm-width = [15.0, 11.0]
+hand-scale = 1.15
+reach = [70.0, 166.0]
+leg-profile = [30.0, 28.0, 25.0, 21.0, 23.5, 19.0, 15.0]
+arm-profile = [21.0, 19.5, 17.0, 14.5, 16.0, 13.0, 10.5]
+floor = true
+
+# A stout build fills out the slim body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
+
+[bodies.kid.limbs]
+pelvis-y = -270.0
+ankle-y = -24.0
+hip-spread = 20.0
+thigh = 124.0
+shin = 124.0
+upper-arm = 104.0
+forearm = 96.0
+
+[bodies.grown-up]
+neck = [0.0, -730.0]
+head-above-neck = 132.0
+shoulder-y = -704.0
+shoulder-half = 58.0
+shoulders-turned = [-52.0, 40.0]
+hips-turned = [-20.0, 28.0]
+hem-y = -452.0
+body-radius = 72.0
+leg-width = [30.0, 20.0]
+forearm-width = [18.0, 13.0]
+hand-scale = 1.35
+reach = [90.0, 275.0]
+leg-profile = [38.0, 35.0, 30.0, 25.0, 28.0, 23.0, 18.0]
+arm-profile = [25.0, 23.0, 20.0, 17.0, 19.0, 15.0, 12.5]
+foot-scale = 1.3
+floor = true
+
+# A stout build fills out the slim body further than the default, so it reads at a glance.
+stout = { chest = 1.3, waist = 1.6, limbs = 1.45 }
+
+[bodies.grown-up.limbs]
+pelvis-y = -460.0
+ankle-y = -24.0
+hip-spread = 28.0
+thigh = 218.0
+shin = 218.0
+upper-arm = 170.0
+forearm = 154.0

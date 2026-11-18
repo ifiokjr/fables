@@ -25,6 +25,7 @@ use fables::studio::BuildName;
 use fables::studio::CharacterBrief;
 use fables::studio::Colours;
 use fables::studio::PartData;
+use fables::studio::PhysiqueName;
 use fables::studio::SheetKind;
 use fables::studio::Studio;
 use fables::studio::WorldBrief;
@@ -58,7 +59,7 @@ struct Cli {
 	#[command(subcommand)]
 	command: Command,
 	/// Draw in these page skins instead of the script's own: riso, tv, bold, cut-paper, crayon,
-	/// storybook, clear, a comma-separated list (bold,tv), or all. Each skin renders into its
+	/// storybook, clear, shadow, card, a comma-separated list (bold,tv), or all. Each skin renders into its
 	/// own folder. For the drawing styles figures are built with (chibi, clear-line…), see
 	/// `fables style list`.
 	#[arg(long, global = true)]
@@ -74,19 +75,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-	/// Start a new book from the world's recipe.
+	/// Start a new book from a story flow, or from the world's recipe.
 	New {
 		/// The book (and its star's) name, e.g. "Bogey `McBogeyface`".
 		title: String,
 		/// The cast id of the star, from the world's cast.toml.
 		#[arg(long)]
 		star: String,
+		/// The cast id of the second character, for a flow that stages two or a crowd.
+		#[arg(long)]
+		friend: Option<String>,
+		/// The story flow to start from, from `fables flow list` (default: the world's
+		/// recipe.md, or three-tries when it has none).
+		#[arg(long)]
+		flow: Option<String>,
 		/// The author on the title page. Defaults to the world's `author` in world.toml.
 		#[arg(long)]
 		author: Option<String>,
 		/// Where books live (default: the world's stories/ folder).
 		#[arg(long)]
 		dir: Option<PathBuf>,
+	},
+	/// Choose a story flow: a laid-out shape a new book can start from.
+	Flow {
+		#[command(subcommand)]
+		action: FlowAction,
 	},
 	/// Start a world, and add characters to one.
 	World {
@@ -96,7 +109,7 @@ enum Command {
 	/// Add a character to a world's cast.
 	Character {
 		#[command(subcommand)]
-		action: CharacterAction,
+		action: Box<CharacterAction>,
 	},
 	/// Start a world's own setting, blank or from one it already uses.
 	Setting {
@@ -169,6 +182,11 @@ enum Command {
 		#[command(subcommand)]
 		action: PuppetAction,
 	},
+	/// Work with props (the world's `props/`): what a character can hold or stand on stage.
+	Prop {
+		#[command(subcommand)]
+		action: PropAction,
+	},
 	/// Serve the studio to an agent over MCP (stdio): worlds, styles and characters, with
 	/// model sheets returned as images.
 	Mcp,
@@ -234,6 +252,19 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum FlowAction {
+	/// List the story flows: what each is for, how many characters it stages and its length.
+	List,
+	/// Show a flow's beats as a table.
+	///
+	/// Example: `fables flow show three-tries`
+	Show {
+		/// The flow's name, from `fables flow list`.
+		name: String,
+	},
+}
+
+#[derive(Subcommand)]
 enum WorldAction {
 	/// Start a world: a world.toml, an empty cast with a commented example, and stories/.
 	///
@@ -287,6 +318,19 @@ enum CharacterAction {
 		/// The pattern on the top, in the trim colour: plain, stripes, dots or star.
 		#[arg(long)]
 		pattern: Option<String>,
+		/// A hairdo their style draws on their body (`fables style describe` lists them). Left
+		/// out, one is picked from their id.
+		#[arg(long)]
+		hair: Option<String>,
+		/// How heavily built they are. Left out, one is picked from their id.
+		#[arg(long, value_parser = ["slim", "plain", "stout"])]
+		build: Option<String>,
+		/// Brows their style draws; left out, the style's own.
+		#[arg(long)]
+		brows: Option<String>,
+		/// A nose their style draws, or `none`; left out, the style's own.
+		#[arg(long)]
+		nose: Option<String>,
 		/// Also write their part file from the style's template, so it can be redrawn.
 		#[arg(long)]
 		draw: bool,
@@ -369,6 +413,23 @@ enum PuppetAction {
 		id: String,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
+	},
+}
+
+#[derive(Subcommand)]
+enum PropAction {
+	/// Every prop the world can use, with where it comes from, its hands, its carry and its grip.
+	List,
+	/// Start a world's own prop to redraw, from a built-in or another prop.
+	New {
+		/// The prop's name: lowercase words joined by hyphens.
+		name: String,
+		/// A prop to start from (to redraw it); leave it out for a plain shape.
+		#[arg(long)]
+		from: Option<String>,
+		/// A line on what the thing is.
+		#[arg(long, default_value = "")]
+		about: String,
 	},
 }
 
@@ -473,9 +534,32 @@ fn run(cli: Cli) -> Result<()> {
 		Command::New {
 			title,
 			star,
+			friend,
+			flow,
 			author,
 			dir,
-		} => new_story(&world()?, &title, &star, author.as_deref(), dir.as_deref()),
+		} => {
+			new_story(
+				&world()?,
+				&title,
+				&star,
+				friend.as_deref(),
+				flow.as_deref(),
+				author.as_deref(),
+				dir.as_deref(),
+			)
+		}
+		Command::Flow { action } => {
+			let world = match flag {
+				Some(dir) => Some(World::load(dir)?),
+				None => World::find(&root).ok(),
+			};
+
+			match action {
+				FlowAction::List => flow_list(world.as_ref()),
+				FlowAction::Show { name } => flow_show(world.as_ref(), &name),
+			}
+		}
 		Command::World { action } => {
 			match action {
 				WorldAction::New {
@@ -487,7 +571,7 @@ fn run(cli: Cli) -> Result<()> {
 			}
 		}
 		Command::Character { action } => {
-			match action {
+			match *action {
 				CharacterAction::New {
 					id,
 					name,
@@ -501,9 +585,13 @@ fn run(cli: Cli) -> Result<()> {
 					shoes,
 					eyes,
 					pattern,
+					hair,
+					build,
+					brows,
+					nose,
 					draw,
 				} => {
-					let build = if kind == "grown-up" {
+					let kind = if kind == "grown-up" {
 						BuildName::GrownUp
 					} else {
 						BuildName::Kid
@@ -511,7 +599,11 @@ fn run(cli: Cli) -> Result<()> {
 					let brief = CharacterBrief {
 						id,
 						name,
-						build,
+						kind,
+						build: build.as_deref().map(physique_name).transpose()?,
+						hair,
+						brows,
+						nose,
 						born: None,
 						about,
 						habit: None,
@@ -578,6 +670,14 @@ fn run(cli: Cli) -> Result<()> {
 					)
 				}
 				PuppetAction::Sheet { id, out } => puppet_sheet(&world()?, &id, &out),
+			}
+		}
+		Command::Prop { action } => {
+			match action {
+				PropAction::List => prop_list(&world()?),
+				PropAction::New { name, from, about } => {
+					prop_new(&world()?, &name, from.as_deref(), &about)
+				}
 			}
 		}
 		Command::Mcp => fables::mcp::serve(&root),
@@ -869,56 +969,17 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	Ok(())
 }
 
-/// The age band every new book is read aloud to until its author says otherwise.
-const NEW_BOOK_AGE: &str = "3-5";
-
-/// Gives a new book the default `age` in its front matter. Every new book's text passes here,
-/// whether it came from the world's `recipe.md` or from the built-in flow that starts a book
-/// in a world without one, so both paths get the band; a recipe that names its own `age`
-/// keeps it.
-fn with_default_age(script: String) -> String {
-	let front = script.split("\n+++").next().unwrap_or(&script);
-	let names_age = front.lines().skip(1).any(|line| {
-		line.trim()
-			.strip_prefix("age")
-			.is_some_and(|rest| rest.trim_start().starts_with('='))
-	});
-
-	if names_age {
-		return script;
-	}
-
-	match script.find("\n+++") {
-		Some(end) => {
-			format!(
-				"{}\nage = \"{NEW_BOOK_AGE}\"{}",
-				&script[..end],
-				&script[end..]
-			)
-		}
-		None => script,
-	}
-}
-
-/// Starts a book from the world's recipe, filled in with a title, a star and an author.
+/// Starts a book from a story flow (or the world's recipe), filled in with a title, a star and
+/// an author.
 fn new_story(
 	world: &World,
 	title: &str,
 	star: &str,
+	friend: Option<&str>,
+	flow: Option<&str>,
 	author: Option<&str>,
 	dir: Option<&Path>,
 ) -> Result<()> {
-	let author = author.or(world.author.as_deref()).with_context(|| {
-		"no author for the title page: pass --author, or set author in the world's world.toml"
-	})?;
-	let recipe = world.recipe().with_context(|| {
-		format!(
-			"{} has no recipe.md to start a book from",
-			world.dir.display()
-		)
-	})?;
-	let recipe = std::fs::read_to_string(&recipe)
-		.with_context(|| format!("could not read {}", recipe.display()))?;
 	let slug = fables::story::slugify(title);
 	anyhow::ensure!(
 		!slug.is_empty(),
@@ -936,22 +997,13 @@ fn new_story(
 		);
 	}
 
-	let year = 1970
-		+ std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map_or(0, |elapsed| elapsed.as_secs() / 31_556_952);
-	let script = with_default_age(
-		recipe
-			.replace("{{title}}", title)
-			.replace("{{star}}", star)
-			.replace("{{author}}", author)
-			.replace("{{year}}", &year.to_string()),
-	);
+	let started = fables::flow::start(world, title, star, friend, flow, author)?;
 
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
-	std::fs::write(&path, script).with_context(|| format!("could not write {}", path.display()))?;
-	say!("✓ wrote {} from the {} recipe", path.display(), world.name)?;
+	std::fs::write(&path, started.script)
+		.with_context(|| format!("could not write {}", path.display()))?;
+	say!("✓ wrote {} from {}", path.display(), started.source)?;
 
 	if let Err(error) =
 		load(&path, None, Some(&world.dir)).and_then(|(story, cast, _)| check(&story, &cast, true))
@@ -965,6 +1017,68 @@ fn new_story(
 	}
 
 	Ok(())
+}
+
+/// Prints the story flows a book can start from, and what each is for.
+fn flow_list(world: Option<&World>) -> Result<()> {
+	for flow in fables::flow::list(world)? {
+		say!("{} ({})", flow.name, flow.slug)?;
+		say!(
+			"  {}, {} story pages, {} words",
+			flow.needs.line(),
+			pages(flow.pages),
+			pages(flow.words)
+		)?;
+		say!("  {}", flow.about)?;
+		say!("  good for: {}", flow.good_for)?;
+	}
+
+	Ok(())
+}
+
+/// Prints one flow's beats as a table.
+fn flow_show(world: Option<&World>, name: &str) -> Result<()> {
+	let flow = fables::flow::find(world, name)?;
+	say!("{} ({})", flow.name, flow.slug)?;
+	say!(
+		"  {}, {} story pages, {} words",
+		flow.needs.line(),
+		pages(flow.pages),
+		pages(flow.words)
+	)?;
+	say!("  {}", flow.about)?;
+	say!("  good for: {}", flow.good_for)?;
+	say!("")?;
+
+	let width = flow
+		.beats
+		.iter()
+		.map(|beat| beat.name.len())
+		.max()
+		.unwrap_or(4)
+		.max(4);
+	say!("  {:<width$}  {:>5}  {:>7}", "beat", "pages", "words")?;
+
+	for beat in &flow.beats {
+		say!(
+			"  {:<width$}  {:>5}  {:>7}",
+			beat.name,
+			beat.pages,
+			pages((beat.words[0], beat.words[1]))
+		)?;
+		say!("    {}", beat.note)?;
+	}
+
+	Ok(())
+}
+
+/// A page or word range as `13–17`, or `15` when both ends agree.
+fn pages((min, max): (usize, usize)) -> String {
+	if min == max {
+		min.to_string()
+	} else {
+		format!("{min}–{max}")
+	}
 }
 
 /// Starts a world under `<root>/worlds/`, and says what to make next.
@@ -997,6 +1111,16 @@ fn world_new(
 	Ok(())
 }
 
+/// The build `--build` names. Clap only lets the three through.
+fn physique_name(name: &str) -> Result<PhysiqueName> {
+	match name {
+		"slim" => Ok(PhysiqueName::Slim),
+		"plain" => Ok(PhysiqueName::Plain),
+		"stout" => Ok(PhysiqueName::Stout),
+		other => anyhow::bail!("unknown build `{other}`; use slim, plain or stout"),
+	}
+}
+
 /// Adds a character to a world's cast, drawn from its style's template.
 fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
 	let report = fables::studio::create_character(world, brief)?;
@@ -1010,7 +1134,7 @@ fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
 		Some("template") => {
 			format!(
 				"drawn from {}",
-				world.style()?.template_origin(brief.build.build())
+				world.style()?.template_origin(brief.kind.build())
 			)
 		}
 		_ => "drawn by the parametric puppet".to_owned(),
@@ -1051,7 +1175,15 @@ fn setting_new(world: &World, name: &str, from: Option<&str>, about: Option<&str
 fn style_describe(name: &str) -> Result<()> {
 	let report = Studio::describe_style(name)?;
 	say!("{}: {}", report.name, report.description)?;
-	say!("page skin: {}", report.skin)?;
+	say!(
+		"page skin: {} · text card: {}{}",
+		report.skin,
+		report.card,
+		report
+			.transition
+			.map(|transition| format!(" · page turn: {transition}"))
+			.unwrap_or_default()
+	)?;
 	let finish = &report.finish;
 	say!(
 		"finish: line {}, detail {}, light ({}, {}), cel shadow {}, far {}",
@@ -1080,9 +1212,24 @@ fn style_describe(name: &str) -> Result<()> {
 			body.template,
 			body.template_parts
 		)?;
+
+		for (field, offers) in [
+			("hair", &body.hair),
+			("brows", &body.brows),
+			("nose", &body.noses),
+		] {
+			say!("    {field:<6} {}", offers.join(", "))?;
+		}
+
+		say!("    {:<6} {}", "build", body.builds.join(", "))?;
 	}
 
 	say!("  (`kind = \"grown-up\"` in the cast file puts a person on the grown-up body)")?;
+	say!(
+		"  (a cast picks each with `hair`, `brows`, `nose` and `build`; the first is the style's \
+		 own, and without a `hair` or `build` a template-drawn person gets one picked from their \
+		 id)"
+	)?;
 
 	say!("parts (name, views, need, home, space):")?;
 
@@ -1115,8 +1262,8 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 	if let Some(name) = style {
 		if Style::parse(name).is_none() {
 			anyhow::bail!(
-				"unknown page skin `{name}`; use riso, tv, bold, cut-paper, crayon, storybook or \
-				 clear (for drawing styles, run `fables style list`)"
+				"unknown page skin `{name}`; use {} (for drawing styles, run `fables style list`)",
+				StyleName::ALL.map(|(name, _)| name).join(", ")
 			);
 		}
 
@@ -1145,6 +1292,10 @@ fn check(story: &Story, cast: &Cast, notes: bool) -> Result<()> {
 		for note in &report.notes {
 			say!("  note: {note}")?;
 		}
+	}
+
+	if let Some(padding) = &report.padding {
+		say!("  note: {padding}")?;
 	}
 
 	if story.age.is_none() {
@@ -1245,6 +1396,20 @@ fn sheets(
 	)?;
 	done(&path, started)?;
 
+	// Every prop the world can use: each alone and in the first figure's hand.
+	let path = out.join(format!("{slug}-props.png"));
+	std::fs::write(
+		&path,
+		raster::png(&press::sheets::props_sheet(
+			&*world.props()?,
+			&cast,
+			&world.style()?,
+			&world.name,
+			style,
+		)?)?,
+	)?;
+	done(&path, started)?;
+
 	// One setting with one cast member, drawn under every light: the world's colour script.
 	let settings = world.settings()?;
 	let own = settings
@@ -1340,6 +1505,46 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 	)?;
 	done(&acting, started)?;
 
+	Ok(())
+}
+
+/// Every prop the world can use: its name, source, hands, carry, grip and what it is.
+fn prop_list(world: &World) -> Result<()> {
+	for prop in fables::studio::list_props(world)? {
+		say!(
+			"{:<12} {:<9} {:<4} {:<6} grip {:.0},{:.0}  {}",
+			prop.name,
+			prop.from,
+			prop.hands,
+			prop.carry,
+			prop.grip[0],
+			prop.grip[1],
+			prop.about
+		)?;
+	}
+
+	Ok(())
+}
+
+/// Starts a world's own prop file, a copy of one it can use or a plain shape.
+fn prop_new(world: &World, name: &str, from: Option<&str>, about: &str) -> Result<()> {
+	let prop = fables::studio::create_prop(world, name, about, from)?;
+	say!(
+		"✓ created `{}` in {} ({} hand{}, grip {:.0},{:.0})",
+		prop.name,
+		world
+			.dir
+			.join("props")
+			.join(format!("{name}.svg"))
+			.display(),
+		prop.hands,
+		if prop.hands == "one" { "" } else { "s" },
+		prop.grip[0],
+		prop.grip[1]
+	)?;
+	say!(
+		"  next: redraw its parts with the prop tools over MCP, then `holds={name}` or `@{name}`"
+	)?;
 	Ok(())
 }
 
@@ -1541,7 +1746,8 @@ fn audition(world: &World, who: &str, line: &str, mood: Option<&str>, out: &Path
 
 fn style_check(name: &str) -> Result<()> {
 	let pack = StylePack::named(name)?;
-	let findings = pack.check();
+	let mut findings = pack.check();
+	findings.extend(fables::art::puppet::props_clear_of_the_face(&pack));
 	let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
 	say!(
 		"{name}: {} kit parts, {} kid and {} grown-up template parts, bodies: {}",
@@ -1572,7 +1778,7 @@ fn style_sheet(name: &str, out: &Path) -> Result<()> {
 	let dir = out.join("styles");
 	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
 
-	for (kind, image) in ["model", "parts"]
+	for (kind, image) in ["model", "parts", "variants"]
 		.iter()
 		.zip(Studio::style_sheets(name, 2600)?)
 	{
@@ -1760,7 +1966,7 @@ mod tests {
 	/// Runs `new_story` and reads the book it wrote.
 	fn new_book(world: &World, author: Option<&str>) -> Result<String> {
 		let path = world.stories().join("a-new-tale/story.md");
-		new_story(world, "A New Tale", "mo", author, None)?;
+		new_story(world, "A New Tale", "mo", None, None, author, None)?;
 		Ok(std::fs::read_to_string(path)?)
 	}
 
@@ -1792,6 +1998,65 @@ mod tests {
 	}
 
 	#[test]
+	fn a_world_without_a_recipe_starts_from_the_default_flow() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"A. Writer\"\n");
+		std::fs::remove_file(world.dir.join("recipe.md")).unwrap();
+
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("flow = \"three-tries\""), "{script}");
+		assert!(script.contains("title = \"A New Tale\""), "{script}");
+	}
+
+	#[test]
+	fn a_named_flow_starts_from_that_flow() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"A. Writer\"\n");
+		let path = world.stories().join("a-new-tale/story.md");
+		new_story(
+			&world,
+			"A New Tale",
+			"mo",
+			None,
+			Some("gag-short"),
+			None,
+			None,
+		)
+		.unwrap();
+		let script = std::fs::read_to_string(path).unwrap();
+
+		assert!(script.contains("flow = \"gag-short\""), "{script}");
+		assert_eq!(script.matches("\n# ").count(), 7, "{script}");
+	}
+
+	#[test]
+	fn a_flow_that_needs_a_friend_without_one_names_the_flow_and_its_cast() {
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"A. Writer\"\n");
+		std::fs::write(
+			world.cast_file(),
+			"[mo]\nname = \"Mo\"\n[nan]\nname = \"Nan\"\nkind = \"grown-up\"\n",
+		)
+		.unwrap();
+
+		let error = format!(
+			"{:#}",
+			new_story(
+				&world,
+				"A New Tale",
+				"mo",
+				None,
+				Some("odd-couple"),
+				None,
+				None
+			)
+			.unwrap_err()
+		);
+		assert!(error.contains("two characters"), "{error}");
+		assert!(error.contains("mo, nan"), "{error}");
+	}
+
+	#[test]
 	fn a_new_book_starts_at_the_default_age() {
 		let dir = tempfile::tempdir().unwrap();
 		let world = new_world(dir.path(), "author = \"World Author\"\n");
@@ -1802,9 +2067,17 @@ mod tests {
 
 	#[test]
 	fn a_recipe_that_names_its_own_age_keeps_it() {
-		let own = "+++\ntitle = \"T\"\nage = \"5-7\"\n+++\n\n# park\nHi.\n";
-		assert_eq!(with_default_age(own.to_owned()), own);
-		let tight = "+++\ntitle = \"T\"\nage=\"under-3\"\n+++\n";
-		assert_eq!(with_default_age(tight.to_owned()), tight);
+		let dir = tempfile::tempdir().unwrap();
+		let world = new_world(dir.path(), "author = \"World Author\"\n");
+		std::fs::write(
+			world.dir.join("recipe.md"),
+			"+++\ntitle = \"{{title}}\"\nauthor = \"{{author}}\"\nstar = \"{{star}}\"\nage = \
+			 \"5-7\"\n+++\n\n# park\nHi.\n",
+		)
+		.unwrap();
+
+		let script = new_book(&world, None).unwrap();
+		assert!(script.contains("age = \"5-7\""), "{script}");
+		assert_eq!(script.matches("\nage").count(), 1, "{script}");
 	}
 }

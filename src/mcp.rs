@@ -29,9 +29,11 @@ use crate::studio::Frames;
 use crate::studio::Image;
 use crate::studio::Output;
 use crate::studio::PartData;
+use crate::studio::PropPart;
 use crate::studio::SettingPart;
 use crate::studio::SettingWeather;
 use crate::studio::SheetKind;
+use crate::studio::StoryBrief;
 use crate::studio::Studio;
 use crate::studio::VideoShape;
 use crate::studio::VoiceChoice;
@@ -71,9 +73,12 @@ fables is a studio for illustrated books and cartoons. A world (a series) has a 
 
 To design a character:
 1. `world_list`, or `world_create` for a new series.
-2. `style_describe` to learn the parts a figure is drawn with and the space each is drawn in.
-3. `character_create` with who they are and their colours. Their parts start as the style's \
-	 template for their build: a grown-up's are cut for a grown-up.
+2. `style_describe` to learn the parts a figure is drawn with, the space each is drawn in, and the \
+	 hair, brows, noses and builds each body offers.
+3. `character_create` with who they are, their colours, and their `kind` (kid or grown-up), \
+	 `hair`, `build`, `brows` and `nose`. Their parts start as the style's template for their \
+	 body (a grown-up's are cut for a grown-up) with those variants; without a `hair` or `build`, \
+	 one is picked from their id and written into the cast.
 4. `character_sheet` to see them. `character_parts` reads parts back as SVG path data (name kit \
 	 parts to see the shared ones).
 5. `character_set_parts` to redraw parts, then look at the sheet again. Repeat until they read as \
@@ -86,16 +91,20 @@ To make a book:
 1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
 	 mixing, sound and workflow.
 2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
-3. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
+3. `flow_list` shows the story flows a book can take, with each one's page and word budgets; \
+	 `flow_describe` prints one flow's beats. `story_start` returns the whole laid-out story.md \
+	 for a flow, with the star and friend staged; fill in the [bracketed] lines and `story_write` \
+	 it.
+4. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
 	 pages that start `# setting`, with narration and `@actor` stage directions). It is checked \
 	 against the cast and refused, with the line to fix, if it doesn't work. `story_read` reads \
 	 one back, for example a world's existing books, to learn the format.
-4. `story_review` critiques it the way a director would: findings with line numbers and \
+5. `story_review` critiques it the way a director would: findings with line numbers and \
 	 suggestions, never a refusal. `storyboard_render` returns the board and its text shot list; \
 	 `storyboard_pin` writes that plan into the script as editable `@camera` lines; \
 	 `animatic_render` holds each shot for its real duration over the soundtrack; `video_frames` \
 	 shows moments in time.
-5. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
+6. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
 	 the ePub and KDP print files; `video_render` narrates and animates it.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -187,6 +196,28 @@ pub struct WriteStoryParams {
 	pub story: String,
 	/// The whole story.md.
 	pub script: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FlowParams {
+	pub world: String,
+	/// The flow's name, from `flow_list`: `three-tries`, `pile-up` and the rest.
+	pub flow: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StartStoryParams {
+	pub world: String,
+	/// The book's title.
+	pub title: String,
+	/// The cast id of the star.
+	pub star: String,
+	/// The cast id of the second character, for a flow that stages two or a crowd.
+	pub friend: Option<String>,
+	/// The flow to start from, from `flow_list`; the world's `recipe.md` when left out.
+	pub flow: Option<String>,
+	/// The author on the title page; the world's author when left out.
+	pub author: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -307,6 +338,36 @@ pub struct RenderSettingParams {
 	pub weather: SettingWeather,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PropParams {
+	pub world: String,
+	/// The prop's name, as `holds=` or a stage direction uses it (`holds=kite`).
+	pub prop: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreatePropParams {
+	pub world: String,
+	/// The new prop's name: lowercase words joined by hyphens.
+	pub prop: String,
+	/// A line on what the thing is.
+	pub about: String,
+	/// A prop to start from (to redraw it); leave out for a plain shape.
+	pub from: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetPropPartsParams {
+	pub world: String,
+	pub prop: String,
+	/// Parts to write or replace, each one SVG element.
+	#[serde(default)]
+	pub parts: Vec<PropPart>,
+	/// Part ids to remove.
+	#[serde(default)]
+	pub remove: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct SayVoice {
 	name: String,
@@ -419,9 +480,10 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "Describe a drawing style: its finish, its bodies, every part a figure is \
-		               drawn with (views, whether it's required, the coordinate space) and the \
-		               rules for drawing parts. Read this before drawing."
+		description = "Describe a drawing style: its finish, its bodies and the hair, brows, \
+		               noses and builds each offers, every part a figure is drawn with (views, \
+		               whether it's required, the coordinate space) and the rules for drawing \
+		               parts. Read this before drawing."
 	)]
 	#[expect(
 		clippy::unused_self,
@@ -432,8 +494,8 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "Show a style as images: its template character on a model sheet, and its \
-		               kit and template parts."
+		description = "Show a style as images: its template character on a model sheet, its kit \
+		               and template parts, and every hair, brows, nose and build it offers."
 	)]
 	#[expect(
 		clippy::unused_self,
@@ -473,9 +535,12 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "Add a character to a world's cast: their id, name, build (kid or \
-		               grown-up), who they are, their habit and colours. Their drawing starts as \
-		               the style's template for their build; redraw it with character_set_parts."
+		description = "Add a character to a world's cast: their id, name, kind (kid or grown-up), \
+		               who they are, their habit and colours, and the hair, build (slim, plain or \
+		               stout), brows and nose style_describe lists for their body. Their drawing \
+		               starts as the style's template for their body with those (any left out are \
+		               picked from the ones the cast uses least, and written into the cast); \
+		               redraw it with character_set_parts."
 	)]
 	fn character_create(
 		&self,
@@ -624,6 +689,98 @@ impl StudioServer {
 				.render_setting(&params.world, &params.setting, params.weather)
 				.map(|image| vec![image]),
 		)
+	}
+
+	#[tool(
+		description = "List the props a world's books can use, built-in and its own, with how \
+		               each is held: its hands, its grip and its carry (hand, up, front, string \
+		               or head)."
+	)]
+	fn prop_list(&self, Parameters(params): Parameters<WorldParams>) -> CallToolResult {
+		json(self.studio.props(&params.world))
+	}
+
+	#[tool(
+		description = "Start a world's own prop: a copy of one it can use (to redraw it), or a \
+		               plain shape. Props are SVG part files with a data-grip; prop_parts shows \
+		               the format."
+	)]
+	fn prop_create(&self, Parameters(params): Parameters<CreatePropParams>) -> CallToolResult {
+		json(self.studio.create_prop(
+			&params.world,
+			&params.prop,
+			&params.about,
+			params.from.as_deref(),
+		))
+	}
+
+	#[tool(
+		description = "Read a prop's parts as SVG elements. The root data-grip is the point in \
+		               the fist, data-hands says one or two, data-angle leans it in a relaxed \
+		               hand, and data-use=\"brush\" is a toothbrush's behaviour. Fills are \
+		               palette names or hex; data-shade, data-line and data-opacity tune each \
+		               part."
+	)]
+	fn prop_parts(&self, Parameters(params): Parameters<PropParams>) -> CallToolResult {
+		json(self.studio.prop_parts(&params.world, &params.prop))
+	}
+
+	#[tool(
+		description = "Write or replace parts of a world's own prop, each one SVG element, or \
+		               remove parts. A file that wouldn't read is not written."
+	)]
+	fn prop_set_parts(&self, Parameters(params): Parameters<SetPropPartsParams>) -> CallToolResult {
+		json(
+			self.studio
+				.set_prop_parts(&params.world, &params.prop, &params.parts, &params.remove),
+		)
+	}
+
+	#[tool(description = "Show a prop as an image, alone and fitted to the sheet, with its grip.")]
+	fn prop_render(&self, Parameters(params): Parameters<PropParams>) -> CallToolResult {
+		images(
+			self.studio
+				.render_prop(&params.world, &params.prop)
+				.map(|image| vec![image]),
+		)
+	}
+
+	#[tool(
+		description = "List the story flows a world's new books can start from: each one's name, \
+		               what it is for, how many characters it stages, its page and word budgets \
+		               and its beats. The world's own flows come before the built-ins."
+	)]
+	fn flow_list(&self, Parameters(params): Parameters<WorldParams>) -> CallToolResult {
+		json(self.studio.flows(&params.world))
+	}
+
+	#[tool(
+		description = "Describe one story flow: its about, what it is good for, the characters it \
+		               needs, its page and word budgets, and its beats as a table of what happens \
+		               over how many pages."
+	)]
+	fn flow_describe(&self, Parameters(params): Parameters<FlowParams>) -> CallToolResult {
+		json(self.studio.describe_flow(&params.world, &params.flow))
+	}
+
+	#[tool(
+		description = "Start a book from a story flow (or the world's recipe): returns the whole \
+		               story.md scaffold with the star and friend staged and every page laid out. \
+		               Fill in the [bracketed] lines, then write it with story_write."
+	)]
+	fn story_start(&self, Parameters(params): Parameters<StartStoryParams>) -> CallToolResult {
+		let brief = StoryBrief {
+			title: params.title,
+			star: params.star,
+			friend: params.friend,
+			flow: params.flow,
+			author: params.author,
+		};
+
+		match self.studio.start_story(&params.world, &brief) {
+			Ok(script) => CallToolResult::success(vec![ContentBlock::text(script)]),
+			Err(error) => failed(&error),
+		}
 	}
 
 	#[tool(
@@ -903,6 +1060,9 @@ mod tests {
 			"story_read",
 			"story_check",
 			"story_review",
+			"flow_list",
+			"flow_describe",
+			"story_start",
 			"book_render",
 			"page_render",
 			"video_render",
@@ -917,6 +1077,11 @@ mod tests {
 			"setting_parts",
 			"setting_set_parts",
 			"setting_render",
+			"prop_list",
+			"prop_create",
+			"prop_parts",
+			"prop_set_parts",
+			"prop_render",
 		] {
 			assert!(
 				names.iter().any(|listed| listed == name),
@@ -967,6 +1132,57 @@ mod tests {
 				assert!(text.text.contains("workflow"), "{}", text.text);
 			}
 			other => panic!("the error comes back as text: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn a_flow_lists_and_starts_a_book() {
+		let server = StudioServer::new(Path::new("."));
+		let listed = server.flow_list(Parameters(WorldParams {
+			world: "mumbleton".into(),
+		}));
+		assert_eq!(listed.is_error, Some(false));
+
+		match &listed.content[0] {
+			ContentBlock::Text(text) => {
+				assert!(text.text.contains("three-tries"), "{}", text.text);
+				assert!(text.text.contains("good_for"), "{}", text.text);
+			}
+			other => panic!("the flow list comes back as JSON text: {other:?}"),
+		}
+
+		let started = server.story_start(Parameters(StartStoryParams {
+			world: "mumbleton".into(),
+			title: "A Test Tale".into(),
+			star: "mo".into(),
+			friend: None,
+			flow: Some("three-tries".into()),
+			author: None,
+		}));
+		assert_eq!(started.is_error, Some(false));
+
+		match &started.content[0] {
+			ContentBlock::Text(text) => {
+				assert!(
+					text.text.contains("flow = \"three-tries\""),
+					"{}",
+					text.text
+				);
+				assert!(text.text.contains("@mo"), "{}", text.text);
+				assert!(
+					text.text.contains("[The star says what they want.]"),
+					"{}",
+					text.text
+				);
+				assert_eq!(
+					text.text.matches("\nage").count(),
+					1,
+					"one age line: {}",
+					text.text
+				);
+				assert!(text.text.contains("age = \"3-5\""), "{}", text.text);
+			}
+			other => panic!("the scaffold comes back as text: {other:?}"),
 		}
 	}
 

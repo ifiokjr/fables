@@ -11,6 +11,7 @@
 
 use std::f32::consts::PI;
 use std::f32::consts::TAU;
+use std::sync::Arc;
 
 use super::Bounds;
 use super::Color;
@@ -22,6 +23,8 @@ use super::lerp;
 use super::noise;
 use super::pack::StylePack;
 use super::palette;
+use super::props;
+use super::props::Carry;
 use super::pt;
 use super::puppet;
 use super::rig;
@@ -140,7 +143,7 @@ impl Look {
 	/// puppets will) without touching the stage, video or sheets.
 	pub fn frame(&self) -> Frame {
 		if let Some(authored) = &self.puppet {
-			Frame::authored(&authored.style, self.build)
+			Frame::of_body(&authored.style, &authored.body(self.build))
 		} else {
 			Frame::of(self.build)
 		}
@@ -231,13 +234,8 @@ pub enum Teeth {
 	Sparkly,
 }
 
-/// Something carried in the right hand.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Prop {
-	Toothbrush,
-	Parcel,
-	Jam,
-}
+/// A thing carried in a hand (see [`props`](super::props)).
+pub use super::props::Prop;
 
 /// A mouth shape for lip-sync, following the Preston Blair chart that most 2D studios (and the
 /// Rhubarb lip-sync tool) use: a handful of shapes is enough for speech to read clearly.
@@ -313,10 +311,17 @@ pub enum Pose {
 	Think,
 	ReachOut,
 	Pick,
+	/// One hand reaching high: catching something that has been thrown.
+	Catch,
 }
 
+/// How far a figure catching something turns towards it: no more than halfway round, so the
+/// hand it reaches up with, on that side, stays in front of the body and clear of the face
+/// instead of crossing it (a figure turned further raises its near hand instead).
+pub const CATCH_TURN: f32 = 0.15;
+
 impl Pose {
-	pub const ALL: [(&'static str, Pose); 15] = [
+	pub const ALL: [(&'static str, Pose); 16] = [
 		("idle", Pose::Idle),
 		("wave", Pose::Wave),
 		("point", Pose::Point),
@@ -332,6 +337,7 @@ impl Pose {
 		("think", Pose::Think),
 		("reach-out", Pose::ReachOut),
 		("pick", Pose::Pick),
+		("catch", Pose::Catch),
 	];
 
 	pub fn parse(name: &str) -> Option<Pose> {
@@ -411,6 +417,8 @@ impl Pose {
 				)
 			}
 			Pose::Pick => (idle, reach(Anchor::Nose, 0.0, 0.18)),
+			// A hand up and out above the head, open to catch what comes down.
+			Pose::Catch => (idle, reach(Anchor::Shoulder, 1.0, -1.3)),
 		}
 	}
 
@@ -426,6 +434,7 @@ impl Pose {
 			| Pose::CoverMouth
 			| Pose::Shrug
 			| Pose::Droop
+			| Pose::Catch
 			| Pose::ReachOut => (Open, Open),
 			Pose::Point | Pose::Pick => (Open, Point),
 			Pose::ArmsCrossed | Pose::Hips | Pose::Cheer | Pose::Brush => (Fist, Fist),
@@ -448,6 +457,10 @@ pub struct FigureState {
 	pub viseme: Option<Viseme>,
 	/// Where the eyes look: -1 (left) to 1 (right).
 	pub gaze: f32,
+	/// Where the eyes look up (-1) or down (1).
+	pub gaze_y: f32,
+	/// A `see=` direction holds the eyes: the listening and idle rules leave them alone.
+	pub gaze_locked: bool,
 	/// Head and face turn: -1 (left) to 1 (right).
 	pub facing: f32,
 	/// 0..1, eyelids closing for a blink.
@@ -469,7 +482,12 @@ pub struct FigureState {
 	/// Vertical squash for hops and bounces (1 = normal). Width compensates to keep volume.
 	pub squash: f32,
 	pub teeth: Teeth,
-	pub prop: Option<Prop>,
+	/// The thing this figure holds; several hands can meet at its grip (see [`props`]).
+	pub prop: Option<Arc<Prop>>,
+	/// How it is carried: the prop's own way while standing at ease, in the hand otherwise.
+	pub carry: Carry,
+	/// Standing at ease (the idle pose): a prop carried in the hand then leans out of the face.
+	pub at_ease: bool,
 	/// Seconds since the scene started, for little idle motions.
 	pub time: f32,
 }
@@ -577,9 +595,15 @@ impl Frame {
 		}
 	}
 
-	/// The measurements an authored puppet is drawn to (see [`puppet`](super::puppet)).
+	/// The measurements an authored puppet is drawn to (see [`puppet`](super::puppet)) on its
+	/// style's plain body for a build.
 	pub fn authored(style: &StylePack, build: Build) -> Frame {
-		let body = style.body(build);
+		Self::of_body(style, style.body(build))
+	}
+
+	/// The measurements an authored puppet in a style is drawn to on `body`, which may be built
+	/// slimmer or stouter than the style's plain one.
+	pub fn of_body(style: &StylePack, body: &puppet::Proportions) -> Frame {
 		let limbs = body.limbs;
 
 		Frame {
@@ -663,13 +687,48 @@ impl Frame {
 	}
 
 	fn resolve(&self, reach: Reach, side: f32, facing: f32) -> Pt {
-		self.anchor(reach.anchor, side, facing)
-			+ pt(side * reach.x * self.reach.x, reach.y * self.reach.y)
+		let target = self.anchor(reach.anchor, side, facing)
+			+ pt(side * reach.x * self.reach.x, reach.y * self.reach.y);
+
+		if reach.anchor == Anchor::Hip {
+			self.on_hip(target, side)
+		} else {
+			target
+		}
 	}
 
-	/// Hand positions for a named pose.
+	/// Where a hand reaching for the hip at `target` goes. An arm too short for its hand to get
+	/// there (a chibi's) would hang straight with the hand in the air beside the hip, so the hand
+	/// comes to the side of the waist instead, as low as the arm reaches with its elbow out.
+	fn on_hip(&self, target: Pt, side: f32) -> Pt {
+		/// How far the arm stretches to the waist, as a share of its length: short of straight,
+		/// so the elbow bends out.
+		const AKIMBO: f32 = 0.9;
+		let shoulder = self.shoulder(side);
+
+		if (target - shoulder).len() <= self.arm_len + self.hand_r {
+			return target;
+		}
+
+		// The wrist sits a hand's width out from the hip: the hand carries on in from it, along
+		// the forearm, to rest on the side of the waist.
+		let x = side * (self.anchor(Anchor::Hip, side, 0.0).x.abs() + self.hand_r * 2.0);
+		let across = x - shoulder.x;
+		let length = self.arm_len * AKIMBO;
+
+		pt(
+			x,
+			shoulder.y + (length * length - across * across).max(0.0).sqrt(),
+		)
+	}
+
+	/// Hand positions for a named pose. A catch reaches with the hand on the side the figure
+	/// turns to (see [`CATCH_TURN`]).
 	pub fn hands(&self, pose: Pose, facing: f32) -> (Pt, Pt) {
-		let (left, right) = pose.reaches();
+		let (left, right) = match pose.reaches() {
+			(idle, reaching) if pose == Pose::Catch && facing < 0.0 => (reaching, idle),
+			reaches => reaches,
+		};
 
 		(
 			self.resolve(left, -1.0, facing),
@@ -689,6 +748,7 @@ impl FigureState {
 		state.tilt = lerp(self.tilt, other.tilt, t);
 		state.facing = lerp(self.facing, other.facing, t);
 		state.gaze = lerp(self.gaze, other.gaze, t);
+		state.gaze_y = lerp(self.gaze_y, other.gaze_y, t);
 		state.mouth_open = lerp(self.mouth_open, other.mouth_open, t);
 		state.head_tilt = lerp(self.head_tilt, other.head_tilt, t);
 		state.brow_lift = lerp(self.brow_lift, other.brow_lift, t);
@@ -723,6 +783,8 @@ impl FigureState {
 			mouth_open: 0.0,
 			viseme: None,
 			gaze: 0.0,
+			gaze_y: 0.0,
+			gaze_locked: false,
 			facing: 0.0,
 			blink: 0.0,
 			tilt: 0.0,
@@ -735,6 +797,8 @@ impl FigureState {
 			squash: 1.0,
 			teeth: Teeth::Clean,
 			prop: None,
+			carry: Carry::Hand,
+			at_ease: false,
 			time: 0.0,
 		}
 	}
@@ -1468,7 +1532,10 @@ fn draw_eye(svg: &mut Svg, look: &Look, c: Pt, r: f32, side: f32, eyes: Eyes, st
 			} else {
 				rx * 0.72
 			};
-			let iris = c + pt(state.gaze * rx * 0.4, look_down + ry * 0.08);
+			let iris = c + pt(
+				state.gaze * rx * 0.4,
+				look_down + ry * 0.08 + state.gaze_y * ry * 0.3,
+			);
 			svg.fill(&Path::circle(iris, iris_r), look.eyes);
 			svg.fill(&Path::circle(iris, iris_r * 0.55), palette::INK);
 			svg.fill(
@@ -2268,7 +2335,7 @@ fn draw_arms(svg: &mut Svg, look: &Look, frame: &Frame, state: &FigureState, pos
 		draw_hand(svg, look, frame, hand, direction, side, shape, hand_color);
 
 		if side > 0.0
-			&& let Some(prop) = state.prop
+			&& let Some(prop) = &state.prop
 		{
 			draw_prop(svg, prop, hand, (hand - elbow).norm(), frame, state);
 		}
@@ -2370,120 +2437,94 @@ fn draw_hand(
 
 fn draw_prop(
 	svg: &mut Svg,
-	prop: Prop,
+	prop: &Prop,
 	hand: Pt,
 	direction: Pt,
 	frame: &Frame,
 	state: &FigureState,
 ) {
-	let r = frame.head_r;
+	// Props are drawn for the house hand's 33-unit fist; this puppet's hand may be a little
+	// bigger or smaller.
+	prop.draw_held(
+		svg,
+		&props::Held {
+			at: hand,
+			scale: frame.hand_r / 16.5,
+			along: direction,
+			side: 1.0,
+			mouth: frame.head + pt(state.facing * frame.head_r * 0.2, frame.head_r * 0.45),
+			time: state.time,
+			fist_size: 1.0,
+			angle: None,
+			ink: props::Ink::Skin,
+		},
+	);
+}
 
-	match prop {
-		Prop::Toothbrush => {
-			// While brushing the bristles sit in the mouth, so the handle points back out.
-			let brushing =
-				(hand - (frame.head + pt(state.facing * r * 0.2, r * 0.45))).len() < r * 0.9;
-			let dir = if brushing {
-				pt(-1.0, 0.0)
-			} else {
-				direction.perp().norm() * -1.0
-			};
-			let scrub = if brushing {
-				(state.time * 22.0).sin() * 8.0
-			} else {
-				0.0
-			};
-			let tip = hand + dir * (r * 0.75) + pt(scrub, 0.0);
-			let tail = hand - dir * (r * 0.35);
-			svg.inked_noodle(&Path::new().move_to(tail).line_to(tip), palette::TEAL, 14.0);
-			let head = Path::wobbly_poly(
-				&[
-					tip + pt(-12.0, -26.0),
-					tip + pt(12.0, -26.0),
-					tip + pt(12.0, -4.0),
-					tip + pt(-12.0, -4.0),
-				],
-				4.0,
-				1.0,
-				9,
-			);
-			svg.inked(&head, palette::WHITE);
-			let paste = Path::wobbly_ellipse(tip + pt(0.0, -34.0), 14.0, 9.0, 0.1, 10);
-			svg.inked(&paste, palette::MINT);
+/// Sets how a figure carries the prop it holds in `pose`: the prop's own way (`data-carry`)
+/// while it stands at ease, held up or in front with its hands placed for its own body. A pose
+/// that does something with the hands (`hold` shows a prop off, `reach-out` offers it) keeps
+/// them, with the prop in the fist, except a prop on a string, which floats from any hand, and
+/// a hat, which stays on the head. The parametric puppet carries everything in the hand.
+pub fn carry(look: &Look, pose: Pose, state: &mut FigureState) {
+	state.at_ease = pose == Pose::Idle;
 
-			if brushing {
-				for i in 0..5 {
-					let bubble = hand
-						+ pt(
-							-r * 0.6 + noise(77, i) * r * 0.3,
-							-r * 0.1 + noise(78, i) * r * 0.25,
-						);
-					let size = r
-						* (0.05 + noise(79, i).abs() * 0.05)
-						* (1.0 + (state.time * 6.0 + i as f32).sin() * 0.2);
-					svg.inked(&Path::circle(bubble, size), palette::WHITE);
-				}
-			}
-		}
-		Prop::Parcel => {
-			let c = hand + pt(0.0, -r * 0.25);
-			let parcel = Path::wobbly_poly(
-				&[
-					c + pt(-r * 0.45, -r * 0.35),
-					c + pt(r * 0.45, -r * 0.35),
-					c + pt(r * 0.45, r * 0.35),
-					c + pt(-r * 0.45, r * 0.35),
-				],
-				6.0,
-				2.0,
-				12,
-			);
-			svg.inked(&parcel, palette::TOFFEE);
-			svg.stroke(
-				&Path::new()
-					.move_to(c + pt(0.0, -r * 0.35))
-					.line_to(c + pt(0.0, r * 0.35)),
-				palette::TOMATO,
-				8.0,
-			);
-			svg.stroke(
-				&Path::new()
-					.move_to(c + pt(-r * 0.45, 0.0))
-					.line_to(c + pt(r * 0.45, 0.0)),
-				palette::TOMATO,
-				8.0,
-			);
-		}
-		Prop::Jam => {
-			let c = hand + pt(0.0, -r * 0.2);
-			let jar = Path::wobbly_poly(
-				&[
-					c + pt(-r * 0.3, -r * 0.3),
-					c + pt(r * 0.3, -r * 0.3),
-					c + pt(r * 0.32, r * 0.35),
-					c + pt(-r * 0.32, r * 0.35),
-				],
-				10.0,
-				1.5,
-				13,
-			);
-			svg.inked(&jar, palette::TOMATO);
-			let lid = Path::wobbly_poly(
-				&[
-					c + pt(-r * 0.34, -r * 0.48),
-					c + pt(r * 0.34, -r * 0.48),
-					c + pt(r * 0.34, -r * 0.3),
-					c + pt(-r * 0.34, -r * 0.3),
-				],
-				5.0,
-				1.0,
-				14,
-			);
-			svg.inked(&lid, palette::CREAM);
-			let label = Path::wobbly_ellipse(c + pt(0.0, r * 0.05), r * 0.2, r * 0.13, 0.05, 15);
-			svg.fill(&label, palette::CREAM);
-		}
+	let Some(prop) = state.prop.clone() else {
+		state.carry = Carry::Hand;
+		return;
+	};
+	let carry = match prop.carry {
+		Carry::Up | Carry::Front if pose != Pose::Idle => Carry::Hand,
+		carry => carry,
+	};
+	let Some(authored) = &look.puppet else {
+		state.carry = Carry::Hand;
+		return;
+	};
+
+	state.carry = carry;
+
+	if pose != Pose::Idle {
+		return;
 	}
+
+	if let Some((hands, shapes)) = puppet::carry_hands(
+		look,
+		authored,
+		&prop,
+		carry,
+		state.facing,
+		(state.hands, state.hand_shapes),
+	) {
+		state.hands = hands;
+		state.hand_shapes = shapes;
+	}
+}
+
+/// Draws only what a figure holds, placed exactly as [`draw`] would place it, for measuring.
+pub fn draw_held(svg: &mut Svg, look: &Look, state: &FigureState) {
+	if let Some(authored) = &look.puppet {
+		puppet::draw_held(svg, look, authored, state);
+		return;
+	}
+
+	let Some(prop) = &state.prop else {
+		return;
+	};
+	let frame = look.frame();
+	let lie_lift = state.lie * frame.head_r * 0.95;
+	let lie_turn = -state.lie * 90.0 * if state.facing < 0.0 { -1.0 } else { 1.0 };
+	let breathe =
+		1.0 + (state.time * 2.4 + look.seed as f32 % 7.0).sin() * 0.012 * (1.0 - state.lie);
+	let squash = state.squash * breathe;
+	let stretch = 1.0 / squash.max(0.2).sqrt();
+
+	svg.begin(&format!(
+		"translate(0 {:.1}) rotate({:.2}) rotate({:.2}) scale({stretch:.4} {squash:.4})",
+		-lie_lift, lie_turn, state.tilt
+	));
+	draw_prop(svg, prop, state.hands.1, pt(0.0, 1.0), &frame, state);
+	svg.end();
 }
 
 /// Smoothly blends two hand positions (used by the stage tweener).
@@ -2522,6 +2563,55 @@ mod tests {
 				(right - nose).len() < frame.head_r * 0.3,
 				"{build:?}: hand at {right:?}, nose at {nose:?}"
 			);
+		}
+	}
+
+	#[test]
+	fn hands_on_hips_reach_the_waist_on_every_body() {
+		use crate::art::pack::StylePack;
+		let mut brought_in = Vec::new();
+
+		for name in StylePack::names() {
+			let style = StylePack::named(name).unwrap();
+
+			for build in [Build::Kid, Build::Grownup] {
+				let frame = Frame::authored(&style, build);
+				let asked = frame.anchor(Anchor::Hip, 1.0, 0.0)
+					+ pt(0.5 * frame.reach.x, -0.15 * frame.reach.y);
+				let (_, hand) = frame.hands(Pose::Hips, 0.0);
+				let shoulder = frame.shoulder(1.0);
+
+				// An arm that reaches keeps its pose exactly; a short one is brought in to the
+				// waist, near enough for its elbow to bend out, and below the chest.
+				if (asked - shoulder).len() <= frame.arm_len + frame.hand_r {
+					assert_eq!(hand, asked, "{name} {build:?} reaches its hip");
+				} else {
+					brought_in.push(format!("{name} {build:?}"));
+					assert!(
+						(hand - shoulder).len() < frame.arm_len * 0.95,
+						"{name} {build:?}: hand at {hand:?} is out of reach"
+					);
+					assert!(
+						hand.y > frame.shoulder_y + (frame.body_bottom - frame.shoulder_y) * 0.5,
+						"{name} {build:?}: hand at {hand:?} is above the waist"
+					);
+					assert!(
+						hand.x > frame.anchor(Anchor::Hip, 1.0, 0.0).x,
+						"{name} {build:?}: hand at {hand:?} is inside the body"
+					);
+				}
+			}
+		}
+
+		// Only chibi's short arms need it, so no other style's pose moves.
+		assert_eq!(brought_in, ["chibi Kid", "chibi Grownup"]);
+
+		// The parametric puppet's arms reach.
+		for build in [Build::Kid, Build::Grownup] {
+			let frame = Frame::of(build);
+			let asked = frame.anchor(Anchor::Hip, -1.0, 0.0)
+				+ pt(-0.5 * frame.reach.x, -0.15 * frame.reach.y);
+			assert_eq!(frame.hands(Pose::Hips, 0.0).0, asked, "{build:?}");
 		}
 	}
 

@@ -71,10 +71,11 @@ fn spans(cell: &str) -> Vec<(String, String)> {
 /// A value the table writes as a placeholder, replaced with one the parser accepts.
 fn value_for(key: &str, value: &str) -> String {
 	match value {
+		"<prop>" => "kite".into(),
 		"" | "…" | "<seconds>" | "<actor>" | "<actor>,<actor>" => {
 			match key {
 				"look" => "0.5,0.5".into(),
-				"on" => "stinky".into(),
+				"on" | "see" | "tether" => "stinky".into(),
 				"shot" => "close".into(),
 				"move" => "push".into(),
 				"over" => "2".into(),
@@ -142,7 +143,7 @@ fn stage_directions() -> Vec<String> {
 				key = Some(name.to_owned());
 			} else if gap.trim() == "/" {
 				if let Some(name) = &key {
-					tokens.push(format!("{name}={span}"));
+					tokens.push(format!("{name}={}", value_for(name, &span)));
 				}
 			} else if words && !span.chars().all(|ch| ch.is_ascii_digit() || ch == '.') {
 				// A bare number is a range's upper bound (`shake=0`–`1`), not a word.
@@ -159,7 +160,8 @@ fn parses(script: &str) -> Result<(), String> {
 	let source = format!("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n{script}");
 	let story = story::parse(&source).map_err(|error| format!("{error:#}"))?;
 	let page = &story.pages[0];
-	let mut scene = Scene::for_page(page, &story.settings).map_err(|error| format!("{error:#}"))?;
+	let mut scene = Scene::for_page(page, &story.settings, &story.props)
+		.map_err(|error| format!("{error:#}"))?;
 	let cast =
 		Cast::parse("[stinky]\nname = \"Stinky\"\n").map_err(|error| format!("{error:#}"))?;
 	let mut memory = HashMap::new();
@@ -227,15 +229,15 @@ fn every_documented_stage_direction_word_key_and_value_parses() {
 		let mut failures = Vec::new();
 		let mut accepted = false;
 
-		// A direction is written on an actor, `@scene` or `@camera`; a documented token needs
-		// only one of them to understand it.
-		for actor in ["stinky", "scene", "camera"] {
-			match parses(&format!("# park\n@{actor} {token}\n")) {
+		// A direction is written on an actor, `@scene`, `@camera` or a prop standing on the
+		// stage beside Stinky; a documented token needs only one of them to understand it.
+		for lines in ["@stinky", "@scene", "@camera", "@stinky\n@kite"] {
+			match parses(&format!("# park\n{lines} {token}\n")) {
 				Ok(()) => {
 					accepted = true;
 					break;
 				}
-				Err(error) => failures.push(format!("@{actor}: {error}")),
+				Err(error) => failures.push(format!("{lines}: {error}")),
 			}
 		}
 
@@ -271,5 +273,70 @@ fn every_documented_comment_form_parses() {
 	for direction in &directions {
 		parses(&format!("# park\n{direction}\n"))
 			.unwrap_or_else(|error| panic!("{direction}: {error}"));
+	}
+}
+
+/// The variants table: every word it documents is drawn by some style's body, and every word a
+/// style's body offers is documented.
+#[test]
+fn every_documented_variant_is_drawn_and_every_drawn_one_documented() {
+	use fables::art::figure::Build;
+	use fables::art::pack::StylePack;
+	use fables::art::parts::Feature;
+
+	let rows = table("### Variants");
+	let words = |field: &str| -> Vec<String> {
+		let (_, meaning) = rows
+			.iter()
+			.find(|(name, _)| name == &format!("`{field}`"))
+			.unwrap_or_else(|| panic!("the variants table has no `{field}` row"));
+		spans(meaning)
+			.into_iter()
+			.map(|(_, span)| span)
+			.filter(|span| !span.contains(' '))
+			.collect()
+	};
+
+	for field in ["hair", "build", "brows", "nose"] {
+		let documented = words(field);
+		let mut drawn = Vec::new();
+
+		for name in StylePack::names() {
+			let style = StylePack::named(name).unwrap();
+
+			for (kind, build) in [("kid", Build::Kid), ("grown-up", Build::Grownup)] {
+				let offers: Vec<String> = match field {
+					"hair" => style.offers(build, Feature::Hair),
+					"brows" => style.offers(build, Feature::Brows),
+					"nose" => style.offers(build, Feature::Nose),
+					_ => vec!["slim", "plain", "stout"],
+				}
+				.into_iter()
+				.map(str::to_owned)
+				.collect();
+
+				for offer in &offers {
+					assert!(
+						documented.contains(offer),
+						"{name} {kind}: `{field} = \"{offer}\"` is drawn but not documented"
+					);
+					let cast = format!(
+						"[pip]\nname = \"Pip\"\nkind = \"{kind}\"\n{field} = \"{offer}\"\n"
+					);
+					Cast::parse_in(&cast, std::path::Path::new(""), &style).unwrap_or_else(
+						|error| panic!("{name} {kind}: {field} {offer}: {error:#}"),
+					);
+				}
+
+				drawn.extend(offers);
+			}
+		}
+
+		for word in &documented {
+			assert!(
+				drawn.contains(word),
+				"`{field} = \"{word}\"` is documented but no style draws it"
+			);
+		}
 	}
 }

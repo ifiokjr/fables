@@ -30,6 +30,7 @@ use crate::art::dials::Palette;
 use crate::art::dials::Tone;
 use crate::art::light::Light;
 use crate::art::settings::Library;
+use crate::art::style::Card;
 use crate::art::style::Style;
 use crate::art::style::StyleName;
 use crate::video::audio::Music;
@@ -256,6 +257,10 @@ pub struct Meta {
 	/// The cast member drawn on the cover.
 	#[serde(default)]
 	pub star: Option<String>,
+	/// The story flow the book was started from (`fables new --flow`, or a world's own flow):
+	/// `three-tries`, `pile-up`, `there-and-back` and the rest of `fables flow list`.
+	#[serde(default)]
+	pub flow: Option<String>,
 	/// The world the book belongs to, as a folder relative to the script. Defaults to the
 	/// nearest `world.toml` above the script (see [`world`](crate::world)).
 	#[serde(default)]
@@ -275,11 +280,15 @@ pub struct Meta {
 	pub light: Option<String>,
 	#[serde(default)]
 	pub cover: Option<CoverSpec>,
-	/// The page skin: riso, tv, bold, cut-paper, crayon, storybook or clear. This is the
+	/// The page skin: riso, tv, bold, cut-paper, crayon, storybook, clear, shadow or card. This is the
 	/// printing look, not the drawing style; without it, the world's drawing style names the
 	/// skin that suits it (default riso).
 	#[serde(default)]
 	pub style: Option<String>,
+	/// What the words sit on: `paper` or `caption`. Without it, the world's drawing style
+	/// says (`[page] card` in its `style.toml`, default paper).
+	#[serde(default)]
+	pub card: Option<Card>,
 	/// The narrator; without one, the world's narrator reads (see [`Story::narrator`]).
 	#[serde(default)]
 	pub voice: Option<Voice>,
@@ -645,6 +654,8 @@ pub struct Story {
 	pub skin: Option<String>,
 	/// The settings its pages can use: the built-in ones and its world's.
 	pub settings: Arc<Library>,
+	/// The props its actors can hold or stand on stage: the built-in ones and its world's.
+	pub props: Arc<crate::art::props::Library>,
 	/// The light pages start in when their heading says nothing (`light = "dawn"` in front
 	/// matter, or the world's default).
 	pub light: Light,
@@ -661,6 +672,8 @@ pub struct Drawing {
 	pub tone: Tone,
 	pub palette: Palette,
 	pub motion: Motion,
+	/// What the words sit on, unless the book's own `card` says.
+	pub card: Card,
 }
 
 impl Story {
@@ -696,6 +709,7 @@ impl Story {
 			.unwrap_or_default();
 		style.finish.tone = (self.drawing.fill == Fill::Screentone).then_some(self.drawing.tone);
 		style.finish.palette = (self.drawing.fill == Fill::Palette).then_some(self.drawing.palette);
+		style.card = self.meta.card.unwrap_or(self.drawing.card);
 		style
 	}
 
@@ -770,12 +784,13 @@ pub fn parse(source: &str) -> Result<Story> {
 		drawing: Drawing::default(),
 		skin: None,
 		settings: Library::built_in(),
+		props: crate::art::props::Library::built_in(),
 		light,
 		age,
 	})
 }
 
-fn split_front_matter(source: &str) -> Result<(&str, &str, usize)> {
+pub(crate) fn split_front_matter(source: &str) -> Result<(&str, &str, usize)> {
 	let Some(rest) = source.trim_start().strip_prefix("+++") else {
 		bail!("a story must begin with TOML front matter between `+++` lines");
 	};
@@ -1589,6 +1604,18 @@ Hello.
 		assert!(
 			message.contains("line 5") && message.contains("0 to 60"),
 			"{message}"
+		);
+	}
+
+	#[test]
+	fn a_card_the_page_cannot_draw_is_an_error_naming_the_ones_it_can() {
+		let error = format!(
+			"{:#}",
+			parse("+++\ntitle = \"T\"\ncard = \"plaque\"\n+++\n# plain\nHi.\n").unwrap_err()
+		);
+		assert!(
+			error.contains("plaque") && error.contains("paper") && error.contains("caption"),
+			"{error}"
 		);
 	}
 }

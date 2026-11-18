@@ -24,6 +24,13 @@ while IFS= read -r style; do
 	"${fables[@]}" style check "${style%% *}"
 done < <("${fables[@]}" style list)
 
+echo "props"
+# Every prop a world can use (the built-in ones and its own) must read; `style check` above
+# draws every built-in prop in a kid's and a grown-up's hand in each style.
+while IFS= read -r world; do
+	"${fables[@]}" --world "$world" prop list >/dev/null
+done < <(find worlds -mindepth 1 -maxdepth 1 -type d | sort)
+
 echo "puppets"
 while IFS= read -r world; do
 	"${fables[@]}" --world "$world" puppet check

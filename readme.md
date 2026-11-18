@@ -53,7 +53,9 @@ worlds/kerfuffle/
   world.toml      the series' name, its drawing style, its narrator, and the words in every book's front and back matter
   cast.toml       who lives there and what they look like
   puppets/        authored puppets' part files
+  props/          the world's own props, as part files (optional)
   recipe.md       the 12-beat recipe `fables new` starts a book from
+  flows/          its own story flows, found before the built-in ones
   stories/        one folder per book, each with a story.md
 ```
 
@@ -84,14 +86,72 @@ matter is also credited to the world's author.
 
 `fables world new` writes `worlds/<slug>/` with that file, a `cast.toml` holding a commented example and nothing else, a `puppets/` folder and a `stories/` folder, then prints the next command. `fables character new <id> --name "…"` adds a cast member; `fables setting new <name>` starts a place.
 
+## Story flows
+
+A story flow is a shape a book can take: a laid-out recipe with a beat table, page and word budgets, and its pages already staged, so a new book starts from a sound page plan instead of a blank file. Nine are built into fables; `fables flow list` prints this table.
+
+| Flow | What it is good for | Characters | Pages | Words |
+| --- | --- | --- | --- | --- |
+| `three-tries` | A want a child can hold and an ending you can already see, where the tries must earn it. | 1 | 13–17 | 300–500 |
+| `pile-up` | A book built to be read again, where a child can join the chain and shout the last line. | a crowd | 9–13 | 250–450 |
+| `there-and-back` | A search with a clear reason to leave, and a home the reader is glad to come back to. | 1 | 13–17 | 280–480 |
+| `round-we-go` | A chain a child can follow, where the fun is seeing the next link coming. | 1 | 8–12 | 180–320 |
+| `odd-couple` | A funny two-hander where the joke is character, and the ending is a swap rather than a lesson. | 2 | 13–17 | 280–480 |
+| `wrong-end-of-the-stick` | A joke the pictures tell before the words do, where being wrong is funny and easily put right. | 2 | 11–13 | 260–450 |
+| `goodnight-tour` | A bedtime book where the falling light and the falling word count do the work. | 1 | 11–15 | 200–380 |
+| `gag-short` | A sixty-to-ninety-second cartoon where the timing is the story and the words are almost nothing. | 1 | 6–9 | 40–120 |
+| `habit-tale` | A character-led book where the change is a choice the star makes, not a lesson the narrator gives. | 2 | 13–17 | 280–480 |
+
+`fables new "<Title>" --star <id>` starts from the world's own `recipe.md` when it has one, and from `three-tries` when it has none. `--flow <name>` picks a flow instead, and `--friend <id>` names the second character for a flow that stages two or a crowd. A flow that needs a friend refuses without one, naming the flow and the world's cast.
+
+```bash
+fables new "The Whole Street Hums" --star mo --friend nan --flow pile-up
+fables flow show pile-up
+```
+
+`fables flow list` also shows each flow's one-sentence about; `fables flow show <name>` prints its beats as a table, with the craft note for each beat. A world may add its own flows in its `flows/<name>.md`; they are found before the built-ins, so a world can replace `three-tries` with its own shape, and its `recipe.md` stays its default.
+
+A flow file is a recipe: TOML front matter with a `[flow]` table, then the laid-out pages.
+
+```text
++++
+title = "{{title}}"
+author = "{{author}}"
+year = {{year}}
+star = "{{star}}"
+age = "3-5"              # the read-aloud band; a flow that suits a younger book says "under-3"
+
+[flow]
+name = "The Pile-Up"
+about = "One sentence a parent would understand."
+good-for = "When to pick this shape."
+pages = [9, 13]          # the finished book's story pages
+words = [250, 450]       # the finished book's words
+needs = "many"           # 1, 2 or many
+
+[[flow.beats]]
+name = "First link"
+pages = 1
+words = [15, 25]
+note = "Craft advice a first-time writer can act on in one sentence."
++++
+
+# street day shot=wide
+@{{star}} x=0.16 face=right happy
+// 15–20 words: one actor, one small sound, and a lot of empty street.
+[One small sound in an empty street.]
+```
+
+`pages` and `words` take one number or a `[min, max]` pair. `{{title}}`, `{{author}}`, `{{year}}` and `{{star}}` are filled in from the command; a flow whose `needs` is `2` or `many` writes `{{friend}}` where the second character goes. Every flow file names its `age` band; `fables new` writes `age = "3-5"` into a world recipe or a world flow that leaves one out, so every new book is read aloud at the same pace unless it says otherwise. A flow may also write `flow = "{{flow}}"` in its front matter; without it, `fables new` adds `flow = "<name>"` after the `star` line, so a book always remembers the shape it started from. The beats' page counts must add up to the pages below them, and every `[bracketed]` line is a line for the writer: `fables review` says plainly how many are still unwritten instead of critiquing them.
+
 ## Drawing styles
 
 A drawing style is a folder in `styles/` that characters are drawn from, so a new look is data rather than code:
 
 ```text
 styles/cartoon/
-  style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page skin that suits the look
-  kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
+  style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page that suits the look (`[page]`: its skin, text card and page turn)
+  kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes
   template.svg    a plain kid's own parts, which new kids are drawn from
   template-grown-up.svg
                   a plain grown-up's own parts, cut for the grown-up body, which new grown-ups are drawn from
@@ -103,8 +163,8 @@ Every style has two bodies, `kid` and `grown-up`, and a template for each, so a 
 | --- | --- |
 | `fables style list` | The drawing styles, with a sentence on each look, the bodies it draws (kid, grown-up) and the page skin it prints in. |
 | `fables style check <name>` | Checks each body's template over the kit draws a whole figure whose parts join, and every body stands up. Joins are measured standing, cheering and sitting, front-on and three-quarters: the head or its neck must touch the torso, each arm must start inside the torso or its sleeve, each leg inside the torso or the legwear, and a sleeve or trouser leg drawn in two pieces must meet at the elbow or knee. |
-| `fables style describe <name>` | The bodies the style draws and the template each starts from, every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
-| `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet) and `<name>-parts.png` (every kit and template part). |
+| `fables style describe <name>` | The bodies the style draws and the template each starts from, the hair, brows, noses and builds each body offers, every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
+| `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet), `<name>-parts.png` (every kit and template part) and `<name>-variants.png` (every hair, brows, nose and build the style draws, on the kid and the grown-up). |
 
 | Drawing style | Look |
 | --- | --- |
@@ -116,16 +176,27 @@ Every style has two bodies, `kid` and `grown-up`, and a template for each, so a 
 | `clear-line` | Clear line: one even line weight everywhere, inside and out, with no hatching; flat vivid colour with no shading; simple characters with dot eyes, a short neck and gently tapering limbs with a knee and an elbow, for detailed settings that get their depth from layered planes; restrained, eased motion. Pages read best in the `clear` skin. |
 | `mid-century` | Mid-century modern: angular, geometric characters on a wedge of a neck, with limbs cut as wedges and flat, pointed shoes; a small flat palette that every colour (settings included) snaps to; clean, even angular lines with the colour printed off them by one fixed slip, the same on every part; no shading; held poses that snap between keys on twos. Abstract settings suit it, in the riso skin. |
 | `chibi` | Tiny characters about two heads tall: the anime face with enormous eyes, mitten hands, stubby limbs, soft self-coloured lines with a rim light, and springy, bouncy motion with a gentle idle bob. |
+| `silhouette` | Shadow theatre. Every figure is one ink, a jointed puppet held against a lit screen: the whites of the eyes and an open mouth are holes the light comes through, brows and a shut mouth are slits, and a pin shows at the neck and at every shoulder, elbow, hip and knee, so the cut-out rig is the look. The head has a nose that breaks its edge as it turns, so three-quarters reads as a profile. It moves on twos with no squash or stretch. Pages print in the `shadow` skin, where the setting is shadows too, with the words on a caption band; it looks best under `dusk` and `moonlit`. Tell characters apart by hair and build, since nobody has colours. |
+| `paper-theatre` | A toy theatre cut from card: every part of a figure is its own piece with a white cut edge, lifted off the page so it drops a hard shadow on the piece under it. Flat colour, no line and no shading, on the mid-century figure's straight-edged shapes (it shares that kit and template). Held poses that snap between keys on twos. Pages print in the `card` skin, where the far, near and front layers of a setting stand as sheets one behind another. |
+| `soft-flat` | Flat vector shapes with no line anywhere: the cartoon's round figure (it shares that kit and template) with its parts meeting edge to edge, told apart by colour and by one soft tone of shade. Gentle, eased motion. Pages print in the `tv` skin, which draws settings without outlines too. |
 
-Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. Every style also names the **page skin** that suits it (`skin` in its `style.toml`): `clear-line` prints in `clear`, and the others print in `riso`. A book uses that skin unless its script or `--style` names another (see [Art styles](#art-styles)). [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one, [`worlds/tramline/`](worlds/tramline) a clear-line one with its own square, [`worlds/sundial-heights/`](worlds/sundial-heights) a mid-century one with an abstract plaza, and [`worlds/teacup-town/`](worlds/teacup-town) a chibi one; their stars, Hana, Ren, Clem, Zia, Otto and Mochi, were designed entirely through the MCP tools below.
+Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. Every style also names the **page** that suits it, in a `[page]` table in its `style.toml`, so the type's card, the skin and the page turn match the drawing without a writer choosing them:
+
+| `[page]` | Meaning |
+| --- | --- |
+| `skin` | The page skin its books print in (see [Art styles](#art-styles)): `clear-line` prints in `clear`, `silhouette` in `shadow`, `paper-theatre` in `card`, `soft-flat` in `tv`, and the others in `riso`. A style may still write `skin` at the top of the file instead, as every style did before `[page]`; writing both is an error. |
+| `card` | What the words sit on, in the book and in a video's title and captions: `paper` (the default: a cream card with a wobbly edge, inked the way the skin inks) or `caption` (a plain dark band with light letters, which `silhouette` uses). |
+| `transition` | How a video enters each page unless the book or the page says: `silhouette` and `soft-flat` dissolve, `paper-theatre` pushes the next scene in. Left out, the book's own default applies (a wipe). |
+
+A world's books inherit the table, and a book overrides it in its own front matter: `style = "…"` for the skin, `card = "…"` for the card, `[video] transition = "…"` for the page turn (and `--style` or a heading's `transition=` over those). [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one, [`worlds/tramline/`](worlds/tramline) a clear-line one with its own square, [`worlds/sundial-heights/`](worlds/sundial-heights) a mid-century one with an abstract plaza, and [`worlds/teacup-town/`](worlds/teacup-town) a chibi one; their stars, Hana, Ren, Clem, Zia, Otto and Mochi, were designed entirely through the MCP tools below. The three line-free styles each have a small world with one short book: [`worlds/lantern-lane/`](worlds/lantern-lane) (silhouette), [`worlds/foldaway-square/`](worlds/foldaway-square) (paper-theatre) and [`worlds/pillow-hill/`](worlds/pillow-hill) (soft-flat), whose casts were made with `fables character new` and are drawn from the templates.
 
 A style is four dials: its construction (bodies, features, eyes and kit), and three tables in `style.toml` whose defaults are the cartoon look:
 
 | Dial | Settings |
 | --- | --- |
-| `[line]` | `stroke` (brush thick-and-thin, uniform, broken or none), `colour` (ink, or `self`: each part's fill darkened), `register` (fills off-register from their lines). Weights are `line` and `detail` in `[finish]`. |
-| `[shade]` | `tones` (0, 1 or 2), `highlight` (none or rim), `fill` (flat, a limited `palette`, or screentone), `tone` (dots or lines). |
-| `[motion]` | `timing` (ones, twos or threes) and `modulate` (moves on ones, holds on threes), `easing` (eased or snap) with `anticipation` and `overshoot`, `squash`, `moving-hold`, `smears`, `limbs` (jointed or hose), `follow-through`, `blink-every`, `mouth-rate`, an `idle` loop (bounce) with `idle-amount` and `idle-tempo`, and the acting layer: `lead` (eyes first), `overlap` (parts arriving one after another), `arcs`, `takes`, `breath`, `weight-shift`, `gesture`, `listen`, `business`, and `travel` (walk or slide). See [docs/animation.md](docs/animation.md). |
+| `[line]` | `stroke` (brush thick-and-thin, uniform, broken, none, or `cut`: no line, a white cut edge and a hard drop shadow under every part), `colour` (ink, or `self`: each part's fill darkened), `register` (fills off-register from their lines). Weights are `line` and `detail` in `[finish]`. |
+| `[shade]` | `tones` (0, 1 or 2), `highlight` (none or rim), `fill` (flat, a limited `palette`, screentone, or `silhouette`: every part one ink, with the eyes, mouth and a pin at each joint cut out), `tone` (dots or lines). |
+| `[motion]` | `timing` (ones, twos or threes) and `modulate` (moves on ones, holds on threes), `easing` (eased or snap) with `anticipation` and `overshoot`, `squash`, `moving-hold`, `smears`, `limbs` (jointed or hose), `follow-through`, `blink-every`, `mouth-rate`, an `idle` loop (bounce) with `idle-amount` and `idle-tempo`, and the acting layer: `lead` (eyes first), `overlap` (parts arriving one after another), `arcs`, `takes`, `hang` (seconds a strong mood holds its peak before it relaxes), `breath`, `weight-shift`, `gesture`, `listen`, `business`, and `travel` (walk or slide). See [docs/animation.md](docs/animation.md). |
 
 Each body (`[bodies.kid]`, `[bodies.grown-up]`) can also say how it is built. Left out, every one of these draws the body exactly as before (round tube limbs, a plain neck, cartoon shoes):
 
@@ -140,7 +211,7 @@ The kit can draw two more parts: `neck` (front and three-quarter, in bone units 
 
 `fables rig <id> --motion <style>` shows a character moving the way another style moves.
 
-The built-in drawing styles are compiled into fables, so a world anywhere on disk can name one. A drawing style is not a page skin: the page skins (`riso`, `tv`, `bold`, `cut-paper`, `crayon`, `storybook`, `clear`) print a page, and each drawing style names the skin that suits its look (`skin` in its `style.toml`).
+The built-in drawing styles are compiled into fables, so a world anywhere on disk can name one. A drawing style is not a page skin: the page skins (`riso`, `tv`, `bold`, `cut-paper`, `crayon`, `storybook`, `clear`, `shadow`, `card`) print a page, and each drawing style names the skin that suits its look (`[page] skin` in its `style.toml`).
 
 ## Settings
 
@@ -167,6 +238,43 @@ The fifteen built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bat
 
 **Composing for the stage.** Every page puts a text card and actors on top of a setting, so give each landmark a home neither covers (`fables sheets --zones` outlines these zones on every setting). In stage units, measured from the top: the built-in grounds sit at y 2060–2100; a typical top card covers x 150–2250 down to y ≈ 880 (a short line stops near 375, a long page near 970), and with `text=bottom` it covers y ≈ 1520–2280 (1470 for a long page). Heads reach 1000–1170 above the ground for a kid and 1160–1270 for a grown-up across the drawing styles, so they top out at y ≈ 800–1100. Actors without an `x=` stand at ½ alone, at ⅓ and ⅔ as a pair (x 800 and 1600, each covering about 480 across) and at ¼, ½ and ¾ as three; `x=far-left`, `left`, `center`, `right` and `far-right` are 0.12, 0.28, 0.5, 0.72 and 0.88. That leaves the wings (x below about 540 and above about 1860) from y 880 down to the ground for landmarks, a sun or a moon low in a wing at y ≈ 950–1120, the gutter between a pair (x 1040–1360) for something a lone actor may hide, and the card band for detail a story can lose. Keep the band behind the actors calm and mid-toned, with no straight edge across the heads.
 
+## Props
+
+A prop is a thing the story is about: a kite, a jar, a parcel. Each one is an SVG part file in [`props/`](props), found by name the way a setting is: the world's `props/<name>.svg` first, then the built-in one. `holds=<name>` puts one in a character's hand; `@kite x=0.7 y=sky` stands one on the stage as an actor.
+
+A prop is drawn in its own coordinate space, and its root `<svg>` says how a hand holds it:
+
+| Attribute | Meaning |
+| --- | --- |
+| `data-grip="x y"` | The point that sits in the fist. |
+| `data-hands` | `one`, or `two` to bring both hands to the grip (a crate, a parcel). |
+| `data-angle` | Degrees the prop leans in a relaxed hand. |
+| `data-carry` | How somebody standing at ease carries it: `hand` (in the fist at the side, the default), `up` (held up beside the head, clear of the face: a torch, a flower), `front` (in both hands before the chest: a cake, a drum), `string` (the grip is a string's end and the prop floats above: a balloon) or `head` (worn: a hat). A pose that uses the hands (`hold`, `reach-out`, `wave`…) overrides it. |
+| `data-held-scale` | A factor on the held-scale rule, for a prop that should be bigger or smaller in a hand than the rule makes it. |
+| `data-about` | A sentence on what it is. |
+| `data-use="brush"` | A toothbrush's behaviour: it points at the mouth when it comes near it, and scrubs it with foam. |
+
+Each part is a `<path>` whose `id` is its name, drawn in file order. `fill` is a palette name or hex code; `data-shade="1"` gives the part the style's cel shadow, `data-line="detail"` or `"none"` changes its outline, and a line part has `fill="none"` with a `stroke`, a `stroke-width` and optionally `data-opacity`. Parts take the scene's light and the style's line like everything else. A prop grows with the hand that holds it, so a grown-up holds the same ball bigger than a kid, and it sits in the fist under the fingers at the grip. Small things are drawn larger than life in a hand, the way picture books draw them: the held-scale rule grows a key, a letter or a pebble towards the size of the hand that holds it, so a four-year-old sees what it is, and leaves things already that big as they are. However big a style draws its hands, a held thing's longest side is at least 1.7 times the fist's, so a rubber-hose glove never swallows a pebble.
+
+The thirty-five built-in props are `apple`, `ball`, `balloon`, `basket`, `bell`, `book`, `box`, `bucket`, `cake`, `cup`, `drum`, `flower`, `hat`, `jam`, `jar`, `key`, `kite`, `kite-spool`, `ladder`, `lantern`, `leaf`, `letter`, `map`, `paintbrush`, `parcel`, `pebble`, `ruler`, `sandwich`, `spoon`, `star`, `teddy`, `telescope`, `toothbrush`, `torch` and `umbrella`. `fables sheets` writes `<world>-props.png` with each one alone and in the hand of the world's first figure. Over MCP, `prop_list`, `prop_create`, `prop_parts`, `prop_set_parts` and `prop_render` do the same as the setting tools.
+
+A prop can stand on the stage as an actor, with `size=`, `z=`, `hide`/`show` and `enter=`/`exit=` like anyone:
+
+```text
+@kite x=0.7 y=sky tether=hana
+```
+
+At `size=1` a prop on the stage is the size a kid's hand holds it at, so a kite let go of is the kite that was held; `size=` scales from there. `y=sky` flies it over the cast's heads, low enough that a wide landscape shot, which keeps the ground in view, still shows it whole; on a book page one the card would cover moves beside the card, or below it, never under it and never over a face. In video the full landscape frame shows little sky above the heads, so stand a sky prop in the gap between the actors (or in a wing), not straight above one of them. A number (`y=0.3`, the prop's base that far down the stage) is never moved. A flyer (a bird) placed `y=sky`, or flying with no height given, keeps clear of the card the same way, and `land` puts it on the ground out from under the card.
+
+`tether=<actor>` draws a string from the prop to that actor's hand, in the style's line, which hangs like string: it bows down from the straight line, more the longer and more level it runs (a string straight up hardly bows), and swings gently in video; `tether=nothing` lets it go. Giving and taking are two directions written together:
+
+```text
+@hana holds=nothing
+@mo holds=kite-spool
+```
+
+In video a give plays as one: the two reach towards each other, the hands meet at the smaller one's chest, and the thing passes there. Two who stand too far apart for their hands to meet (a pair at ⅓ and ⅔ do) toss it: it flies underarm in a low arc from the giver's hand into the taker's. A string that changes hands is tied to the new hand when it gets there, so `@mo jump catch` with `@kite tether=mo` reads as a leap and a catch: the catching hand reaches up and out on the side of what it catches, clear of the face, and the string is caught at the top of the leap. Eyes on a stage prop (`see=kite`) go to the thing itself, a little above its middle, not to its tail or string.
+
 ## Designing characters with an agent (MCP)
 
 `fables mcp` serves the studio over the Model Context Protocol on stdio, so an agent can design characters the way every Kerfuffle character was drawn: start from the style's template, redraw parts as SVG path data, look at the model sheet, fix, repeat. Sheets come back as images, so the model sees what it drew. Register it with any MCP client, for example:
@@ -180,13 +288,14 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, sound, workflow. |
 | `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences, a drawing style and an author, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
 | `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space, the drawing rules and the page skin the style prints in; the kit as an image. |
-| `character_create` | A new cast member from who they are and their colours, drawn from the style's template. `draw` also writes their part file. |
+| `character_create` | A new cast member from who they are and their colours, drawn from the style's template with the `hair`, `build`, `brows` and `nose` they name (or ones picked to differ from the rest of the cast). `draw` also writes their part file. |
 | `character_parts` | A character's parts as path data: their own, their style's template's, or the kit's. |
 | `character_set_parts` | Writes or replaces parts and checks the figure. A character still drawn from the template is given a file of their own first. Changes that would break it are refused with the findings, so the world always loads. |
 | `character_sheet` | The model sheet (five beats, front and three-quarters), the parts sheet, or all fifteen moods, as images. |
 | `voice_providers`, `voice_list` | Which voice providers can speak now, and the offline macOS voices. |
 | `voice_cast`, `voice_audition` | Give a character their voice, and hear a line in it, delivered in a mood, as audio. |
 | `story_write`, `story_read`, `story_check` | Write a book's script into a world, checked against the cast (a script that doesn't rehearse is refused, with the line to fix), or read and check one. |
+| `flow_list`, `flow_describe`, `story_start` | The story flows a world's books can start from and one flow's beats; and the whole `story.md` scaffold for a flow, with the star and friend staged, ready to fill in and `story_write`. |
 | `story_review` | A director's critique of a book: findings with a severity, the script line and a suggestion. Advice, never a refusal. |
 | `storyboard_render`, `storyboard_pin` | The storyboard as images and as a text shot list (page, script line, timing, shot size, subjects, move, entry, source and words); and the same plan pinned into the script as editable `@camera` directions marked `// pinned`, or removed again. |
 | `animatic_render`, `video_frames` | An animatic that holds each shot for its real duration over the soundtrack, with each shot's caption and a progress bar, and the shot list; `silent: true` records no voice; and sampled frames of the video as one tiled image, offline. |
@@ -195,6 +304,8 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `video_render` | The narrated, lip-synced MP4, 9:16 or 16:9, or a quick preview. |
 | `setting_list`, `setting_create` | A world's settings, built-in and its own; start one, blank or from a setting to repaint. |
 | `setting_parts`, `setting_set_parts`, `setting_render` | Read and redraw a setting's parts as SVG elements, and see it by day or night, wilted or not. |
+| `prop_list`, `prop_create` | A world's props, built-in and its own; start one, blank or from a prop to redraw. |
+| `prop_parts`, `prop_set_parts`, `prop_render` | Read and redraw a prop's parts, its grip and its behaviour, and see the prop as an image. |
 
 Worlds, books, settings and characters are named by slugs, never paths, so the server only reads and writes under its root: a name that is absolute or steps out with `..` is refused before any file is touched. A book written over MCP belongs to the world it is written into, so `story_write` refuses a script whose front matter names a `world`; at the command line, name one with `--world` or a relative `world =`. A person signs off every model sheet before a character is used in a book; `fables puppet sheet <id>` writes the same model sheet at full size.
 
@@ -203,11 +314,15 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | Command | What it makes |
 | --- | --- |
 | `fables world new "<Name>" --style <drawing style> [--about "…"] [--author "…"]` | `worlds/<slug>/` with `world.toml`, a commented cast example, a `puppets/` folder and a `stories/` folder. |
-| `fables character new <id> --name "…" [--kind kid\|grown-up] [--about "…"] [--skin … --hair-colour … --top … --trim … --bottom … --shoes … --eyes … --pattern …] [--draw]` | A new cast member, drawn from the world's drawing style's template; `--draw` also writes their part file. |
+| `fables character new <id> --name "…" [--kind kid\|grown-up] [--about "…"] [--hair … --build … --brows … --nose …] [--skin … --hair-colour … --top … --trim … --bottom … --shoes … --eyes … --pattern …] [--draw]` | A new cast member, drawn from the world's drawing style's template with the variants named (see [Variants](#variants)); any left out are picked to differ from the rest of the cast and written into the table. `--draw` also writes their part file. |
 | `fables setting new <name> [--from <setting>] [--about "…"]` | A world's own setting, blank or repainted from one it already uses. |
-| `fables new "<Title>" --star <id>` | A new book in the world's `stories/<title>/story.md`, laid out from its `recipe.md` with the star already staged. |
-| `fables check <story>` | Validates the script and reports the drawing style and page skin, page and word counts, and any cast fields a drawn character ignores. Errors give line numbers and list valid options. |
-| `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, mood arcs, pacing, light and shots. Advice, never a refusal; ends with a count of findings. |
+| `fables new "<Title>" --star <id> [--friend <id>] [--flow <name>]` | A new book in the world's `stories/<title>/story.md`, laid out from the named flow, else the world's `recipe.md`, else `three-tries`, with the star already staged. |
+| `fables flow list` | The story flows: each one's about, what it is good for, how many characters it needs and its length. |
+| `fables flow show <name>` | One flow's beats as a table, with its page and word budgets and its craft notes. |
+| `fables prop list` | Every prop the world can use, with its source, hands, grip and a sentence on it. |
+| `fables prop new <name> [--from <prop>]` | A world's own `props/<name>.svg`, blank or copied from a prop it can use. |
+| `fables check <story>` | Validates the script and reports the drawing style and page skin, page and word counts, any cast fields a drawn character ignores, and the blank pages a short book is padded with. Errors give line numbers and list valid options. |
+| `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, words the picture never shows, mood arcs, pacing, light, shots and the shape a book's `flow` promises. Advice, never a refusal; ends with a count of findings. |
 | `fables puppet parts <id> [part…]` | A character's parts as SVG path data: their own (or their style's template) and the kit's, each marked. |
 | `fables puppet set <id> <part> --d "…"` / `--file <svg>` | Writes parts through the same checked operation as MCP `character_set_parts`; a change that would break the figure is refused with the findings. |
 | `fables puppet template <id> [--from <id>]` | Starts the part file from the template (or another member's drawings) and adds the `puppet = …` line. |
@@ -220,7 +335,7 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables animatic <story> [--format landscape\|portrait] [--silent]` | `out/<book>/<skin>/animatic/<book>-animatic.mp4`: each storyboard panel held for its real duration over the soundtrack, captioned with its number, page, line, start, length and first words, under a progress bar that marks each cut, so timing reads in seconds; a push or pan moves by cropping one wide plate. Half size at 24 fps, with `soundtrack.wav` beside it, mixed exactly as the video's. A line whose voice cannot speak here (no `say`, no API key, no command) is silent and timed by its estimate while music, effects and ambience play, and the output says how many; `--silent` does that for every line and records nothing. `fables video` never falls back: it stops with the voice's error. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
-| `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
+| `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's props (`<world>-props.png`: each prop alone and in the first figure's hand), the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
 | `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every page skin, side by side. |
 | `fables rig <id>` | `out/rig/<skin>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character), a motion-test video, and an acting-test video (the ten acting rules, in order, on two characters). |
 
@@ -229,9 +344,9 @@ Every command also takes `--style`, the **page skin**, so any render can print i
 
 - `--style storybook` prints in one skin;
 - `--style bold,tv` prints in each listed skin;
-- `--style all` prints in all seven.
+- `--style all` prints in all nine.
 
-A book's skin is, in order: `--style` on the command line, `style` in the script's front matter, the page skin its world's drawing style names (`skin` in `styles/<style>/style.toml`), then `riso`. Without `--style` and a front-matter `style`, a chibi world prints in `riso` and a clear-line one in `clear`. Each skin renders to its own folder, `out/<book>/<skin>/`, so skins sit side by side and never overwrite each other. The voice cache is shared, so re-rendering a video in another skin records nothing new.
+A book's skin is, in order: `--style` on the command line, `style` in the script's front matter, the page skin its world's drawing style names (`[page] skin` in `styles/<style>/style.toml`), then `riso`. Without `--style` and a front-matter `style`, a chibi world prints in `riso` and a clear-line one in `clear`. Each skin renders to its own folder, `out/<book>/<skin>/`, so skins sit side by side and never overwrite each other. The voice cache is shared, so re-rendering a video in another skin records nothing new.
 
 Install with `cargo install --path .`, or use `cargo run --release --` in place of `fables`.
 
@@ -277,7 +392,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `age` sets how the book is read aloud: the narration rate (about 125, 135 and 150 words a minute for `under-3`, `3-5` and `5-7`), the gaps between lines and the tail after a page, and how long a page in a new place is seen before it is talked over. A world sets a default in its `world.toml`, a book's own `age` wins, and a narrator with an explicit `rate` keeps it. A book with no `age` anywhere keeps the older, brisker timing (165 words a minute), so its video does not change; `fables check` suggests one.
 
-- **In the book**, each page shows the stage *at the end of the page*, framed by its heading alone (`shot=`, `on=`, `zoom=`, `look=`; `@camera` is video-only, so pinning a camera plan never changes a page). The text sits on a paper card, at the top unless the heading says `text=bottom`. A world whose cast is only the star gets no "meet the folk" page.
+- **In the book**, each page shows the stage *at the end of the page*, framed by its heading alone (`shot=`, `on=`, `zoom=`, `look=`; `@camera` is video-only, so pinning a camera plan never changes a page). The text sits on a paper card, at the top unless the heading says `text=bottom`. `card = "caption"` in the front matter sets it on a dark caption band with light letters instead (and `card = "paper"` puts the paper back in a world whose drawing style asks for a caption). A world whose cast is only the star gets no "meet the folk" page.
 - **On the cover**, the star takes `[cover]`'s `pose` in its `setting`, `tint` and `light` (any light preset, such as `light = "moonlit"`; daylight when unset).
 - **In the video**, each `@` line takes effect *when the narrator reaches it*. Above, Mum points and talks during the first line; Stanley crosses his arms and his mouth moves during the second.
 
@@ -316,18 +431,18 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, `music=…`, `ambience=…`, and friends; the video eases the change over about a second), and `@camera …` the framing. `@music <cue>` changes the cue from that line on, and `@hold <seconds>` is a dead stop (below).
-
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`), or a prop's name, which stands that prop on the stage (`@kite`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, `music=…`, `ambience=…`, and friends; the video eases the change over about a second), and `@camera …` the framing. `@music <cue>` changes the cue from that line on, and `@hold <seconds>` is a dead stop (below).
 
 | Kind | Values |
 | --- | --- |
 | Moods | `happy` `grin` `laugh` `sad` `grumpy` `cross` `defiant` `shocked` `disgusted` `fainted` `dizzy` `sleepy` `dreamy` `worried` `proud` |
-| Poses | `idle` `wave` `point` `arms-crossed` `hips` `cheer` `hold-nose` `cover-mouth` `brush` `shrug` `droop` `hold` `think` `reach-out` `pick` |
-| Stances (legs and spine) | `stand` `crouch` `sit` `kneel` `jump` `bow` `tiptoe` |
-| Gaits | `walk` `run` (cycles on the spot in video) `still` |
-| Actions | `talk` (mouth moves with the next paragraph) `faint` `wake` `fly` `land` `wag` `calm` `hop` `flip` `hide` `show` `quiet` |
-| Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (for flyers), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
-| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=toothbrush`/`parcel`/`jam`/`nothing`, `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers) |
+| Poses | `idle` `wave` `point` `arms-crossed` `hips` `cheer` `hold-nose` `cover-mouth` `brush` `shrug` `droop` `hold` `think` `reach-out` `pick` `catch` |
+| Stances (legs and spine) | `stand` `crouch` `sit` `kneel` `jump` `bow` `tiptoe` (in video a `jump` is a leap that lands) |
+| Gaits | `walk` `run` (in video: goes to where the actor is placed, or is placed next on the page; on the spot when it is placed nowhere new) `still` |
+| Actions | `talk` (mouth moves with the next paragraph) `faint` `wake` `fly` `land` `wag` `calm` `hop` `flip` `hide` `show` `notice` `quiet` |
+| Place | `x=left` (`far-left`, `center`, `right`, `far-right`, or `0`–`1`), `y=sky` (a flyer high over the cast, a prop flying over their heads; on a book page, clear of the text card), `y=0.3` (a bird's body, or a prop's base, that far down the stage: 0 is the top, 1 the bottom; a number is never moved), `size=1.4`, `z=5` (draw order), `face=left`/`right`/`front` |
+| Character | `teeth=clean`/`grotty`/`sparkly`, `stink=0`–`1`, `mint=0`–`1`, `holds=<prop>`/`nothing` (any world or built-in prop, or empty hands), `mouth=0`–`1`, `colour=teal`, `wilt=0`–`1` (flowers), `tether=<actor>`/`nothing` (a stage prop's string, or letting it go) |
+| Eyes | `see=<actor>`/`<prop>`/`mine`/`up`/`down`/`left`/`right`/`front`/`away` (`mine` is what the actor holds): it holds until it is changed, `front` releases it, and the eyes lead the head. `notice` plays a small beat first: the eyes flick to the `see=` target (or whoever spoke last), hold for about half a second, and then the rest of the direction lands. |
 | Entrances | `enter=left`/`right`, `exit=left`/`right` (figures walk on and off in video, critters keep their own entrances; in the book they just appear or vanish) |
 | Scene | `light=golden` or a bare preset (`dusk`), `wilt=1`, `stink=1`, `mint=1`, `tint=sunflower`, `music=calm`, `ambience=birds` (or `none`), `speed=1`, `impact=1` |
 | Directions (no actor) | `@pause 1` `@hold 1.5` `@music calm` `@sfx pop` |
@@ -338,7 +453,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `[video] direction` chooses between two directors:
 
-- `"auto"` (the default): pages without any `@camera` direction are shot by film rules. Every page opens on an establishing wide or full shot long enough to read; whoever speaks gets a medium (landscape) or close (portrait); a two-way exchange alternates shot and reverse shot; very short lines share a two-shot; a strong mood on somebody who isn't speaking earns a close reaction shot; entrances, exits, walks, runs, hops and faints widen to a full shot so the action stays in frame. No shot runs shorter than 1.2 s, cuts land at most one per 1.2 s and never just after a line begins, and a framing held longer than 8 s gets a slow push.
+- `"auto"` (the default): pages without any `@camera` direction are shot by film rules. Every page opens on an establishing wide or full shot long enough to read; whoever speaks gets a medium (landscape) or close (portrait); a two-way exchange alternates shot and reverse shot; very short lines share a two-shot; a strong mood on somebody who isn't speaking earns a close reaction shot, landing as the take settles, and one at the very end of a page stretches the page's tail (by at most the take and the shortest shot) instead of being dropped; a narrated line that opens with the name of somebody on stage ("Mo stood tall.") frames them; entrances, exits, walks, runs, hops, faints and anybody crossing the stage widen to a full shot so the action stays in frame, and a wide or full shot lifts a little rather than let a tall head leave the top of the frame. No shot runs shorter than 1.2 s, cuts land at most one per 1.2 s and never just after a line begins, and a framing held longer than 8 s gets a slow push.
 - `"locked"`: the older camera, kept byte for byte — one auto-framed view per scene key and line, gliding between them.
 
 `[video] acting = "plain"` turns the acting layer off and reproduces the plain motion; every style's `[motion]` dials tune it, and [`docs/animation.md`](docs/animation.md) has the whole story.
@@ -422,15 +537,42 @@ A person with **no `puppet` line** is drawn from their world's drawing style's t
 
 - `fables puppet template <id>` writes `puppets/<id>.svg` from the template and adds the `puppet = "puppets/<id>.svg"` line itself, so a part can be redrawn with `fables puppet set <id> <part> --d "M…"`.
 - `fables character new <id> --name "…" --draw` writes both the table and the part file in one step.
-- `puppet = "parametric"` draws the older parametric puppet instead, the one that reads `hair`, `head`, `body`, `nose` and `mouth` (`mouth_size` in code). Those five fields do nothing on a character drawn from parts, and `fables check` says so once per member.
+- `puppet = "parametric"` draws the older parametric puppet instead, the one that reads `hair`, `head`, `body`, `nose` and `mouth` (`mouth_size` in code) as its own shapes. `head`, `body` and `mouth` do nothing on a character drawn from parts, and `fables check` says so once per member; on a template-drawn character `hair` and `nose` are [variants](#variants).
 
 A person is `kind = "kid"` (the default) or `kind = "grown-up"`, and the kind picks the body they stand on and the template they are drawn from. Every drawing style has a kid template and a grown-up one cut for adult proportions, so a grown-up with no `puppet` line, or one started with `puppet template` or `character new --draw`, is a grown-up of that style rather than a kid stretched tall. `fables puppet check <id>` fails a figure whose parts come apart on its body, naming the part, the gap and the pose, and `fables puppet set` refuses a change that opens a join.
+
+### Variants
+
+A person drawn from the template can be drawn more than one way, so a cast of template-drawn people reads as different people from the same show. Four words in their cast table pick how:
+
+| Field | Words |
+| --- | --- |
+| `hair` | `short`, `bob`, `bun`, `curls`, `spikes`, `pigtails`, `long` and `bald` in every drawing style, plus a style's own: `tuft` (cartoon, soft-flat and rubber-hose kids), `bowl` (chibi), `flat-top` (mid-century and paper-theatre) |
+| `build` | `slim`, `plain` (the body as the style draws it) or `stout` |
+| `brows` | `bold`, `arched` or `thin` |
+| `nose` | `button`, `round`, `long` or `none` where the style draws them: chibi draws only `button`, anime and manga have no `round`, and rubber-hose faces always have a nose |
+
+```toml
+[nell]
+name = "Nell Nibbles"
+kind = "grown-up"
+hair = "bun"
+build = "stout"
+brows = "arched"
+nose = "round"
+```
+
+- A word the style doesn't draw is an error naming the ones it does; `fables style describe <style>` lists every body's, and `fables style sheet <style>` draws them all.
+- `fables character new` (and the `character_create` tool) takes `--hair`, `--build`, `--brows` and `--nose`. Any left out are picked from the ones the rest of the cast uses least (by the character's id among equals) and written into the table, so they never change afterwards. A kid is only bald, and a face only goes without a nose, when asked.
+- A table without them is drawn with the template's own hair, brows and nose on a plain build, as before variants existed.
+- A character with their own part file draws their own hair, brows and nose, so those three words do nothing there (`fables check` says so); `build` still fits their parts to a slim or stout body. `--draw` writes the picked hair, brows and nose into the new part file.
+- Every variant on every body passes `fables style check`'s joins, built slim, plain and stout.
 
 Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book. The full command-line vocabulary for a character is `fables puppet parts <id>` (their parts as path data) and `fables style describe <drawing style>` (every part, its space and the drawing rules).
 
 ## Art styles
 
-**A page skin is how the page prints.** Choose one per book with `style = "..."` in the front matter, or render in any others with `--style` (one, a comma list, or `all`). `fables styles <story>` draws the same pages in every skin so you can compare. A book that names neither uses the page skin its world's **drawing style** recommends (`skin` in `styles/<style>/style.toml`: `clear` for clear-line, `riso` for the others).
+**A page skin is how the page prints.** Choose one per book with `style = "..."` in the front matter, or render in any others with `--style` (one, a comma list, or `all`). `fables styles <story>` draws the same pages in every skin so you can compare. A book that names neither uses the page skin its world's **drawing style** recommends (`[page] skin` in `styles/<style>/style.toml`: `clear` for clear-line, `shadow` for silhouette, `card` for paper-theatre, `tv` for soft-flat, `riso` for the others).
 
 | Page skin | Look |
 | --- | --- |
@@ -441,6 +583,8 @@ Colours are palette names (see the bible) or `#rrggbb`. A character with a `habi
 | `crayon` | Waxy scribbled colour that strays over the lines |
 | `storybook` | Pencil lines over soft watercolour washes on textured paper |
 | `clear` | One even outline everywhere, flat colour, no shading or texture (for the clear-line drawing style) |
+| `shadow` | Shadow theatre: every setting is ink shadows on a lit screen, paler the farther back a part stands, so the actors read in front. The screen is the scene light's own sky, brightest at the ground (lamplight in flat daylight), the sun and moon are the lamp behind it, and critters are shadows too (for the silhouette drawing style) |
+| `card` | Paper theatre: every shape is card with a white cut edge and a hard shadow, with paper fibres, and the near and front layers of a setting each cast a shadow on the layer behind (for the paper-theatre drawing style) |
 
 The drawing style decides how a figure is built (chibi, clear-line, rubber-hose…); the page skin decides how every page prints. `fables check` and every render say which is which: `drawing: chibi · skin: riso`.
 
@@ -472,7 +616,7 @@ Run `fables rig <id>` for the rig sheet, the motion test and the acting test.
 
 Add `drop-tags = true` to skip short tags like "said Mum.", which makes the video play like a show.
 
-The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, and `**shouted**` words are shouted. Mouths lip-sync to whoever is speaking, and everyone else looks at them.
+The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, and `**shouted**` words are shouted. Mouths lip-sync to whoever is speaking; everyone else looks at them unless a `see=` holds their eyes, and a `notice` makes them look before they react.
 
 | `provider` | Needs | Acting | Lip-sync |
 | --- | --- | --- | --- |
@@ -531,6 +675,7 @@ Sourcing voices, provider prices and policies, local models, human actors and ke
 ```text
 src/
   story.rs        script parser (front matter, pages, beats, markup)
+  flow.rs         story flows: the `[flow]` table, the built-in recipes and starting a book
   cast.rs         cast file → puppet looks
   stage.rs        scene model, stage directions, rehearsal across pages
   compose.rs      scene → positioned puppets (blendable for animation)
@@ -545,9 +690,11 @@ src/
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, the director's camera setups, frame renderer, soundtrack, ffmpeg
-worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe and books
+worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe, flows and books
 settings/         the built-in settings, as part files
+props/            the built-in props, as part files
 styles/           drawing styles: style.toml, kit and template per look
+flows/            the built-in story flows, one laid-out recipe per shape
 docs/             the five-minute guide, voices and turning the books into a show
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```

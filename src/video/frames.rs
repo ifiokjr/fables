@@ -4,6 +4,8 @@
 //! easing, mouths driven by the narration, a camera that frames the action for the output
 //! shape, captions, and a paper wipe between pages.
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use anyhow::Result;
 use base64::Engine as _;
@@ -17,7 +19,9 @@ use crate::art::Svg;
 use crate::art::lerp;
 use crate::art::noise;
 use crate::art::palette;
+use crate::art::props::Prop;
 use crate::art::pt;
+use crate::art::rig::Stance;
 use crate::art::seed_of;
 use crate::art::settings;
 use crate::art::settings::Layer;
@@ -25,6 +29,7 @@ use crate::compose;
 use crate::compose::Puppet;
 use crate::raster;
 use crate::stage::Scene;
+use crate::stage::See;
 use crate::stage::ShotSize;
 use crate::stage::Travel;
 use crate::story::Acting;
@@ -364,8 +369,15 @@ impl<'a> Renderer<'a> {
 		let since = time - current.time;
 		let progress = (since / TWEEN).clamp(0.0, 1.0);
 		let fresh = index == 0;
-		let before = compose::puppets(&previous.scene, time, false);
-		let after = compose::puppets(&current.scene, time, false);
+		let mut before = compose::puppets(&previous.scene, time, false);
+		let mut after = compose::puppets(&current.scene, time, false);
+
+		// A `jump` is a leap that lands: outside the leap itself, a jumper stands.
+		for (scene, puppets) in [(&previous.scene, &mut before), (&current.scene, &mut after)] {
+			for puppet in puppets.iter_mut().filter(|puppet| jumps(scene, &puppet.id)) {
+				acting::leap(puppet, f32::INFINITY, 0.0);
+			}
+		}
 		let cx = acting::Cx {
 			on,
 			motion,
@@ -375,6 +387,8 @@ impl<'a> Renderer<'a> {
 			hold: self.timeline.in_hold(time),
 		};
 		let mut puppets = Vec::with_capacity(after.len());
+		// When each figure leaping this key leaves the ground.
+		let mut leaps: Vec<(&str, f32)> = Vec::new();
 
 		for puppet in &after {
 			let old_actor = previous
@@ -390,8 +404,9 @@ impl<'a> Renderer<'a> {
 			let mut blended = match before.iter().find(|old| old.id == puppet.id) {
 				Some(old) if !fresh => {
 					let knocked_down = matches!((old_actor, new_actor), (Some(a), Some(b)) if b.knocked > a.knocked + 0.5);
+					let notice = new_actor.is_some_and(|actor| actor.eyes.notice);
 					// Falls bounce; every other change is acted by the rules in `acting`.
-					acting::tween(old, puppet, since, progress, knocked_down, &cx)
+					acting::tween(old, puppet, since, progress, knocked_down, notice, &cx)
 				}
 				_ if fresh => puppet.clone(),
 				_ => {
@@ -411,6 +426,15 @@ impl<'a> Renderer<'a> {
 				&& !fresh
 			{
 				acting::hop(&mut blended, since, motion.squash);
+			}
+
+			if jumps(&current.scene, &puppet.id) && (fresh || !jumps(&previous.scene, &puppet.id)) {
+				let start = match before.iter().find(|old| old.id == puppet.id) {
+					Some(old) if !fresh => acting::leap_start(old, puppet, &cx),
+					_ => 0.0,
+				};
+				acting::leap(&mut blended, since - start, motion.squash);
+				leaps.push((puppet.id.as_str(), start));
 			}
 
 			puppets.push(blended);
@@ -437,11 +461,31 @@ impl<'a> Renderer<'a> {
 		let speaking = speaker_at(shot, time)
 			.and_then(|id| puppets.iter().find(|p| p.id == id))
 			.map(|puppet| {
+				let looking = current
+					.scene
+					.actors
+					.iter()
+					.find(|actor| actor.id == puppet.id)
+					.and_then(|actor| actor.eyes.see.as_ref())
+					.and_then(|see| {
+						match see {
+							See::Actor(id) => {
+								puppets
+									.iter()
+									.find(|other| other.id == *id)
+									.map(Puppet::focus)
+							}
+							See::Mine => puppet.hand_near(puppet.focus()),
+							_ => None,
+						}
+					});
+
 				acting::Speaker {
 					id: puppet.id.clone(),
 					x: puppet.at.x,
 					heading: puppet.heading,
 					pointing: acting::pointing_at(puppet),
+					looking,
 				}
 			});
 
@@ -450,6 +494,56 @@ impl<'a> Renderer<'a> {
 		}
 
 		let mut scene = current.scene.clone();
+
+		if !fresh {
+			for (giver, taker, prop) in gives(&previous.scene, &current.scene) {
+				let at = |id: &str| puppets.iter().position(|puppet| puppet.id == id);
+
+				if let (Some(giver), Some(taker)) = (at(&giver), at(&taker)) {
+					let (giver, taker) = pair_mut(&mut puppets, giver, taker);
+
+					if let Some((grip, size)) = acting::give(giver, taker, &prop, since) {
+						puppets.push(acting::tossed(&prop, grip, size));
+					}
+				}
+			}
+
+			// A string changing hands is tied to the new hand only once that hand gets there:
+			// at the top of a leap, the end of a walk, or the meeting of a give.
+			for actor in &mut scene.actors {
+				let Some(was) = previous.scene.actors.iter().find(|old| old.id == actor.id) else {
+					continue;
+				};
+
+				let Some(holder) = actor.tether.as_deref() else {
+					continue;
+				};
+
+				if was.tether == actor.tether {
+					continue;
+				}
+
+				let caught = leaps.iter().find(|(id, _)| *id == holder).map_or_else(
+					|| {
+						let old = before.iter().find(|puppet| puppet.id == holder);
+						let new = after.iter().find(|puppet| puppet.id == holder);
+
+						match (old, new) {
+							(Some(old), Some(new)) => {
+								acting::plan_between(old, new, &cx)
+									.map_or(acting::GIVE_MEET, |plan| plan.duration)
+							}
+							_ => 0.0,
+						}
+					},
+					|(_, start)| acting::leap_top(*start),
+				);
+
+				if since < caught {
+					actor.tether.clone_from(&was.tether);
+				}
+			}
+		}
 		let weather_t = smoothstep(since / 1.2);
 
 		if !fresh {
@@ -634,7 +728,12 @@ impl<'a> Renderer<'a> {
 				};
 				let scene = shot.scene_at(setup.anchor);
 				let puppets = compose::puppets(scene, at, false);
-				let subjects = self.subjects(on, *size, shot, at, &puppets);
+				let subjects = director::framed(
+					scene,
+					&puppets,
+					self.subjects(on, *size, shot, at, &puppets),
+					*size,
+				);
 
 				director::shot_view(
 					aspect,
@@ -923,7 +1022,7 @@ impl<'a> Renderer<'a> {
 			centre.x, centre.y, -centre.x, -centre.y
 		));
 		card(svg, &block.bounds, unit);
-		svg.raw(&text::svg(&block, Ink::default()));
+		svg.raw(&text::svg(&block, Ink::default().on(svg.style.card)));
 		svg.end();
 	}
 
@@ -989,7 +1088,7 @@ impl<'a> Renderer<'a> {
 			RunStyle::Bold,
 		);
 		card(svg, &block.bounds, unit);
-		svg.raw(&text::svg(&block, Ink::default()));
+		svg.raw(&text::svg(&block, Ink::default().on(svg.style.card)));
 	}
 
 	/// The page turn at the edges of a shot: this page's `transition` arriving, and the next
@@ -1197,6 +1296,56 @@ fn sheet(svg: &mut Svg, h: f32, x0: f32, x1: f32) {
 }
 
 /// Who is talking at `time` (lingering briefly after the line so listeners don't snap away).
+/// Whether the actor `id` is in a `jump` in `scene`.
+fn jumps(scene: &Scene, id: &str) -> bool {
+	scene
+		.actors
+		.iter()
+		.any(|actor| actor.id == id && actor.stance == Stance::Jump)
+}
+
+/// What changes hands between two keys, as (giver, taker, the thing): one figure stops
+/// holding something and another, who was not holding it, starts.
+fn gives(old: &Scene, new: &Scene) -> Vec<(String, String, Arc<Prop>)> {
+	let holds = |scene: &Scene, id: &str, name: &str| {
+		scene.actors.iter().any(|actor| {
+			actor.id == id && actor.prop.as_ref().is_some_and(|prop| prop.name == name)
+		})
+	};
+
+	old.actors
+		.iter()
+		.filter_map(|giver| {
+			let prop = giver.prop.as_ref()?;
+
+			if holds(new, &giver.id, &prop.name) {
+				return None;
+			}
+
+			let taker = new.actors.iter().find(|actor| {
+				actor.id != giver.id
+					&& holds(new, &actor.id, &prop.name)
+					&& !holds(old, &actor.id, &prop.name)
+			})?;
+
+			Some((giver.id.clone(), taker.id.clone(), Arc::clone(prop)))
+		})
+		.collect()
+}
+
+/// Two different items of `items`, both to change.
+fn pair_mut<T>(items: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
+	debug_assert_ne!(a, b, "a pair is two different items");
+
+	if a < b {
+		let (left, right) = items.split_at_mut(b);
+		(&mut left[a], &mut right[0])
+	} else {
+		let (left, right) = items.split_at_mut(a);
+		(&mut right[0], &mut left[b])
+	}
+}
+
 fn speaker_at(shot: &Shot, time: f32) -> Option<&str> {
 	shot.lines
 		.iter()
@@ -1347,7 +1496,7 @@ fn balance_markers(chunks: Vec<String>) -> Vec<String> {
 fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 	let pad_x = 34.0 * unit;
 	let pad_y = CARD_PAD_Y * unit;
-	let card = Path::wobbly_poly(
+	svg.text_card(
 		&[
 			pt(bounds.x - pad_x, bounds.y - pad_y),
 			pt(bounds.x + bounds.w + pad_x, bounds.y - pad_y),
@@ -1358,7 +1507,6 @@ fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 		2.0 * unit,
 		svg.seed(17),
 	);
-	svg.inked(&card, palette::PAPER);
 }
 
 #[cfg(test)]

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-34 -52 68 96" data-grip="0 6" data-hands="one" data-about="A glass jar of round sweets with a red lid and a label.">
+  <title>A sweet jar</title>
+  <path id="glass" d="M-30 -30 C-34 -10 -34 20 -30 34 C-28 42 28 42 30 34 C34 20 34 -10 30 -30 C20 -34 -20 -34 -30 -30 Z" fill="ice"/>
+  <path id="sweet-1" d="M-23 28 C-23 23 -19 19 -14 19 C-9 19 -5 23 -5 28 C-5 33 -9 37 -14 37 C-19 37 -23 33 -23 28 Z" fill="bubblegum" data-line="detail"/>
+  <path id="sweet-2" d="M-4 30 C-4 25 0 21 5 21 C10 21 14 25 14 30 C14 35 10 39 5 39 C0 39 -4 35 -4 30 Z" fill="sunflower" data-line="detail"/>
+  <path id="sweet-3" d="M11 18 C11 13.6 14.6 10 19 10 C23.4 10 27 13.6 27 18 C27 22.4 23.4 26 19 26 C14.6 26 11 22.4 11 18 Z" fill="teal" data-line="detail"/>
+  <path id="sweet-4" d="M-10 14 C-10 9.6 -6.4 6 -2 6 C2.4 6 6 9.6 6 14 C6 18.4 2.4 22 -2 22 C-6.4 22 -10 18.4 -10 14 Z" fill="grape" data-line="detail"/>
+  <path id="sweet-5" d="M-26 10 C-26 6.1 -22.9 3 -19 3 C-15.1 3 -12 6.1 -12 10 C-12 13.9 -15.1 17 -19 17 C-22.9 17 -26 13.9 -26 10 Z" fill="tangerine" data-line="detail"/>
+  <path id="label" d="M-17 -22 L17 -22 C19.2 -22 21 -20.2 21 -18 L21 -6 C21 -3.8 19.2 -2 17 -2 L-17 -2 C-19.2 -2 -21 -3.8 -21 -6 L-21 -18 C-21 -20.2 -19.2 -22 -17 -22 Z" fill="cream" data-line="detail"/>
+  <path id="label-heart" d="M-6 -13 C-6 -18 0 -18 0 -13 C0 -18 6 -18 6 -13 C6 -9 0 -6 0 -6 C0 -6 -6 -9 -6 -13" fill="none" stroke="#f2543d" stroke-width="3"/>
+  <path id="lid" d="M-28 -32 C-28 -40 -26 -46 -22 -48 C-8 -51 8 -51 22 -48 C26 -46 28 -40 28 -32 C14 -29 -14 -29 -28 -32 Z" fill="tomato" data-shade="1"/>
+  <path id="shine" d="M-24 -10 C-26 4 -26 18 -23 30" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.75"/>
+</svg>
