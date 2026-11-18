@@ -21,7 +21,7 @@ done < <(find worlds -name story.md | sort)
 
 echo "styles"
 while IFS= read -r style; do
-	"${fables[@]}" style check "${style%%:*}"
+	"${fables[@]}" style check "${style%% *}"
 done < <("${fables[@]}" style list)
 
 echo "puppets"
