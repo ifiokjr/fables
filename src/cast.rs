@@ -108,13 +108,6 @@ pub struct Guest {
 	pub member: Member,
 }
 
-impl Guest {
-	/// How directions name them when their id clashes with a local cast member: `world.id`.
-	pub fn qualified(&self) -> String {
-		format!("{}.{}", self.world, self.member.id)
-	}
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct Cast {
 	pub members: BTreeMap<String, Member>,
@@ -432,7 +425,12 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 		.collect::<Result<Vec<_>>>()?;
 
 	let puppet = match &entry.puppet {
-		Some(file) => Some(Authored::load(&dir.join(file), style)?),
+		Some(file) => {
+			Some(Authored::load(
+				&crate::world::under(dir, "puppet", file)?,
+				style,
+			)?)
+		}
 		None => None,
 	};
 
@@ -610,5 +608,27 @@ colour = "#c9865a"
 			puppet.parts.get("hand-fist").is_some(),
 			"kit parts come along"
 		);
+	}
+
+	#[test]
+	fn a_puppet_file_must_live_beside_the_cast_file() {
+		let dir = tempfile::tempdir().unwrap();
+		let path = dir.path().join("cast.toml");
+
+		for puppet in ["../outside.svg", "/etc/passwd", "puppets/../../outside.svg"] {
+			std::fs::write(
+				&path,
+				format!("[kid]\nname = \"Kid\"\npuppet = \"{puppet}\"\n"),
+			)
+			.unwrap();
+			let error = format!(
+				"{:#}",
+				Cast::load(&path, &StylePack::default_pack()).unwrap_err()
+			);
+			assert!(
+				error.contains("puppet name") && error.contains(puppet),
+				"{puppet}: {error}"
+			);
+		}
 	}
 }

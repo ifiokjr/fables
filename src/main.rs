@@ -354,14 +354,14 @@ fn run(cli: Cli) -> Result<()> {
 		}
 		Command::Styles { story, out } => {
 			each(&story, |path| {
-				let (story, cast) = load(path, None, flag)?;
+				let (story, cast, _) = load(path, None, flag)?;
 				styles(&story, &cast, &out)
 			})
 		}
 		Command::Check { story } => each_style(&story, &choices, flag, check),
 		Command::Review { story, out } => {
 			each(&story, |path| {
-				let (story, cast) = load(path, None, flag)?;
+				let (story, cast, _) = load(path, None, flag)?;
 				review(&story, &cast, &out)
 			})
 		}
@@ -466,8 +466,17 @@ fn each_style(
 	mut action: impl FnMut(&Story, &Cast) -> Result<()>,
 ) -> Result<()> {
 	each(path, |script| {
+		let mut resolved = None;
+
 		for choice in choices {
-			let (story, cast) = load(script, choice.as_deref(), world)?;
+			let (story, cast, dir) = load(script, choice.as_deref(), world)?;
+
+			// Say which world a script resolved, so a redirected build is visible.
+			if resolved.as_ref() != Some(&dir) {
+				println!("  world: {}", dir.display());
+				resolved = Some(dir);
+			}
+
 			println!("  style: {}", story.style().name.name());
 			action(&story, &cast)?;
 		}
@@ -535,6 +544,10 @@ fn new_story(
 	let recipe = std::fs::read_to_string(&recipe)
 		.with_context(|| format!("could not read {}", recipe.display()))?;
 	let slug = fables::story::slugify(title);
+	anyhow::ensure!(
+		!slug.is_empty(),
+		"the title needs at least one letter or digit: it names the book's folder"
+	);
 	let folder = dir
 		.map_or_else(|| world.stories(), Path::to_path_buf)
 		.join(&slug);
@@ -563,7 +576,7 @@ fn new_story(
 	println!("✓ wrote {} from the {} recipe", path.display(), world.name);
 
 	if let Err(error) =
-		load(&path, None, Some(&world.dir)).and_then(|(story, cast)| check(&story, &cast))
+		load(&path, None, Some(&world.dir)).and_then(|(story, cast, _)| check(&story, &cast))
 	{
 		println!("  next: {error:#}");
 		println!(
@@ -577,7 +590,8 @@ fn new_story(
 }
 
 /// Loads a script and its world's cast, furnished with the world's book matter and narrator.
-fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story, Cast)> {
+/// Returns the resolved world folder too, so a build says which world it read.
+fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story, Cast, PathBuf)> {
 	let mut story = Story::load(path)?;
 
 	if let Some(name) = style {
@@ -594,7 +608,7 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 	world.furnish(&mut story)?;
 	let cast = world.cast_for(&story)?;
 
-	Ok((story, cast))
+	Ok((story, cast, world.dir.clone()))
 }
 
 fn check(story: &Story, cast: &Cast) -> Result<()> {

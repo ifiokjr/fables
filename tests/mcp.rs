@@ -413,3 +413,251 @@ fn an_agent_invites_a_guest_from_another_world() {
 	);
 	assert_eq!(kept["isError"], true, "the refused story is not kept");
 }
+
+/// A settings file outside the root, with the parts a setting needs, so only the sandbox can
+/// refuse copying it in.
+const DECOY_SETTING: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2080">
+  <title>Decoy</title>
+  <path id="near-secret-vault" d="M0 0 L100 100 Z" fill="moss"/>
+</svg>"#;
+
+const MINIMAL_SCRIPT: &str = "+++\ntitle = \"Probe\"\nauthor = \"A\"\n+++\n# park\nHi.\n";
+
+/// Every tool that takes a world, story, setting or character name, or a `from` setting.
+fn calls_taking_a_name(name: &str) -> Vec<(&'static str, Value)> {
+	let colours = json!({
+		"skin": "#f4c766", "hair": "#7a4a35", "top": "#ec7aa6", "trim": "#fff8ef",
+		"bottom": "#2e9a90", "shoes": "#7a5cb8", "eyes": "#5d9e5a"
+	});
+
+	vec![
+		("world_describe", json!({ "world": name })),
+		("setting_list", json!({ "world": name })),
+		(
+			"character_create",
+			json!({ "world": "nibbleton", "character": { "id": name, "name": "Probe", "colours": colours } }),
+		),
+		(
+			"character_parts",
+			json!({ "world": "nibbleton", "id": name }),
+		),
+		(
+			"character_set_parts",
+			json!({ "world": "nibbleton", "id": name, "parts": [] }),
+		),
+		(
+			"character_sheet",
+			json!({ "world": "nibbleton", "id": name }),
+		),
+		(
+			"voice_cast",
+			json!({ "world": "nibbleton", "id": name, "voice": { "provider": "say", "name": "Daniel" } }),
+		),
+		(
+			"voice_audition",
+			json!({ "world": "nibbleton", "who": name, "line": "Hi." }),
+		),
+		(
+			"story_write",
+			json!({ "world": "nibbleton", "story": name, "script": MINIMAL_SCRIPT }),
+		),
+		("story_read", json!({ "world": "nibbleton", "story": name })),
+		(
+			"story_check",
+			json!({ "world": "nibbleton", "story": name }),
+		),
+		(
+			"story_review",
+			json!({ "world": "nibbleton", "story": name }),
+		),
+		(
+			"book_render",
+			json!({ "world": "nibbleton", "story": name }),
+		),
+		(
+			"page_render",
+			json!({ "world": "nibbleton", "story": name, "page": 1 }),
+		),
+		(
+			"storyboard_render",
+			json!({ "world": "nibbleton", "story": name }),
+		),
+		(
+			"video_frames",
+			json!({ "world": "nibbleton", "story": name, "times": [0.0] }),
+		),
+		(
+			"video_render",
+			json!({ "world": "nibbleton", "story": name, "preview": true }),
+		),
+		(
+			"setting_create",
+			json!({ "world": "nibbleton", "setting": name, "about": "Probe" }),
+		),
+		(
+			"setting_parts",
+			json!({ "world": "nibbleton", "setting": name }),
+		),
+		(
+			"setting_set_parts",
+			json!({ "world": "nibbleton", "setting": name, "parts": [] }),
+		),
+		(
+			"setting_render",
+			json!({ "world": "nibbleton", "setting": name }),
+		),
+	]
+}
+
+/// The sandbox the readme promises: a name is a slug, never a path, and nothing outside the
+/// root is read or written, whichever tool is asked.
+#[test]
+fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
+	// The root and the decoy are siblings, as in the report's reproduction, so the relative
+	// `..` forms really do leave the root.
+	let base = tempfile::tempdir().unwrap();
+	let root = base.path().join("root");
+	let outside = base.path().join("outside");
+	std::fs::create_dir_all(&root).unwrap();
+	std::fs::create_dir_all(&outside).unwrap();
+
+	// A decoy setting, and a decoy world with a book, both outside the root.
+	let decoy = outside.join("decoy.svg");
+	std::fs::write(&decoy, DECOY_SETTING).unwrap();
+	let away = outside.join("worlds/away");
+	std::fs::create_dir_all(away.join("stories/book")).unwrap();
+	std::fs::write(away.join("world.toml"), "name = \"Away\"\n").unwrap();
+	std::fs::write(away.join("stories/book/story.md"), MINIMAL_SCRIPT).unwrap();
+
+	let mut session = Session::start(&root);
+	session.json("world_create", &json!({ "name": "Nibbleton" }));
+	session.json(
+		"character_create",
+		&json!({
+			"world": "nibbleton",
+			"character": {
+				"id": "nell", "name": "Nell Nibbles",
+				"colours": {
+					"skin": "#f4c766", "hair": "#7a4a35", "top": "#ec7aa6", "trim": "#fff8ef",
+					"bottom": "#2e9a90", "shoes": "#7a5cb8", "eyes": "#5d9e5a"
+				}
+			}
+		}),
+	);
+	session.json(
+		"story_write",
+		&json!({ "world": "nibbleton", "story": "nell-nibbles", "script": MINIMAL_SCRIPT }),
+	);
+	// A setting of the world's own, so its `settings/` folder exists: a relative `..` needs it.
+	session.json(
+		"setting_create",
+		&json!({ "world": "nibbleton", "setting": "harbour", "about": "The harbour wall" }),
+	);
+
+	let forms = [
+		// `setting_create` appends `.svg`, so the reported exploit names the decoy without it.
+		decoy.with_extension("").display().to_string(),
+		decoy.display().to_string(),
+		"../../../outside/decoy".into(),
+		"../../../../outside/decoy".into(),
+		"../worlds/away".into(),
+		"/etc/passwd".into(),
+		"..".into(),
+	];
+
+	for form in &forms {
+		for (tool, arguments) in calls_taking_a_name(form) {
+			let result = session.request(
+				"tools/call",
+				&json!({ "name": tool, "arguments": arguments }),
+			);
+
+			assert_eq!(
+				result["isError"],
+				json!(true),
+				"{tool} accepted `{form}`: {result}"
+			);
+		}
+
+		// `setting_create`'s `from` is the reported hole: a copy of a file outside the root.
+		let result = session.request(
+			"tools/call",
+			&json!({
+				"name": "setting_create",
+				"arguments": {
+					"world": "nibbleton", "setting": "stolen", "about": "Probe", "from": form
+				}
+			}),
+		);
+		assert_eq!(
+			result["isError"],
+			json!(true),
+			"setting_create copied `{form}`: {result}"
+		);
+	}
+
+	// A display name is slugified rather than refused, and lands under `worlds/`.
+	let created = session.request(
+		"tools/call",
+		&json!({ "name": "world_create", "arguments": { "name": "../../outside" } }),
+	);
+	assert!(
+		created["isError"] == json!(true)
+			|| created["content"][0]["text"]
+				.as_str()
+				.is_some_and(|text| text.contains("\"folder\": \"outside\"")),
+		"{created}"
+	);
+	assert!(
+		!outside.join("outside").exists(),
+		"no world was made outside the root"
+	);
+	assert!(
+		!root.join("outside").exists(),
+		"no world was made beside the root"
+	);
+
+	// Nothing outside the root was read into it or written to.
+	assert_eq!(
+		std::fs::read_to_string(&decoy).unwrap(),
+		DECOY_SETTING,
+		"the decoy is untouched"
+	);
+	assert!(
+		!root.join("worlds/nibbleton/settings/stolen.svg").exists(),
+		"nothing was copied into the world"
+	);
+}
+
+/// A story written over MCP belongs to the world it is written into, so its front matter may
+/// not name another world.
+#[test]
+fn a_story_written_over_mcp_cannot_name_its_own_world() {
+	let root = tempfile::tempdir().unwrap();
+	let mut session = Session::start(root.path());
+	session.json("world_create", &json!({ "name": "Nibbleton" }));
+
+	let refused = session.request(
+		"tools/call",
+		&json!({
+			"name": "story_write",
+			"arguments": {
+				"world": "nibbleton",
+				"story": "elsewhere",
+				"script": "+++\ntitle = \"Elsewhere\"\nauthor = \"A\"\nworld = \"../elsewhere\"\n+++\n# plain\nHi.\n"
+			}
+		}),
+	);
+	assert_eq!(refused["isError"], true);
+	let error = refused["content"][0]["text"].as_str().unwrap();
+	assert!(
+		error.contains("world") && error.contains("written into"),
+		"{error}"
+	);
+
+	let kept = session.request(
+		"tools/call",
+		&json!({ "name": "story_read", "arguments": { "world": "nibbleton", "story": "elsewhere" } }),
+	);
+	assert_eq!(kept["isError"], true, "the refused story is not kept");
+}
