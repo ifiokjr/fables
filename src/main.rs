@@ -298,6 +298,13 @@ enum CharacterAction {
 	},
 }
 
+/// A skin tone picked from the id, so the same id always gets the same one and a cast
+/// made without `--skin` is not all one colour.
+fn default_skin(id: &str) -> &'static str {
+	let tones = fables::art::palette::SKIN_TONES;
+	tones[(fables::art::seed_of(id) >> 20) as usize % tones.len()]
+}
+
 // What `fables character new` takes; boxed, so the other actions stay small.
 #[derive(clap::Args)]
 struct NewCharacter {
@@ -312,9 +319,9 @@ struct NewCharacter {
 	/// Who they are, in a sentence.
 	#[arg(long)]
 	about: Option<String>,
-	/// Their skin: a palette name or #rrggbb (default: tangerine, a cartoon orange). The
-	/// palette names that read as skin are cream, sand, toffee and cocoa; any colour is
-	/// allowed. The palette: paper, ink, white, tangerine, sunflower, mustard, bubblegum,
+	/// Their skin: a palette name or #rrggbb. The palette names that read as skin are
+	/// cream, sand, toffee and cocoa; left out, one of those is picked from the id, the
+	/// same one every time. Any colour is allowed. The palette: paper, ink, white, tangerine, sunflower, mustard, bubblegum,
 	/// flamingo, blush, tomato, teal, mint, ice, sky, cornflower, grape, lilac, leaf, meadow,
 	/// moss, bog, cocoa, toffee, sand, plum, slate, night, cream.
 	#[arg(long)]
@@ -625,6 +632,7 @@ fn run(cli: Cli) -> Result<()> {
 					} else {
 						BuildName::Kid
 					};
+					let skin = skin.unwrap_or_else(|| default_skin(&id).into());
 					let brief = CharacterBrief {
 						id,
 						name,
@@ -637,7 +645,7 @@ fn run(cli: Cli) -> Result<()> {
 						about,
 						habit: None,
 						colours: Colours {
-							skin: skin.unwrap_or_else(|| "tangerine".into()),
+							skin,
 							hair: hair_colour.unwrap_or_else(|| "plum".into()),
 							top: top.unwrap_or_else(|| "teal".into()),
 							trim: trim.unwrap_or_else(|| "cream".into()),
@@ -2041,6 +2049,18 @@ fn done(path: &Path, started: Instant) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+	#[test]
+	fn a_default_skin_is_a_skin_tone_and_stable() {
+		for id in ["pip", "nell", "otto", "wren", "gran-fennel"] {
+			assert!(fables::art::palette::SKIN_TONES.contains(&default_skin(id)));
+			assert_eq!(default_skin(id), default_skin(id));
+		}
+		let tones: std::collections::BTreeSet<_> = ["pip", "nell", "otto", "wren", "juno", "hob"]
+			.map(default_skin)
+			.into();
+		assert!(tones.len() > 1, "a cast should not all share one tone");
+	}
+
 	use super::*;
 
 	#[test]
