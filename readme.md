@@ -23,6 +23,13 @@ Every character is a **puppet drawn in code**, not a generated picture. That one
 
 The house style, setting and series rules live in the series bible, [`worlds/kerfuffle/kerfuffle.md`](worlds/kerfuffle/kerfuffle.md). Character voices, voice APIs and turning the books into a show are covered in [`docs/tv-show.md`](docs/tv-show.md).
 
+## Where to read next
+
+1. **[Your first cartoon in five minutes](docs/first-cartoon.md)**: an empty folder to a rendered book, storyboard and preview video, using only the command line.
+2. **[Directing](docs/directing.md)**: the craft rules `fables review` applies.
+3. **[Animation](docs/animation.md)**: how the rig, the acting layer and the camera move.
+4. **[Voices and the show](docs/tv-show.md)**: real voices, character consistency and turning the books into a series.
+
 ## Worlds
 
 A world is a series: a folder with a `world.toml`, its cast, its puppets and its books. Kerfuffle is the first one.
@@ -36,13 +43,14 @@ worlds/kerfuffle/
   stories/        one folder per book, each with a story.md
 ```
 
-Commands find a script's world by walking up to the nearest `world.toml`. Commands without a script, such as `sheets`, `rig`, `new` and `puppet`, use the world above the current folder, or the only world in `./worlds/`. `--world <folder>` picks one explicitly, and a script can name its own with `world = "…"` in its front matter, relative to the script.
+Commands find a script's world by walking up to the nearest `world.toml`. Commands without a script, such as `sheets`, `rig`, `new`, `character` and `puppet`, use the world above the current folder, or the only world in `./worlds/`. `--world <folder>` picks one explicitly, `--root <folder>` says which folder holds `worlds/`, and a script can name its own with `world = "…"` in its front matter, relative to the script.
 
-A world needs only a name to start:
+A world needs only a name to start, and `fables world new "Kerfuffle" --style cartoon --author "Ifiok Jr."` writes one for you:
 
 ```toml
 name = "Kerfuffle"
 style = "cartoon"           # optional: the drawing style its folk are drawn in (default cartoon)
+author = "Ifiok Jr."        # optional: the author credited in its books, unless a book names one
 light = "golden"            # optional: the light every page starts in (default day)
 
 [narrator]                  # optional: who reads every book aloud, unless a script names its own [voice]
@@ -55,24 +63,27 @@ meet = ["Have you met the rest of **Kerfuffle**?"]
 draw = ["**Draw your own Kerfuffle folk!**"]
 ```
 
+`fables world new` writes `worlds/<slug>/` with that file, a `cast.toml` holding a commented example and nothing else, a `puppets/` folder and a `stories/` folder, then prints the next command. `fables character new <id> --name "…"` adds a cast member; `fables setting new <name>` starts a place.
+
 ## Drawing styles
 
-A drawing style is a folder in `styles/` that authored puppets are drawn with, so a new look is data rather than code:
+A drawing style is a folder in `styles/` that characters are drawn from, so a new look is data rather than code:
 
 ```text
 styles/cartoon/
-  style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, and the bodies (kid, grown-up)
+  style.toml      the finish (line weights, light, cel shadow), the face cylinder, where the features sit, how eyes are built, the kit's inks, the bodies (kid, grown-up), and the page skin that suits the look
   kit.svg         parts every character in the style starts with: hands, eyes, mouths, shoes, props
-  template.svg    a plain character's own parts, which `fables puppet template` starts new characters from
+  template.svg    a plain character's own parts, which new characters are drawn from
 ```
 
 | Command | What it does |
 | --- | --- |
-| `fables style list` | The drawing styles, with a sentence on each look. |
+| `fables style list` | The drawing styles, with a sentence on each look and the page skin it prints in. |
 | `fables style check <name>` | Checks the template over the kit draws a whole figure, and every body stands up. |
+| `fables style describe <name>` | Every part a figure is drawn with (which are turning pairs, which are required), its coordinate space, and the rules for drawing parts. |
 | `fables style sheet <name>` | `out/styles/<name>-model.png` (the template kid on a model sheet) and `<name>-parts.png` (every kit and template part). |
 
-| Style | Look |
+| Drawing style | Look |
 | --- | --- |
 | `cartoon` | Kerfuffle's look: round kids with big heads, brushed outlines that swell on the shadow side, one tone of cel shadow. |
 | `anime` | Slender kids and grown-ups with the head about a quarter of their height; big eyes with a shaded iris, a pupil, a rim and two highlights; a tiny nose and mouth; thin even lines; hard two-tone cel shading. |
@@ -83,7 +94,7 @@ styles/cartoon/
 | `mid-century` | Mid-century modern: angular, geometric characters on a wedge of a neck, with limbs cut as wedges and flat, pointed shoes; a small flat palette that every colour (settings included) snaps to; clean, even angular lines with the colour printed off them by one fixed slip, the same on every part; no shading; held poses that snap between keys on twos. Abstract settings suit it, in the riso skin. |
 | `chibi` | Tiny characters about two heads tall: the anime face with enormous eyes, mitten hands, stubby limbs, soft self-coloured lines with a rim light, and springy, bouncy motion with a gentle idle bob. |
 
-Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one, [`worlds/tramline/`](worlds/tramline) a clear-line one with its own square, [`worlds/sundial-heights/`](worlds/sundial-heights) a mid-century one with an abstract plaza, and [`worlds/teacup-town/`](worlds/teacup-town) a chibi one; their stars, Hana, Ren, Clem, Zia, Otto and Mochi, were designed entirely through the MCP tools below.
+Every kid stands as tall on the page as a cartoon kid, and every grown-up as tall as the others, so a style's proportions change the drawing, not the page layout. Every style also names the **page skin** that suits it (`skin` in its `style.toml`): `clear-line` prints in `clear`, and the others print in `riso`. A book uses that skin unless its script or `--style` names another (see [Art styles](#art-styles)). [`worlds/kiteharbour/`](worlds/kiteharbour) is a small anime test world and [`worlds/hayate-street/`](worlds/hayate-street) a manga one, [`worlds/hoppington/`](worlds/hoppington) a rubber-hose one, [`worlds/tramline/`](worlds/tramline) a clear-line one with its own square, [`worlds/sundial-heights/`](worlds/sundial-heights) a mid-century one with an abstract plaza, and [`worlds/teacup-town/`](worlds/teacup-town) a chibi one; their stars, Hana, Ren, Clem, Zia, Otto and Mochi, were designed entirely through the MCP tools below.
 
 A style is four dials: its construction (bodies, features, eyes and kit), and three tables in `style.toml` whose defaults are the cartoon look:
 
@@ -106,11 +117,11 @@ The kit can draw two more parts: `neck` (front and three-quarter, in bone units 
 
 `fables rig <id> --motion <style>` shows a character moving the way another style moves.
 
-The built-in styles are compiled into fables, so a world anywhere on disk can name one. They are separate from the `--style` skins (riso, tv, bold…), which restyle the older parametric puppet and the settings.
+The built-in drawing styles are compiled into fables, so a world anywhere on disk can name one. A drawing style is not a page skin: the page skins (`riso`, `tv`, `bold`, `cut-paper`, `crayon`, `storybook`, `clear`) print a page, and each drawing style names the skin that suits its look (`skin` in its `style.toml`).
 
 ## Settings
 
-A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page's art style, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene. A page's `light=` grades every colour the scene paints exactly once, paints `fill="sky"` parts with the light's sky gradient, and washes a haze and a vignette over the art; the story text and captions keep their own colours.
+A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page skin, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene. A page's `light=` grades every colour the scene paints exactly once, paints `fill="sky"` parts with the light's sky gradient, and washes a haze and a vignette over the art; the story text and captions keep their own colours.
 
 | Attribute | Meaning |
 | --- | --- |
@@ -140,11 +151,11 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | Tool | What it does |
 | --- | --- |
 | `guide` | The director's guide ([`docs/directing.md`](docs/directing.md)), by topic: overview, story, staging, camera, light, acting, mixing, workflow. |
-| `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences and a style, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
-| `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space and the drawing rules; the kit as an image. |
-| `character_create` | A new cast member from who they are and their colours, drawn from the style's template. |
-| `character_parts` | A character's parts as path data, their own or the kit's. |
-| `character_set_parts` | Writes or replaces parts and checks the figure. Changes that would break it are refused with the findings, so the world always loads. |
+| `world_list`, `world_create`, `world_describe` | The worlds under `<root>/worlds/`: start one from a name, a few sentences, a drawing style and an author, or read one back with its cast and books — and the other worlds whose characters a script's `guests` could invite. |
+| `style_list`, `style_describe`, `style_sheet` | The drawing styles; every part a figure is drawn with, its coordinate space, the drawing rules and the page skin the style prints in; the kit as an image. |
+| `character_create` | A new cast member from who they are and their colours, drawn from the style's template. `draw` also writes their part file. |
+| `character_parts` | A character's parts as path data: their own, their style's template's, or the kit's. |
+| `character_set_parts` | Writes or replaces parts and checks the figure. A character still drawn from the template is given a file of their own first. Changes that would break it are refused with the findings, so the world always loads. |
 | `character_sheet` | The model sheet (five beats, front and three-quarters), the parts sheet, or all fifteen moods, as images. |
 | `voice_providers`, `voice_list` | Which voice providers can speak now, and the offline macOS voices. |
 | `voice_cast`, `voice_audition` | Give a character their voice, and hear a line in it, delivered in a mood, as audio. |
@@ -163,28 +174,35 @@ Worlds and characters are named by slugs, never paths, so the server only reads 
 
 | Command | What it makes |
 | --- | --- |
+| `fables world new "<Name>" --style <drawing style> [--about "…"] [--author "…"]` | `worlds/<slug>/` with `world.toml`, a commented cast example, a `puppets/` folder and a `stories/` folder. |
+| `fables character new <id> --name "…" [--kind kid\|grown-up] [--about "…"] [--skin … --hair-colour … --top … --trim … --bottom … --shoes … --eyes … --pattern …] [--draw]` | A new cast member, drawn from the world's drawing style's template; `--draw` also writes their part file. |
+| `fables setting new <name> [--from <setting>] [--about "…"]` | A world's own setting, blank or repainted from one it already uses. |
 | `fables new "<Title>" --star <id>` | A new book in the world's `stories/<title>/story.md`, laid out from its `recipe.md` with the star already staged. |
-| `fables check <story>` | Validates the script and reports page and word counts. Errors give line numbers and list valid options. |
+| `fables check <story>` | Validates the script and reports the drawing style and page skin, page and word counts, and any cast fields a drawn character ignores. Errors give line numbers and list valid options. |
 | `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, mood arcs, pacing, light and shots. Advice, never a refusal; ends with a count of findings. |
-| `fables proofs <story>` | `out/<book>/<style>/proofs/`: one PNG per page plus `contact-sheet.png`, in about a second. |
-| `fables ebook <story>` | `out/<book>/<style>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
-| `fables print <story>` | `out/<book>/<style>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
-| `fables video <story> [--format landscape\|portrait\|both] [--preview]` | `out/<book>/<style>/video/`: MP4s, `soundtrack.wav`, `.srt` captions, a YouTube thumbnail and a 9:16 cover image. `--preview` renders at half size and 15 fps. |
-| `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<style>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. A hold a script-written cut leaves under 1.2 s is labelled `· short`. Never records a voice, so it runs offline in a second or two. |
+| `fables puppet parts <id> [part…]` | A character's parts as SVG path data: their own (or their style's template) and the kit's, each marked. |
+| `fables puppet set <id> <part> --d "…"` / `--file <svg>` | Writes parts through the same checked operation as MCP `character_set_parts`; a change that would break the figure is refused with the findings. |
+| `fables puppet template <id> [--from <id>]` | Starts the part file from the template (or another member's drawings) and adds the `puppet = …` line. |
+| `fables style describe <drawing style>` | Every part a figure is drawn with, which are turning pairs, the coordinate space and the drawing rules. |
+| `fables proofs <story>` | `out/<book>/<skin>/proofs/`: one PNG per page plus `contact-sheet.png`, in about a second. |
+| `fables ebook <story>` | `out/<book>/<skin>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
+| `fables print <story>` | `out/<book>/<skin>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
+| `fables video <story> [--format landscape\|portrait\|both] [--preview]` | `out/<book>/<skin>/video/`: MP4s, `soundtrack.wav`, `.srt` captions, a YouTube thumbnail and a 9:16 cover image. `--preview` renders at half size and 15 fps. |
+| `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<skin>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. A hold a script-written cut leaves under 1.2 s is labelled `· short`. Never records a voice, so it runs offline in a second or two. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
-| `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<style>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. |
-| `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every art style, side by side. |
-| `fables rig <id>` | `out/rig/<style>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character), a motion-test video, and an acting-test video (the ten acting rules, in order, on two characters). |
+| `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. |
+| `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every page skin, side by side. |
+| `fables rig <id>` | `out/rig/<skin>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character), a motion-test video, and an acting-test video (the ten acting rules, in order, on two characters). |
 
 Every command that takes `<story>` also takes a folder of books or a world: `fables all worlds/kerfuffle` builds every `story.md` in it.
-Every command also takes `--style`, so any render can be in any style without editing the script:
+Every command also takes `--style`, the **page skin**, so any render can print in any skin without editing the script. (For drawing styles such as `chibi` or `clear-line`, run `fables style list`.)
 
-- `--style storybook` draws in one style;
-- `--style bold,tv` draws in each listed style;
-- `--style all` draws in all six.
+- `--style storybook` prints in one skin;
+- `--style bold,tv` prints in each listed skin;
+- `--style all` prints in all seven.
 
-Without `--style`, a book uses the `style` in its front matter (or `riso`), and sheets and rigs use `riso`. Each style renders to its own folder, `out/<book>/<style>/`, so styles sit side by side and never overwrite each other. The voice cache is shared, so re-rendering a video in another style records nothing new.
+A book's skin is, in order: `--style` on the command line, `style` in the script's front matter, the page skin its world's drawing style names (`skin` in `styles/<style>/style.toml`), then `riso`. Without `--style` and a front-matter `style`, a chibi world prints in `riso` and a clear-line one in `clear`. Each skin renders to its own folder, `out/<book>/<skin>/`, so skins sit side by side and never overwrite each other. The voice cache is shared, so re-rendering a video in another skin records nothing new.
 
 Install with `cargo install --path .`, or use `cargo run --release --` in place of `fables`.
 
@@ -242,7 +260,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | --- | --- |
 | Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`, or one of the world's own (see Settings). |
 | `night`, `wilt=1`, `stink=0.5`, `mint=1`, `tint=sunflower` | Starting weather (`tint` colours the `plain` blob). |
-| `light=golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. It grades every colour in the scene once, paints the sky, aims the shadows and adds haze and a vignette. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. A bare `night` keeps today's behaviour exactly unless a `light=` is also given. Under a `light=` the light alone makes the night: parts keep their day colour and the light grades it, so `data-night` colours are for bare nights. |
+| `light=golden`, `golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. A bare preset word means `light=<preset>` in a heading (`# street golden`) or an `@scene` direction (`@scene dusk`). It grades every colour in the scene once, paints the sky, aims the shadows and adds haze and a vignette. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. Bare `night` and `day` keep their weather meaning exactly: `night` turns the sky night without naming a light, so the book's default light still applies. Under a `light=` the light alone makes the night: parts keep their day colour and the light grades it, so `data-night` colours are for bare nights. |
 | `speed=1`, `impact=1` | Manga effects: focus lines rushing in towards the first person on stage, or a jagged burst behind them. They work in every style. |
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
 | `size=0.9` | Scales the page's text. |
@@ -256,7 +274,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 
 `@actor word word key=value…`
 
-**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, `light=…`, and friends; the video eases the change over about a second), and `@camera …` the framing.
+**Actors** are cast ids from the world's `cast.toml` (`@stinky`), copies of them (`@stinky.monday`), or generic critters: `bird`, `dog`, `worm`, `flower`, `tree`, `toothbrush` (`@bird.a`, `@flower.3`). `@scene …` changes the weather mid-page (`wilt=`, `stink=`, a `light=` or a bare preset such as `@scene dusk`, and friends; the video eases the change over about a second), and `@camera …` the framing.
 
 | Kind | Values |
 | --- | --- |
@@ -302,39 +320,49 @@ A guest is directed by its id (`@hana`), or by `world.id` (`@kiteharbour.hana`) 
 
 ### New characters
 
-Add a table to the world's cast file, such as [`worlds/kerfuffle/cast.toml`](worlds/kerfuffle/cast.toml), built from puppet parts, then run `fables sheets` to see them:
+Add a table to the world's cast file, such as [`worlds/kerfuffle/cast.toml`](worlds/kerfuffle/cast.toml), built from puppet parts, then run `fables sheets` to see them. Or let the command line write the table:
+
+```bash
+fables character new grubby --name "Grubby McGrubhands" --about "Never washes his hands." \
+  --skin teal --hair-colour sunflower --top tomato --trim sunflower --bottom night \
+  --shoes cocoa --eyes cocoa --pattern star
+```
 
 ```toml
 [grubby]
 name = "Grubby McGrubhands"
 born = "Gus"
 habit = "Never washes his hands, so everything he touches turns to mud."
+kind = "kid"               # kid or grown-up
 skin = "teal"
-hair = "curls"            # bald tuft bun curls pigtails bob spikes puff fringe
 hair-colour = "sunflower"
 top = "tomato"
-pattern = "star"          # plain stripes dots star
+pattern = "star"           # plain stripes dots star
 trim = "sunflower"
-legwear = "trousers"      # shorts trousers skirt
+legwear = "trousers"       # shorts trousers skirt
 bottom = "night"
-extras = ["muddy-hands"]  # freckles glasses moustache apron post-cap satchel bow muddy-hands bogey lashes
-head = "wide"             # round egg wide
-body = "round"            # bell bean pear round
-nose = "round"            # button round long none
-eyes = "cocoa"            # iris colour
+shoes = "cocoa"
+extras = ["muddy-hands"]   # freckles glasses moustache apron post-cap satchel bow muddy-hands bogey lashes
+eyes = "cocoa"             # iris colour
 
-[grubby.voice]            # his own voice for dialogue (see Voices)
+[grubby.voice]             # his own voice for dialogue (see Voices)
 name = "Eddy (English (UK))"
 style = "A friendly, slightly mumbly six-year-old boy."
 ```
 
-Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book.
+A person with **no `puppet` line** is drawn from their world's drawing style's template, in their own colours, exactly as if `fables puppet template` had written the file and it had never been touched. That is how a new character is ready in one command.
 
-## Art styles and the rig
+- `fables puppet template <id>` writes `puppets/<id>.svg` from the template and adds the `puppet = "puppets/<id>.svg"` line itself, so a part can be redrawn with `fables puppet set <id> <part> --d "M…"`.
+- `fables character new <id> --name "…" --draw` writes both the table and the part file in one step.
+- `puppet = "parametric"` draws the older parametric puppet instead, the one that reads `hair`, `head`, `body`, `nose` and `mouth` (`mouth_size` in code). Those five fields do nothing on a character drawn from parts, and `fables check` says so once per member.
 
-**Styles are skins.** Choose one per book with `style = "..."` in the front matter, or render in any others with `--style` (one, a comma list, or `all`). `fables styles <story>` draws the same pages in every style so you can compare.
+Colours are palette names (see the bible) or `#rrggbb`. A character with a `habit` appears on the "Have you met the rest of Kerfuffle?" page in every other book. The full command-line vocabulary for a character is `fables puppet parts <id>` (their parts as path data) and `fables style describe <drawing style>` (every part, its space and the drawing rules).
 
-| Style | Look |
+## Art styles
+
+**A page skin is how the page prints.** Choose one per book with `style = "..."` in the front matter, or render in any others with `--style` (one, a comma list, or `all`). `fables styles <story>` draws the same pages in every skin so you can compare. A book that names neither uses the page skin its world's **drawing style** recommends (`skin` in `styles/<style>/style.toml`: `clear` for clear-line, `riso` for the others).
+
+| Page skin | Look |
 | --- | --- |
 | `riso` (default) | Two-colour riso print: flat inks, a wobbly line, fills off register, dot screens |
 | `tv` | Modern preschool TV: no outlines, clean shapes, soft gradient shading |
@@ -342,7 +370,9 @@ Colours are palette names (see the bible) or `#rrggbb`. A character with a `habi
 | `cut-paper` | Collage: paper fibres, torn edges, each shape casting a shadow |
 | `crayon` | Waxy scribbled colour that strays over the lines |
 | `storybook` | Pencil lines over soft watercolour washes on textured paper |
-| `clear` | One even outline everywhere, flat colour, no shading or texture (for the clear-line style) |
+| `clear` | One even outline everywhere, flat colour, no shading or texture (for the clear-line drawing style) |
+
+The drawing style decides how a figure is built (chibi, clear-line, rubber-hose…); the page skin decides how every page prints. `fables check` and every render say which is which: `drawing: chibi · skin: riso`.
 
 These are code-drawn looks. For illustrator-quality drawn art, the same rig can take drawn parts instead; see "Drawn art" in [`docs/tv-show.md`](docs/tv-show.md).
 
@@ -448,7 +478,7 @@ src/
 worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe and books
 settings/         the built-in settings, as part files
 styles/           drawing styles: style.toml, kit and template per look
-docs/             voices and turning the books into a show
+docs/             the five-minute guide, voices and turning the books into a show
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```
 
