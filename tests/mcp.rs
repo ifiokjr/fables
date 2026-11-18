@@ -487,6 +487,10 @@ fn calls_taking_a_name(name: &str) -> Vec<(&'static str, Value)> {
 			json!({ "world": "nibbleton", "story": name, "times": [0.0] }),
 		),
 		(
+			"video_render",
+			json!({ "world": "nibbleton", "story": name, "preview": true }),
+		),
+		(
 			"setting_create",
 			json!({ "world": "nibbleton", "setting": name, "about": "Probe" }),
 		),
@@ -546,6 +550,8 @@ fn a_path_outside_the_studio_root_is_refused_by_every_tool() {
 	);
 
 	let forms = [
+		// `setting_create` appends `.svg`, so the reported exploit names the decoy without it.
+		decoy.with_extension("").display().to_string(),
 		decoy.display().to_string(),
 		"../../outside/decoy".into(),
 		"../../../../outside/decoy".into(),

@@ -955,7 +955,8 @@ impl Studio {
 	}
 
 	/// Writes a book's script (a whole `story.md`) and checks it against the cast. A script
-	/// that doesn't parse or rehearse is not kept; the error says what to fix, by line.
+	/// that doesn't parse or rehearse is not kept; the error says what to fix, by line. A story
+	/// belongs to the world it is written into, so its front matter may not name a `world`.
 	pub fn write_story(
 		&self,
 		folder: &str,
@@ -2364,6 +2365,9 @@ mod tests {
 			.unwrap();
 
 		for from in [
+			// The tool appends `.svg`, so a decoy is named without it, as the report's
+			// reproduction does.
+			decoy.with_extension("").display().to_string(),
 			decoy.display().to_string(),
 			"../../outside/decoy".into(),
 			"../harbour".into(),
