@@ -1,15 +1,29 @@
 # fables
 
-Write a children's picture book as one plain-text script, and get all of these from it:
+[![CI](https://github.com/ifiokjr/fables/actions/workflows/ci.yml/badge.svg)](https://github.com/ifiokjr/fables/actions/workflows/ci.yml)
 
-- **page proofs** to review;
-- a **fixed-layout ePub** for Kindle and Apple Books;
-- a **KDP paperback** (interior and full-wrap cover PDFs);
-- **narrated, voice-acted videos** for YouTube (16:9) and for Shorts, TikTok and Reels (9:16). The characters do what the narrator says and can speak their own lines in their own voices, lip-synced.
+fables turns a picture-book script written as plain text into page proofs, a fixed-layout ePub,
+KDP paperback PDFs and narrated, lip-synced videos.
+
+**Status: early.** The script, the settings and the output formats may still change.
+
+## Quick start
+
+With [Rust](https://rustup.rs) installed, plus `ffmpeg` and a voice for the narration (macOS `say`
+works out of the box; see [Voices](#voices)):
 
 ```bash
-cargo run --release -- all worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
+git clone https://github.com/ifiokjr/fables
+cd fables
+cargo run --release -- proofs worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
+cargo run --release -- storyboard worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
+cargo run --release -- video --preview --format landscape worlds/kerfuffle/stories/stinky-mcstinkbreath/story.md
 ```
+
+The proofs and contact sheet, the storyboard and the preview video land under `out/`. Then read
+[`docs/directing.md`](docs/directing.md) for staging and camera,
+[`docs/animation.md`](docs/animation.md) for the rig and motion, and
+[Designing characters with an agent](#designing-characters-with-an-agent-mcp) for the MCP server.
 
 ## Why it works this way
 
@@ -194,7 +208,10 @@ Install with `cargo install --path .`, or use `cargo run --release --` in place 
 
 ### Requirements
 
-- **Rust** (edition 2024).
+- **Rust**, the pinned nightly in [`rust-toolchain.toml`](rust-toolchain.toml): `rustfmt.toml` uses
+  unstable options. `rustup` installs it, with `rustfmt` and `clippy`, the first time a command
+  runs in the checkout. The Nix shell in [`devenv.nix`](devenv.nix) uses the same rustup
+  toolchain, so it builds with the same compiler.
 - **ffmpeg** with libx264, for video.
 - **A narrator.** macOS `say` by default, or any TTS command (see [Voices](#voices)).
 
@@ -455,6 +472,16 @@ styles/           drawing styles: style.toml, kit and template per look
 docs/             voices and turning the books into a show
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```
+
+## Licence
+
+The code is released into the public domain under the [Unlicense](LICENSE). The Kerfuffle series'
+story text, character names and designs, the series bible and the puppet drawings under
+[`worlds/kerfuffle/`](worlds/kerfuffle) are copyright Ifiok Jr., all rights reserved; they are
+included so the tool can be seen working on a real series, and
+[`worlds/kerfuffle/LICENSE`](worlds/kerfuffle/LICENSE) says what that means. Every other world under
+[`worlds/`](worlds) is an example released with the code. The fonts in [`assets/fonts/`](assets/fonts)
+are under the SIL Open Font License, with their licence files beside them.
 
 ## Known limits
 
