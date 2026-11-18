@@ -6,6 +6,7 @@
 
 use crate::art::Bounds;
 use crate::art::Path;
+use crate::art::Plane;
 use crate::art::Pt;
 use crate::art::STAGE;
 use crate::art::Svg;
@@ -386,9 +387,12 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 	}
 
 	draw_shadow(svg, puppet);
+	// The actor takes the light as a figure, which keeps it forward of the setting.
+	let ground = svg.set_plane(Plane::Figure);
 	svg.begin(&subject_transform(puppet));
 	draw_subject(svg, puppet);
 	svg.end();
+	svg.set_plane(ground);
 
 	if puppet.opacity < 0.99 {
 		svg.end();
@@ -814,5 +818,37 @@ mod tests {
 		draw_puppet(&mut svg, &kid());
 		let day = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
 		assert!(!day.contains(&lean), "no cast lean in daylight: {day}");
+	}
+
+	/// An actor takes the light as a figure, the gentler grade that keeps it forward of the
+	/// setting, and hands the plane back to the setting when it is drawn.
+	#[test]
+	fn an_actor_is_graded_as_a_figure() {
+		let dusk = Light::of(Preset::Dusk);
+		let puppet = kid();
+		let Kind::Figure(look) = &puppet.kind else {
+			panic!("the kid is a figure");
+		};
+		let figure = dusk.grade(look.skin, Plane::Figure);
+		let ground = dusk.grade(look.skin, Plane::Ground(0.0));
+		assert_ne!(figure, ground, "the test needs planes that grade apart");
+
+		let mut svg = Svg::new();
+		svg.set_light(dusk);
+		draw_puppet(&mut svg, &puppet);
+		assert_eq!(
+			svg.set_plane(Plane::Ground(0.0)),
+			Plane::Ground(0.0),
+			"the setting's plane comes back"
+		);
+		let lit = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
+		assert!(
+			lit.contains(&figure.to_string()),
+			"the skin takes the figure's grade: {lit}"
+		);
+		assert!(
+			!lit.contains(&ground.to_string()),
+			"the skin does not take the setting's grade: {lit}"
+		);
 	}
 }

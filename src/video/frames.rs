@@ -44,6 +44,7 @@ use crate::video::audio::Sound;
 use crate::video::director;
 use crate::video::director::View;
 use crate::video::timeline::Framing;
+use crate::video::timeline::Line;
 use crate::video::timeline::Setup;
 use crate::video::timeline::Shot;
 use crate::video::timeline::ShotKind;
@@ -134,6 +135,8 @@ pub struct Renderer<'a> {
 	pub format: Format,
 	pub width: u32,
 	pub height: u32,
+	/// A pixel shape for a plate drawn outside the video format; `None` uses the format's.
+	aspect: Option<f32>,
 	/// Blurred backdrop images, one per setting, depth layer and weather, built once and
 	/// reused for every frame of a depth-of-field shot.
 	blur_cache: std::sync::Mutex<std::collections::HashMap<u64, String>>,
@@ -158,9 +161,23 @@ impl<'a> Renderer<'a> {
 			format,
 			width,
 			height,
+			aspect: None,
 			blur_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
 			view_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
 		}
+	}
+
+	/// This renderer at another pixel shape, for a plate that covers a different part of the
+	/// stage than the video format does.
+	#[must_use]
+	pub fn with_aspect(mut self, aspect: f32) -> Self {
+		self.aspect = Some(aspect);
+		self
+	}
+
+	/// The aspect of the pixels this renderer draws.
+	fn aspect(&self) -> f32 {
+		self.aspect.unwrap_or_else(|| self.format.aspect())
 	}
 
 	/// The view the frame at `time` is drawn with, without rendering it: where the camera
@@ -191,8 +208,32 @@ impl<'a> Renderer<'a> {
 		Ok(pixmap)
 	}
 
+	/// The frame at `time` through an explicit view, as a clean plate: the scene, its light and
+	/// the title card, but no captions and no page turn. Storyboard panels and animatic plates
+	/// are drawn this way.
+	pub fn render_view(&self, time: f32, frame: u64, view: View) -> Result<Pixmap> {
+		let mut pixmap = raster::render(&self.svg_view(time, frame, view)?)?;
+		raster::finish(&mut pixmap, &self.story.style(), 0.03, (frame / 2) as u32);
+
+		Ok(pixmap)
+	}
+
 	/// The frame as an SVG document.
 	pub fn svg(&self, time: f32, frame: u64) -> Result<String> {
+		let shot = self.timeline.shot_at(time);
+		let view = self.camera(shot, time);
+
+		self.svg_with_view(time, frame, view, true)
+	}
+
+	/// The frame as an SVG document through an explicit view, without the video's furniture.
+	pub fn svg_view(&self, time: f32, frame: u64, view: View) -> Result<String> {
+		self.svg_with_view(time, frame, view, false)
+	}
+
+	/// A frame with this renderer's furniture: captions, page turns and parallax when `video`,
+	/// and a clean plate when not.
+	fn svg_with_view(&self, time: f32, frame: u64, view: View, video: bool) -> Result<String> {
 		let shot = self.timeline.shot_at(time);
 		let local = time - shot.start;
 		let portrait = self.format.aspect() < 1.0;
@@ -200,9 +241,8 @@ impl<'a> Renderer<'a> {
 		let motion = self.story.drawing.motion;
 		let posed = motion.drawing_time(time, shot.start, shot.moving(time, TWEEN));
 		let (scene, puppets) = self.stage_at(shot, posed);
-		let view = self.camera(shot, time);
 		let (w, h) = (self.width as f32, self.height as f32);
-		let view_w = view.width(self.format.aspect());
+		let view_w = view.width(self.aspect());
 		let scale = h / view.height;
 		let mut svg = Svg::styled(self.story.style());
 		svg.boil = frame / 4;
@@ -210,8 +250,10 @@ impl<'a> Renderer<'a> {
 		weather.time = time;
 
 		// A page that enters with a push slides everything into place.
-		let sliding =
-			shot.transition == Transition::Push && shot.kind != ShotKind::Title && local < WIPE;
+		let sliding = video
+			&& shot.transition == Transition::Push
+			&& shot.kind != ShotKind::Title
+			&& local < WIPE;
 
 		if sliding {
 			svg.begin(&format!(
@@ -222,13 +264,20 @@ impl<'a> Renderer<'a> {
 
 		// Parallax: the sky and hills travel half as far as the camera does, from where the shot
 		// opened, so pans and push-ins reveal depth.
-		let opening = self.target(shot, shot.start);
-		let far = opening.blend(view, 0.5);
+		let far = if video {
+			self.target(shot, shot.start).blend(view, 0.5)
+		} else {
+			view
+		};
 		let far_scale = h / far.height;
-		let far_w = far.width(self.format.aspect());
+		let far_w = far.width(self.aspect());
 
 		// Depth of field: a close shot's setting softens behind its subject.
-		let blur = self.depth_of_field(setups, time);
+		let blur = if video {
+			self.depth_of_field(setups, time)
+		} else {
+			None
+		};
 
 		svg.fill(&Path::rect(0.0, 0.0, w, h), palette::PAPER);
 
@@ -290,10 +339,13 @@ impl<'a> Renderer<'a> {
 
 		match shot.kind {
 			ShotKind::Title => self.title_overlay(&mut svg, local),
-			ShotKind::Page(_) | ShotKind::End => self.captions(&mut svg, shot, time),
+			ShotKind::Page(_) | ShotKind::End if video => self.captions(&mut svg, shot, time),
+			ShotKind::Page(_) | ShotKind::End => {}
 		}
 
-		self.turn(&mut svg, shot, local)?;
+		if video {
+			self.turn(&mut svg, shot, local)?;
+		}
 
 		Ok(svg.finish((0.0, 0.0, w, h), self.width, self.height))
 	}
@@ -319,6 +371,8 @@ impl<'a> Renderer<'a> {
 			motion,
 			lines: self.spoken_lines(shot),
 			key_time: current.time,
+			// A dead stop freezes the idle movement as well as the sound.
+			hold: self.timeline.in_hold(time),
 		};
 		let mut puppets = Vec::with_capacity(after.len());
 
@@ -874,10 +928,11 @@ impl<'a> Renderer<'a> {
 	}
 
 	fn captions(&self, svg: &mut Svg, shot: &Shot, time: f32) {
-		let Some(line) = shot.lines.iter().find(|line| {
-			let duration = self.timeline.speeches[line.speech].duration();
-			time >= line.start && time < line.start + duration + 0.3
-		}) else {
+		let Some(line) = caption_line(
+			&shot.lines,
+			|speech| self.timeline.speeches[speech].duration(),
+			time,
+		) else {
 			return;
 		};
 
@@ -1196,6 +1251,22 @@ fn tallest_view(format: Format) -> f32 {
 // Arrivals, leaves, walk cycles, hops, follow-through, smears and everything else between
 // keyframes live in [`acting`](crate::video::acting), the performance layer.
 
+/// The line whose caption is up at `time`. A cue stops when the next line's audio begins, so a
+/// character's quoted words and the narrator's following sentence are two cues at the boundary
+/// the audio already has, and a cue never mixes two speakers.
+fn caption_line(lines: &[Line], duration: impl Fn(usize) -> f32, time: f32) -> Option<&Line> {
+	lines.iter().find(|line| {
+		let next = lines
+			.iter()
+			.filter(|other| other.start > line.start + 1e-3)
+			.map(|other| other.start)
+			.fold(f32::INFINITY, f32::min);
+		let until = (line.start + duration(line.speech) + 0.3).min(next);
+
+		time >= line.start && time < until
+	})
+}
+
 /// Splits a paragraph into caption-sized pieces, preferring breaks after punctuation.
 fn chunk(text: &str, limit: usize) -> Vec<String> {
 	let mut chunks: Vec<String> = Vec::new();
@@ -1293,6 +1364,52 @@ fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_caption_cue_never_runs_into_another_speaker() {
+		let line = |start: f32, speech: usize, voiced_by: Option<&str>, text: &str| {
+			Line {
+				start,
+				speech,
+				duration: 0.0,
+				speakers: voiced_by.map(|id| vec![id.to_owned()]).unwrap_or_default(),
+				text: text.to_owned(),
+				voiced_by: voiced_by.map(str::to_owned),
+				line: 0,
+			}
+		};
+		let lines = vec![
+			line(1.0, 0, Some("kid"), "\u{201c}Nope.\u{201d}"),
+			line(1.68, 1, None, "said Kid."),
+		];
+		let duration = |speech: usize| if speech == 0 { 0.5 } else { 0.4 };
+
+		// The quote is up while its own audio plays, and through its beat of silence.
+		assert_eq!(
+			caption_line(&lines, duration, 1.0)
+				.unwrap()
+				.voiced_by
+				.as_deref(),
+			Some("kid")
+		);
+		assert_eq!(
+			caption_line(&lines, duration, 1.67)
+				.unwrap()
+				.voiced_by
+				.as_deref(),
+			Some("kid")
+		);
+
+		// From the instant the narrator's tag begins, its cue is up: never two speakers at once.
+		assert_eq!(
+			caption_line(&lines, duration, 1.68).unwrap().voiced_by,
+			None
+		);
+		assert_eq!(caption_line(&lines, duration, 2.3).unwrap().voiced_by, None);
+		// And the last line's caption keeps its 0.3 s tail.
+		assert!(caption_line(&lines, duration, 2.37).is_some());
+		assert!(caption_line(&lines, duration, 2.4).is_none());
+	}
 
 	#[test]
 	fn captions_split_on_phrases_and_keep_markup_balanced() {

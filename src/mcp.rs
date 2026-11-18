@@ -32,6 +32,7 @@ use crate::studio::PartData;
 use crate::studio::SettingPart;
 use crate::studio::SettingWeather;
 use crate::studio::SheetKind;
+use crate::studio::StoryBrief;
 use crate::studio::Studio;
 use crate::studio::VideoShape;
 use crate::studio::VoiceChoice;
@@ -42,8 +43,8 @@ use crate::studio::WorldBrief;
 const GUIDE: &str = include_str!("../docs/directing.md");
 
 /// The guide's topics, which are its `##` headings.
-const GUIDE_TOPICS: [&str; 8] = [
-	"overview", "story", "staging", "camera", "light", "acting", "mixing", "workflow",
+const GUIDE_TOPICS: [&str; 9] = [
+	"overview", "story", "staging", "camera", "light", "acting", "mixing", "sound", "workflow",
 ];
 
 /// The guide's `##` sections, as (heading, body), in file order.
@@ -64,41 +65,46 @@ fn guide_section(topic: &str) -> Option<&'static str> {
 }
 
 /// What the server tells a model before it calls anything.
-const INSTRUCTIONS: &str = "\
+const INSTRUCTIONS: &str =
+	"\
 fables is a studio for illustrated books and cartoons. A world (a series) has a cast of characters \
-                            drawn as cut-out puppets from vector parts, in a drawing style.
+	 drawn as cut-out puppets from vector parts, in a drawing style.
 
 To design a character:
 1. `world_list`, or `world_create` for a new series.
 2. `style_describe` to learn the parts a figure is drawn with, the space each is drawn in, and \
-                            the hair, brows, noses and builds each body offers.
+	 the hair, brows, noses and builds each body offers.
 3. `character_create` with who they are, their colours, and their `kind` (kid or grown-up), \
-                            `hair`, `build`, `brows` and `nose`. Their parts start as the style's \
-                            template for their body (a grown-up's are cut for a grown-up) with \
-                            those variants; without a `hair` or `build`, one is picked from \
-                            their id.
+	 `hair`, `build`, `brows` and `nose`. Their parts start as the style's template for their body \
+	 (a grown-up's are cut for a grown-up) with those variants; without a `hair` or `build`, one is \
+	 picked from their id and written into the cast.
 4. `character_sheet` to see them. `character_parts` reads parts back as SVG path data (name kit \
-                            parts to see the shared ones).
+	 parts to see the shared ones).
 5. `character_set_parts` to redraw parts, then look at the sheet again. Repeat until they read as \
-                            themselves: a clear silhouette, a face that shows every mood.
+	 themselves: a clear silhouette, a face that shows every mood.
 
 Changes that would break a figure are refused with the part check's findings. A person signs off \
-                            every character's model sheet before the character is used in a book.
+	 every character's model sheet before the character is used in a book.
 
 To make a book:
 1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
-                            mixing and workflow.
+	 mixing, sound and workflow.
 2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
-3. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
-                            pages that start `# setting`, with narration and `@actor` stage \
-                            directions). It is checked against the cast and refused, with the \
-                            line to fix, if it doesn't work. `story_read` reads one back, for \
-                            example a world's existing books, to learn the format.
-4. `story_review` critiques it the way a director would: findings with line numbers and \
-                            suggestions, never a refusal. `storyboard_render` and `video_frames` \
-                            let you see the shots without encoding a video.
-5. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
-                            the ePub and KDP print files; `video_render` narrates and animates it.";
+3. `flow_list` shows the story flows a book can take, with each one's page and word budgets; \
+	 `flow_describe` prints one flow's beats. `story_start` returns the whole laid-out story.md \
+	 for a flow, with the star and friend staged; fill in the [bracketed] lines and `story_write` \
+	 it.
+4. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
+	 pages that start `# setting`, with narration and `@actor` stage directions). It is checked \
+	 against the cast and refused, with the line to fix, if it doesn't work. `story_read` reads \
+	 one back, for example a world's existing books, to learn the format.
+5. `story_review` critiques it the way a director would: findings with line numbers and \
+	 suggestions, never a refusal. `storyboard_render` returns the board and its text shot list; \
+	 `storyboard_pin` writes that plan into the script as editable `@camera` lines; \
+	 `animatic_render` holds each shot for its real duration over the soundtrack; `video_frames` \
+	 shows moments in time.
+6. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
+	 the ePub and KDP print files; `video_render` narrates and animates it.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct WorldParams {
@@ -114,7 +120,7 @@ pub struct StyleParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GuideParams {
-	/// The topic: overview, story, staging, camera, light, acting, mixing or workflow. Leave
+	/// The topic: overview, story, staging, camera, light, acting, mixing, sound or workflow. Leave
 	/// it out for the overview and the topic list.
 	pub topic: Option<String>,
 }
@@ -192,6 +198,28 @@ pub struct WriteStoryParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct FlowParams {
+	pub world: String,
+	/// The flow's name, from `flow_list`: `three-tries`, `pile-up` and the rest.
+	pub flow: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StartStoryParams {
+	pub world: String,
+	/// The book's title.
+	pub title: String,
+	/// The cast id of the star.
+	pub star: String,
+	/// The cast id of the second character, for a flow that stages two or a crowd.
+	pub friend: Option<String>,
+	/// The flow to start from, from `flow_list`; the world's `recipe.md` when left out.
+	pub flow: Option<String>,
+	/// The author on the title page; the world's author when left out.
+	pub author: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct BookParams {
 	pub world: String,
 	pub story: String,
@@ -227,6 +255,34 @@ pub struct StoryboardParams {
 	/// `landscape` (16:9, the default) or `portrait` (9:16).
 	#[serde(default)]
 	pub shape: Option<VideoShape>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StoryboardPinParams {
+	pub world: String,
+	pub story: String,
+	/// Pages to pin, counting from one; leave empty for every page.
+	#[serde(default)]
+	pub pages: Vec<usize>,
+	/// Remove the directions a previous pin wrote instead of pinning.
+	#[serde(default)]
+	pub unpin: bool,
+	/// Whose plan to pin: `landscape` (the default) or `portrait`.
+	#[serde(default)]
+	pub shape: Option<VideoShape>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AnimaticParams {
+	pub world: String,
+	pub story: String,
+	/// `landscape` (16:9, the default) or `portrait` (9:16).
+	#[serde(default)]
+	pub shape: Option<VideoShape>,
+	/// Leave every line silent, timed by its estimate, so nothing is recorded and no voice is
+	/// needed: a quick timing check.
+	#[serde(default)]
+	pub silent: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -420,8 +476,8 @@ impl StudioServer {
 
 	#[tool(
 		description = "The director's guide, by topic: overview, story, staging, camera, light, \
-		               acting, mixing or workflow. No topic returns the overview and the topic \
-		               list. Read it before directing a book or a cartoon."
+		               acting, mixing, sound or workflow. No topic returns the overview and the \
+		               topic list. Read it before directing a book or a cartoon."
 	)]
 	#[expect(
 		clippy::unused_self,
@@ -604,6 +660,44 @@ impl StudioServer {
 	}
 
 	#[tool(
+		description = "List the story flows a world's new books can start from: each one's name, \
+		               what it is for, how many characters it stages, its page and word budgets \
+		               and its beats. The world's own flows come before the built-ins."
+	)]
+	fn flow_list(&self, Parameters(params): Parameters<WorldParams>) -> CallToolResult {
+		json(self.studio.flows(&params.world))
+	}
+
+	#[tool(
+		description = "Describe one story flow: its about, what it is good for, the characters it \
+		               needs, its page and word budgets, and its beats as a table of what happens \
+		               over how many pages."
+	)]
+	fn flow_describe(&self, Parameters(params): Parameters<FlowParams>) -> CallToolResult {
+		json(self.studio.describe_flow(&params.world, &params.flow))
+	}
+
+	#[tool(
+		description = "Start a book from a story flow (or the world's recipe): returns the whole \
+		               story.md scaffold with the star and friend staged and every page laid out. \
+		               Fill in the [bracketed] lines, then write it with story_write."
+	)]
+	fn story_start(&self, Parameters(params): Parameters<StartStoryParams>) -> CallToolResult {
+		let brief = StoryBrief {
+			title: params.title,
+			star: params.star,
+			friend: params.friend,
+			flow: params.flow,
+			author: params.author,
+		};
+
+		match self.studio.start_story(&params.world, &brief) {
+			Ok(script) => CallToolResult::success(vec![ContentBlock::text(script)]),
+			Err(error) => failed(&error),
+		}
+	}
+
+	#[tool(
 		description = "Write a book's script (the whole story.md) into a world and check it \
 		               against the cast. A script that doesn't parse or rehearse is not kept; the \
 		               error says what to fix, by line. The story belongs to the world it is \
@@ -688,9 +782,11 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "The storyboard as images: the video's camera plan as a comic strip, one \
-		               labelled panel per setup. Never records a voice or encodes a video, so it \
-		               runs offline in a second or two."
+		description = "The storyboard: the video's camera plan as a comic strip, one labelled \
+		               panel per shot, and the same plan as a text shot list (page, script line, \
+		               timing, shot size, subjects, move, entry, who chose it, words spoken). \
+		               Never records a voice or encodes a video, so it runs offline in a second \
+		               or two."
 	)]
 	fn storyboard_render(
 		&self,
@@ -698,9 +794,62 @@ impl StudioServer {
 	) -> CallToolResult {
 		let shape = params.shape.unwrap_or(VideoShape::Landscape);
 
-		images(
+		match self.studio.storyboard(&params.world, &params.story, shape) {
+			Ok((text, images)) => {
+				let mut content = vec![ContentBlock::text(text)];
+
+				for image in images {
+					content.push(ContentBlock::text(image.label));
+					content.push(ContentBlock::image(
+						base64::engine::general_purpose::STANDARD.encode(&image.png),
+						"image/png",
+					));
+				}
+
+				CallToolResult::success(content)
+			}
+			Err(error) => failed(&error),
+		}
+	}
+
+	#[tool(
+		description = "Pin the director's shot list into a book's script as editable `@camera` \
+		               directions, one before the line or direction that starts each shot, or \
+		               remove the ones pinned before (`unpin`). A page that already directs its \
+		               own camera is left as written. `shape` picks whose plan is pinned \
+		               (landscape by default); pages where the other shape plans other shots are \
+		               named in one note. Returns the new script."
+	)]
+	fn storyboard_pin(
+		&self,
+		Parameters(params): Parameters<StoryboardPinParams>,
+	) -> CallToolResult {
+		let pages = (!params.pages.is_empty()).then_some(params.pages.as_slice());
+
+		json(self.studio.pin_story(
+			&params.world,
+			&params.story,
+			pages,
+			params.unpin,
+			params.shape.unwrap_or(VideoShape::Landscape),
+		))
+	}
+
+	#[tool(
+		description = "Cut an animatic: every storyboard shot held for its real duration over the \
+		               video's soundtrack, at half size. It draws each panel once and lets ffmpeg \
+		               hold it, so a ninety-second film takes seconds, not minutes. Returns the \
+		               MP4 and the shot list. Narrates any missing line once, then reuses the \
+		               voice cache. A line whose voice cannot speak here (no `say`, no API key, \
+		               no command) is left silent and timed by its estimate, and the shot list \
+		               says so; `silent: true` does that for every line, recording nothing."
+	)]
+	fn animatic_render(&self, Parameters(params): Parameters<AnimaticParams>) -> CallToolResult {
+		let shape = params.shape.unwrap_or(VideoShape::Landscape);
+
+		json(
 			self.studio
-				.storyboard_images(&params.world, &params.story, shape),
+				.render_animatic(&params.world, &params.story, shape, params.silent),
 		)
 	}
 
@@ -825,10 +974,15 @@ mod tests {
 			"story_read",
 			"story_check",
 			"story_review",
+			"flow_list",
+			"flow_describe",
+			"story_start",
 			"book_render",
 			"page_render",
 			"video_render",
 			"storyboard_render",
+			"storyboard_pin",
+			"animatic_render",
 			"video_frames",
 			"light_list",
 			"shot_list",
@@ -887,6 +1041,57 @@ mod tests {
 				assert!(text.text.contains("workflow"), "{}", text.text);
 			}
 			other => panic!("the error comes back as text: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn a_flow_lists_and_starts_a_book() {
+		let server = StudioServer::new(Path::new("."));
+		let listed = server.flow_list(Parameters(WorldParams {
+			world: "mumbleton".into(),
+		}));
+		assert_eq!(listed.is_error, Some(false));
+
+		match &listed.content[0] {
+			ContentBlock::Text(text) => {
+				assert!(text.text.contains("three-tries"), "{}", text.text);
+				assert!(text.text.contains("good_for"), "{}", text.text);
+			}
+			other => panic!("the flow list comes back as JSON text: {other:?}"),
+		}
+
+		let started = server.story_start(Parameters(StartStoryParams {
+			world: "mumbleton".into(),
+			title: "A Test Tale".into(),
+			star: "mo".into(),
+			friend: None,
+			flow: Some("three-tries".into()),
+			author: None,
+		}));
+		assert_eq!(started.is_error, Some(false));
+
+		match &started.content[0] {
+			ContentBlock::Text(text) => {
+				assert!(
+					text.text.contains("flow = \"three-tries\""),
+					"{}",
+					text.text
+				);
+				assert!(text.text.contains("@mo"), "{}", text.text);
+				assert!(
+					text.text.contains("[The star says what they want.]"),
+					"{}",
+					text.text
+				);
+				assert_eq!(
+					text.text.matches("\nage").count(),
+					1,
+					"one age line: {}",
+					text.text
+				);
+				assert!(text.text.contains("age = \"3-5\""), "{}", text.text);
+			}
+			other => panic!("the scaffold comes back as text: {other:?}"),
 		}
 	}
 

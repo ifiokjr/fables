@@ -20,3 +20,16 @@ pattern = "stripes"
 provider = "say"
 name = "Junior"
 rate = 150
+
+[nan]
+name = "Nan Mumble"
+about = "Mo's grandmother, who hangs the washing and hums the same three notes."
+kind = "grown-up"
+skin = "#c98a62"
+hair-colour = "#b9b3c9"
+top = "teal"
+trim = "cream"
+bottom = "plum"
+shoes = "cocoa"
+eyes = "cocoa"
+pattern = "plain"
