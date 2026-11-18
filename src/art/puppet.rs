@@ -213,11 +213,24 @@ fn fist_size(fist: &Shape) -> f32 {
 /// cartoon kid, and the stage stands every kid as tall as a cartoon kid, so a prop is drawn the
 /// same size on the page in every style's hands — a guest from another world holds the same
 /// ball — and a grown-up's bigger hand holds it bigger, as the style draws that hand.
-fn prop_scale(puppet: &Authored, build: Build) -> f32 {
+fn prop_scale(puppet: &Authored, build: Build, prop: &Prop) -> f32 {
 	let kid = |style: &StylePack| Frame::authored(style, Build::Kid).height();
+	let scale = props::held_scale(&puppet.style, build)
+		* (kid(&puppet.style) / kid(&StylePack::default_pack()));
+	// A held thing shows round the fist that holds it, however big the style draws its
+	// hands: a white glove must not swallow a pebble.
+	let (fist_lo, fist_hi) = puppet.required("hand-fist", 0.0).bounds();
+	let fist =
+		(fist_hi.x - fist_lo.x).max(fist_hi.y - fist_lo.y) * puppet.style.body(build).hand_scale;
+	let (lo, hi) = prop.bounds();
+	let longest = (hi.x - lo.x).max(hi.y - lo.y).max(1.0) * prop.held_size() * scale;
 
-	props::held_scale(&puppet.style, build) * (kid(&puppet.style) / kid(&StylePack::default_pack()))
+	scale * (FIST_PRESENCE * fist / longest).max(1.0)
 }
+
+/// How many times the fist holding it a held thing's longest side is drawn at least (see
+/// [`prop_scale`]).
+const FIST_PRESENCE: f32 = 1.7;
 
 /// How far a fist's centre sits from the wrist, in figure units (see [`grip`]).
 fn fist_reach(puppet: &Authored, build: Build) -> f32 {
@@ -351,7 +364,7 @@ fn up_place(puppet: &Authored, build: Build, prop: &Prop, facing: f32) -> (Pt, f
 	let (t, _) = turned(facing);
 	let body = puppet.style.body(build);
 	let zone = face_zone(puppet, build, t);
-	let scale = prop_scale(puppet, build);
+	let scale = prop_scale(puppet, build, prop);
 	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
 	let arm = body.limbs.upper_arm + body.limbs.forearm;
 	let shoulder = pt(
@@ -431,7 +444,7 @@ pub fn carry_hands(
 			let arm = body.limbs.upper_arm + body.limbs.forearm;
 			let zone = face_zone(puppet, build, t);
 			let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
-			let (lo, hi) = prop.held_box(pt(0.0, 0.0), prop_scale(puppet, build), 0.0);
+			let (lo, hi) = prop.held_box(pt(0.0, 0.0), prop_scale(puppet, build, prop), 0.0);
 			let (near, far) = body.shoulders_turned;
 			let centre = lerp(0.0, f32::midpoint(near, far), t);
 			// The arms nearly straight, so the elbows only just bow out.
@@ -482,7 +495,7 @@ fn float_place(
 	let body = puppet.style.body(build);
 	let zone = face_zone(puppet, build, t);
 	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
-	let (lo, hi) = prop.held_box(pt(0.0, 0.0), prop_scale(puppet, build), 0.0);
+	let (lo, hi) = prop.held_box(pt(0.0, 0.0), prop_scale(puppet, build, prop), 0.0);
 	let length = (body.limbs.upper_arm + body.limbs.forearm) * 0.9;
 	let across = if side > 0.0 {
 		(fist.x + length * 0.3).max(zone.1.x + room - lo.x)
@@ -1414,7 +1427,7 @@ fn draw_figure(
 			mouth,
 			time: state.time,
 			scale: props::held_scale(&puppet.style, look.build),
-			size: prop_scale(puppet, look.build),
+			size: prop_scale(puppet, look.build, prop),
 			carry: posed.carry,
 			build: look.build,
 			facing: state.facing,
@@ -1534,7 +1547,7 @@ pub fn draw_held(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureSt
 				mouth: mouth_on_body(&solved, &posed, inks.face, inks.features.mouth),
 				time: state.time,
 				scale: props::held_scale(&puppet.style, look.build),
-				size: prop_scale(puppet, look.build),
+				size: prop_scale(puppet, look.build, prop),
 				carry: posed.carry,
 				build: look.build,
 				facing: state.facing,
@@ -2395,7 +2408,7 @@ fn hand_lean(
 	let (t, _) = turned(facing);
 	let zone = face_zone(puppet, build, t);
 	let room = FACE_CLEARANCE * fist_size(&puppet.required("hand-fist", 0.0));
-	let scale = prop_scale(puppet, build);
+	let scale = prop_scale(puppet, build, prop);
 	let clear = |lean: f32| {
 		let (lo, hi) = prop.held_box(fist, scale, lean);
 		hi.x < zone.0.x - room
