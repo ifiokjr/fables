@@ -1,5 +1,6 @@
 //! The `fables` command line.
 
+use std::io::Write as _;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -24,6 +25,23 @@ use fables::story::Story;
 use fables::studio::SheetKind;
 use fables::video::frames::Format;
 use fables::world::World;
+
+/// Writes a line of the command's output, returning its error instead of panicking the way
+/// `println!` does.
+///
+/// The reader can go away before the command has finished: `fables style list | head -1` closes
+/// the pipe after its one line. [`main`] treats that broken pipe as the end of the job.
+fn say(line: std::fmt::Arguments<'_>) -> Result<()> {
+	writeln!(std::io::stdout().lock(), "{line}")?;
+	Ok(())
+}
+
+/// Writes a line of output through [`say`].
+macro_rules! say {
+	($($arg:tt)*) => {
+		say(format_args!($($arg)*))
+	};
+}
 
 /// Turn a picture-book script into proofs, an ePub, KDP print files and narrated videos.
 ///
@@ -251,10 +269,24 @@ impl Shape {
 }
 
 fn main() {
-	if let Err(error) = run(Cli::parse()) {
-		eprintln!("error: {error:#}");
-		std::process::exit(1);
+	match run(Cli::parse()) {
+		Ok(()) => {}
+		Err(error) if broken_pipe(&error) => {}
+		Err(error) => {
+			eprintln!("error: {error:#}");
+			std::process::exit(1);
+		}
 	}
+}
+
+/// Whether the command failed only because its reader went away (`| head -1`), which is not a
+/// failure to report.
+fn broken_pipe(error: &anyhow::Error) -> bool {
+	error.chain().any(|cause| {
+		cause
+			.downcast_ref::<std::io::Error>()
+			.is_some_and(|error| error.kind() == std::io::ErrorKind::BrokenPipe)
+	})
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -304,14 +336,14 @@ fn run(cli: Cli) -> Result<()> {
 				VoiceAction::Providers => {
 					for provider in fables::studio::Studio::voice_providers() {
 						let state = if provider.ready { "ready" } else { "not ready" };
-						println!("{:<11} {state:<10} {}", provider.provider, provider.needs);
+						say!("{:<11} {state:<10} {}", provider.provider, provider.needs)?;
 					}
 
 					Ok(())
 				}
 				VoiceAction::List => {
 					for (name, language) in fables::studio::Studio::say_voices()? {
-						println!("{name:<28} {language}");
+						say!("{name:<28} {language}")?;
 					}
 
 					Ok(())
@@ -329,7 +361,7 @@ fn run(cli: Cli) -> Result<()> {
 				StyleAction::List => {
 					for name in StylePack::names() {
 						let pack = StylePack::named(name)?;
-						println!("{name}: {}", pack.description);
+						say!("{name}: {}", pack.description)?;
 					}
 
 					Ok(())
@@ -469,7 +501,7 @@ fn each_style(
 	each(path, |script| {
 		for choice in choices {
 			let (story, cast) = load(script, choice.as_deref(), world)?;
-			println!("  style: {}", story.style().name.name());
+			say!("  style: {}", story.style().name.name())?;
 			action(&story, &cast)?;
 		}
 
@@ -512,7 +544,7 @@ fn each(path: &Path, mut action: impl FnMut(&Path) -> Result<()>) -> Result<()> 
 	}
 
 	for script in &scripts {
-		println!("— {}", script.display());
+		say!("— {}", script.display())?;
 		action(script).with_context(|| format!("while building {}", script.display()))?;
 	}
 
@@ -564,17 +596,17 @@ fn new_story(
 	std::fs::create_dir_all(&folder)
 		.with_context(|| format!("could not create {}", folder.display()))?;
 	std::fs::write(&path, script).with_context(|| format!("could not write {}", path.display()))?;
-	println!("✓ wrote {} from the {} recipe", path.display(), world.name);
+	say!("✓ wrote {} from the {} recipe", path.display(), world.name)?;
 
 	if let Err(error) =
 		load(&path, None, Some(&world.dir)).and_then(|(story, cast)| check(&story, &cast))
 	{
-		println!("  next: {error:#}");
-		println!(
+		say!("  next: {error:#}")?;
+		say!(
 			"  (add `[{star}]` to {}, then run `fables proofs {}`)",
 			world.cast_file().display(),
 			path.display()
-		);
+		)?;
 	}
 
 	Ok(())
@@ -603,10 +635,14 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 
 fn check(story: &Story, cast: &Cast) -> Result<()> {
 	let report = publish::check(story, cast)?;
-	println!(
+	say!(
 		"✓ {} — {} script pages, {} book pages, {} words, {} cast members",
-		report.title, report.script_pages, report.book_pages, report.words, report.cast_members
-	);
+		report.title,
+		report.script_pages,
+		report.book_pages,
+		report.words,
+		report.cast_members
+	)?;
 
 	Ok(())
 }
@@ -626,44 +662,46 @@ fn review(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 			fables::review::Severity::Consider => "consider",
 		};
 
-		println!(
+		say!(
 			"{severity} line {}: {} {}",
-			finding.line, finding.observation, finding.suggestion
-		);
+			finding.line,
+			finding.observation,
+			finding.suggestion
+		)?;
 	}
 
 	if findings.is_empty() {
-		println!("Nothing a director would change.");
+		say!("Nothing a director would change.")?;
 	}
 
-	println!(
+	say!(
 		"— {} ({} pages, {} words): {fixes} fix, {considers} consider.",
 		story.meta.title,
 		story.pages.len(),
 		fables::review::story_words(story)
-	);
+	)?;
 
 	Ok(())
 }
 
 fn proofs(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	done(&publish::proofs(story, cast, out)?, started);
+	done(&publish::proofs(story, cast, out)?, started)?;
 	Ok(())
 }
 
 fn ebook(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
-	done(&publish::ebook(story, cast, out)?.epub, started);
+	done(&publish::ebook(story, cast, out)?.epub, started)?;
 	Ok(())
 }
 
 fn print(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	let started = Instant::now();
 	let print = publish::print(story, cast, out)?;
-	done(&print.interior, started);
-	done(&print.cover, started);
-	println!("{}", print.specs);
+	done(&print.interior, started)?;
+	done(&print.cover, started)?;
+	say!("{}", print.specs)?;
 	Ok(())
 }
 
@@ -678,14 +716,14 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 		&path,
 		raster::png(&press::sheets::cast_sheet(&cast, &world.name, style)?)?,
 	)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	let path = out.join(format!("{slug}-places.png"));
 	std::fs::write(
 		&path,
 		raster::png(&press::sheets::places_sheet(&*world.settings()?, style)?)?,
 	)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	// One setting with one cast member, drawn under every light: the world's colour script.
 	let settings = world.settings()?;
@@ -709,7 +747,7 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 			style,
 		)?)?,
 	)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	if let Some(id) = moods {
 		let member = cast
@@ -719,7 +757,7 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 			.with_context(|| format!("`{id}` is not a person, so has no moods"))?;
 		let path = out.join(format!("{id}-moods.png"));
 		std::fs::write(&path, raster::png(&sheet)?)?;
-		done(&path, started);
+		done(&path, started)?;
 	}
 
 	Ok(())
@@ -742,7 +780,7 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 		&sheet,
 		raster::png(&fables::video::motion::rig_sheet(look, style)?)?,
 	)?;
-	done(&sheet, started);
+	done(&sheet, started)?;
 
 	let (motion, label) = if let Some(name) = motion {
 		(StylePack::named(name)?.motion, format!("-{name}"))
@@ -755,7 +793,7 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 	};
 	let video = dir.join(format!("{id}-motion{label}.mp4"));
 	fables::video::motion::motion_test(look, &member.name, (style, &motion), &video)?;
-	done(&video, started);
+	done(&video, started)?;
 
 	// A second motion clip: the acting rules, in order, on this character and a scene
 	// partner (the next person in the cast, or a copy of the same one).
@@ -780,7 +818,7 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 		(style, &motion),
 		&acting,
 	)?;
-	done(&acting, started);
+	done(&acting, started)?;
 
 	Ok(())
 }
@@ -839,14 +877,14 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 		let parts = Parts::load_puppet(&path, &style.kit)?;
 		let findings = parts.check();
 		let count = parts.iter().count();
-		println!(
+		say!(
 			"{id}: {count} parts from {} over the {} kit",
 			path.display(),
 			style.name
-		);
+		)?;
 
 		for finding in &findings {
-			println!("  {finding}");
+			say!("  {finding}")?;
 		}
 
 		errors += findings
@@ -897,12 +935,12 @@ fn puppet_template(world: &World, id: &str, from: Option<&str>) -> Result<()> {
 		.with_context(|| format!("could not create {}", world.dir.join("puppets").display()))?;
 	std::fs::write(&target, parts::write(&title, &drawings))
 		.with_context(|| format!("could not write {}", target.display()))?;
-	println!(
+	say!(
 		"✓ wrote {}\n  Add `puppet = \"puppets/{id}.svg\"` to [{id}] in {}, redraw the parts, and \
 		 run `fables puppet check {id}`.",
 		target.display(),
 		world.cast_file().display()
-	);
+	)?;
 	Ok(())
 }
 
@@ -918,7 +956,7 @@ fn puppet_sheet(world: &World, id: &str, out: &Path) -> Result<()> {
 		let sheet = dir.join(format!("{id}-{kind}.png"));
 		std::fs::write(&sheet, image.png)
 			.with_context(|| format!("could not write {}", sheet.display()))?;
-		done(&sheet, started);
+		done(&sheet, started)?;
 	}
 
 	Ok(())
@@ -935,8 +973,8 @@ fn audition(world: &World, who: &str, line: &str, mood: Option<&str>, out: &Path
 	));
 	std::fs::write(&path, take.wav)
 		.with_context(|| format!("could not write {}", path.display()))?;
-	println!("  {} ({:.1}s)", take.label, take.seconds);
-	done(&path, started);
+	say!("  {} ({:.1}s)", take.label, take.seconds)?;
+	done(&path, started)?;
 	Ok(())
 }
 
@@ -944,15 +982,15 @@ fn style_check(name: &str) -> Result<()> {
 	let pack = StylePack::named(name)?;
 	let findings = pack.check();
 	let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
-	println!(
+	say!(
 		"{name}: {} kit parts, {} template parts, bodies: {}",
 		pack.kit.iter().count(),
 		pack.template.iter().count(),
 		bodies.join(", ")
-	);
+	)?;
 
 	for finding in &findings {
-		println!("  {finding}");
+		say!("  {finding}")?;
 	}
 
 	let errors = findings
@@ -975,7 +1013,7 @@ fn style_sheet(name: &str, out: &Path) -> Result<()> {
 		let sheet = dir.join(format!("{name}-{kind}.png"));
 		std::fs::write(&sheet, image.png)
 			.with_context(|| format!("could not write {}", sheet.display()))?;
-		done(&sheet, started);
+		done(&sheet, started)?;
 	}
 
 	Ok(())
@@ -1000,7 +1038,7 @@ fn styles(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 
 	let path = out.join(&story.slug).join("styles.png");
 	press::board::write(&picks, &path)?;
-	done(&path, started);
+	done(&path, started)?;
 
 	Ok(())
 }
@@ -1009,7 +1047,7 @@ fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bo
 	let started = Instant::now();
 
 	for path in publish::video(story, cast, out, formats, preview)? {
-		done(&path, started);
+		done(&path, started)?;
 	}
 
 	Ok(())
@@ -1019,18 +1057,18 @@ fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<
 	let started = Instant::now();
 
 	for path in publish::storyboard(story, cast, out, portrait)? {
-		done(&path, started);
+		done(&path, started)?;
 	}
 
 	Ok(())
 }
 
-fn done(path: &Path, started: Instant) {
-	println!(
+fn done(path: &Path, started: Instant) -> Result<()> {
+	say!(
 		"✓ wrote {} in {:.1}s",
 		path.display(),
 		started.elapsed().as_secs_f32()
-	);
+	)
 }
 
 #[cfg(test)]
