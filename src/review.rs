@@ -88,6 +88,12 @@ pub fn summary(findings: &[Finding]) -> String {
 /// Reads a rehearsed story and its planned video, and says what a director would change.
 /// Findings come back fixes first, then in script order.
 pub fn review(story: &Story, rehearsals: &[Rehearsal], timeline: &Timeline) -> Vec<Finding> {
+	// A book `fables new` has just written still has its bracketed placeholders; say so
+	// plainly instead of critiquing lines the writer has not written yet.
+	if let Some(unwritten) = unwritten(story) {
+		return vec![unwritten];
+	}
+
 	let mut findings = Vec::new();
 	findings.extend(static_pages(story, rehearsals));
 	findings.extend(long_runs(story, rehearsals));
@@ -111,6 +117,36 @@ pub fn review(story: &Story, rehearsals: &[Rehearsal], timeline: &Timeline) -> V
 /// The state of the stage at the end of each page.
 fn finales(rehearsals: &[Rehearsal]) -> Vec<&Scene> {
 	rehearsals.iter().map(Rehearsal::finale).collect()
+}
+
+/// A scaffold's unwritten lines: the narration paragraphs that are still `[bracketed]`
+/// placeholders. A book with them is not ready to be critiqued, so the review says how many
+/// are left and stops.
+fn unwritten(story: &Story) -> Option<Finding> {
+	let mut count = 0;
+	let mut line = None;
+
+	for page in &story.pages {
+		for text in page.book_text() {
+			if text.contains('[') && text.contains(']') {
+				count += 1;
+				line.get_or_insert(page.line);
+			}
+		}
+	}
+
+	let line = line?;
+
+	Some(Finding::new(
+		"unwritten",
+		Severity::Consider,
+		line,
+		format!(
+			"The book still has {count} unwritten line{} (the [bracketed] ones).",
+			if count == 1 { "" } else { "s" }
+		),
+		"Replace each bracketed line with the story, then run the review again.",
+	))
 }
 
 /// What a page looks like: where everyone stands and how they feel. Two pages with the same
@@ -1220,5 +1256,23 @@ mod tests {
 				.all(|finding| finding.line > 0 && !finding.suggestion.is_empty())
 		);
 		assert_eq!(summary(&findings), "1 fix, 1 consider.");
+	}
+
+	#[test]
+	fn a_scaffold_says_how_many_lines_are_unwritten() {
+		let findings = review_script(
+			"",
+			"# park\n@mo x=0.3 happy\n[The want.]\n\n[The first try.]\n\n# garden\n@mo x=0.4 \
+			 happy\n[The failure.]\n",
+		);
+
+		assert_eq!(findings.len(), 1, "{findings:#?}");
+		assert_eq!(findings[0].rule, "unwritten");
+		assert_eq!(findings[0].severity, Severity::Consider);
+		assert!(
+			findings[0].observation.contains("3 unwritten lines"),
+			"{}",
+			findings[0].observation
+		);
 	}
 }
