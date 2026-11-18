@@ -270,6 +270,41 @@ pub fn held_scale(style: &StylePack, build: Build) -> f32 {
 	style.body(build).hand_scale / style.body(Build::Kid).hand_scale
 }
 
+/// The curve a tether hangs in from `start` to `end`: a cubic whose two handles sit a third
+/// and two thirds along, pushed off the straight line on its lower side by the sag (see
+/// [`Prop::draw_tether`]). Returns the path and is pure, so its shape can be tested.
+pub fn tether_path(start: Pt, end: Pt, sway: f32) -> Path {
+	tether_handles(start, end, sway).map_or_else(
+		|| Path::new().move_to(start).line_to(end),
+		|(a, b)| Path::new().move_to(start).cubic_to(a, b, end),
+	)
+}
+
+/// The tether curve's two handles, or `None` for a string too short to hang.
+pub fn tether_handles(start: Pt, end: Pt, sway: f32) -> Option<(Pt, Pt)> {
+	let run = end - start;
+	let length = run.len();
+
+	if length < 1.0 {
+		return None;
+	}
+
+	let along = run * (1.0 / length);
+	// Square to the string, on the side towards the ground.
+	let across = if along.x >= 0.0 {
+		pt(-along.y, along.x)
+	} else {
+		pt(along.y, -along.x)
+	};
+	let sag = length * (0.05 + 0.2 * along.x.abs()) + sway * length * 0.04;
+	let bow = across * sag;
+
+	Some((
+		start + run * (1.0 / 3.0) + bow,
+		start + run * (2.0 / 3.0) + bow,
+	))
+}
+
 /// A prop: a small drawing whose grip sits in a fist, or whose base stands on the stage.
 #[derive(Clone, Debug)]
 pub struct Prop {
@@ -622,13 +657,12 @@ impl Prop {
 	}
 
 	/// Draws the string a stage prop is tied by, from its grip at `start` to the hand at `end`
-	/// (stage units), in its own style's detail line, as thick however small the prop flies:
-	/// slack, so it sags under its own weight, and drifting sideways by `sway` (-1 to 1) as the
-	/// prop bobs.
+	/// (stage units), in its own style's detail line, as thick however small the prop flies.
+	/// It hangs like string: slack, bowing downwards from the straight line by an amount that
+	/// grows with its length and with how level it runs (a string straight up hardly bows),
+	/// and swinging a little either side by `sway` (-1 to 1) as the prop bobs.
 	pub fn draw_tether(&self, svg: &mut Svg, (start, end): (Pt, Pt), sway: f32) {
-		let length = (end - start).len();
-		let slack = start.lerp(end, 0.5) + pt(sway * length * 0.03, length * 0.12 + 8.0);
-		let path = Path::new().move_to(start).quad_to(slack, end);
+		let path = tether_path(start, end, sway);
 		let saved = svg.use_brush(Brush::new(self.style.line, &self.style.shade, INK));
 		svg.brush_line(&path, INK, self.style.finish.detail * STAGE_SIZE);
 		svg.brush = saved;
@@ -1180,5 +1214,40 @@ mod tests {
 		assert!((cartoon_kid - 1.0).abs() < f32::EPSILON);
 		assert!(cartoon_grown > cartoon_kid);
 		assert!(anime_grown > anime_kid);
+	}
+
+	/// How far a tether's first handle sits off the straight line between its ends, as a share
+	/// of its length: positive when it is pushed towards the ground.
+	fn sag(start: Pt, end: Pt) -> f32 {
+		let (a, _) = tether_handles(start, end, 0.0).unwrap();
+		let off = a - (start + (end - start) * (1.0 / 3.0));
+
+		off.len().copysign(off.y) / (end - start).len()
+	}
+
+	#[test]
+	fn a_tether_hangs_below_its_line_and_more_when_level() {
+		let kite = pt(1400.0, 600.0);
+		let level = sag(kite, pt(600.0, 700.0));
+		let steep = sag(kite, pt(1300.0, 1500.0));
+
+		assert!(level > 0.15, "a level string bows well down: {level}");
+		assert!(
+			steep > 0.0,
+			"a steep one still hangs below its line: {steep}"
+		);
+		assert!(level > steep * 2.0, "level {level} against steep {steep}");
+
+		// Mirrored, it bows down just the same.
+		let mirrored = sag(pt(600.0, 600.0), pt(1400.0, 700.0));
+		assert!(
+			(mirrored - level).abs() < 0.02,
+			"{mirrored} against {level}"
+		);
+
+		assert!(
+			tether_handles(kite, kite, 0.0).is_none(),
+			"no string, no curve"
+		);
 	}
 }
