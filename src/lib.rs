@@ -13,6 +13,7 @@ pub mod art;
 pub mod book;
 pub mod cast;
 pub mod compose;
+pub mod flow;
 pub mod mcp;
 pub mod press;
 pub mod publish;

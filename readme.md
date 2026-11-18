@@ -54,6 +54,7 @@ worlds/kerfuffle/
   cast.toml       who lives there and what they look like
   puppets/        authored puppets' part files
   recipe.md       the 12-beat recipe `fables new` starts a book from
+  flows/          its own story flows, found before the built-in ones
   stories/        one folder per book, each with a story.md
 ```
 
@@ -83,6 +84,64 @@ neither it stops and says to pass one or set the field. A book without an `autho
 matter is also credited to the world's author.
 
 `fables world new` writes `worlds/<slug>/` with that file, a `cast.toml` holding a commented example and nothing else, a `puppets/` folder and a `stories/` folder, then prints the next command. `fables character new <id> --name "…"` adds a cast member; `fables setting new <name>` starts a place.
+
+## Story flows
+
+A story flow is a shape a book can take: a laid-out recipe with a beat table, page and word budgets, and its pages already staged, so a new book starts from a sound page plan instead of a blank file. Nine are built into fables; `fables flow list` prints this table.
+
+| Flow | What it is good for | Characters | Pages | Words |
+| --- | --- | --- | --- | --- |
+| `three-tries` | A want a child can hold and an ending you can already see, where the tries must earn it. | 1 | 13–17 | 300–500 |
+| `pile-up` | A book built to be read again, where a child can join the chain and shout the last line. | a crowd | 9–13 | 250–450 |
+| `there-and-back` | A search with a clear reason to leave, and a home the reader is glad to come back to. | 1 | 13–17 | 280–480 |
+| `round-we-go` | A chain a child can follow, where the fun is seeing the next link coming. | 1 | 8–12 | 180–320 |
+| `odd-couple` | A funny two-hander where the joke is character, and the ending is a swap rather than a lesson. | 2 | 13–17 | 280–480 |
+| `wrong-end-of-the-stick` | A joke the pictures tell before the words do, where being wrong is funny and easily put right. | 2 | 11–13 | 260–450 |
+| `goodnight-tour` | A bedtime book where the falling light and the falling word count do the work. | 1 | 11–15 | 200–380 |
+| `gag-short` | A sixty-to-ninety-second cartoon where the timing is the story and the words are almost nothing. | 1 | 6–9 | 40–120 |
+| `habit-tale` | A character-led book where the change is a choice the star makes, not a lesson the narrator gives. | 2 | 13–17 | 280–480 |
+
+`fables new "<Title>" --star <id>` starts from the world's own `recipe.md` when it has one, and from `three-tries` when it has none. `--flow <name>` picks a flow instead, and `--friend <id>` names the second character for a flow that stages two or a crowd. A flow that needs a friend refuses without one, naming the flow and the world's cast.
+
+```bash
+fables new "The Whole Street Hums" --star mo --friend nan --flow pile-up
+fables flow show pile-up
+```
+
+`fables flow list` also shows each flow's one-sentence about; `fables flow show <name>` prints its beats as a table, with the craft note for each beat. A world may add its own flows in its `flows/<name>.md`; they are found before the built-ins, so a world can replace `three-tries` with its own shape, and its `recipe.md` stays its default.
+
+A flow file is a recipe: TOML front matter with a `[flow]` table, then the laid-out pages.
+
+```text
++++
+title = "{{title}}"
+author = "{{author}}"
+year = {{year}}
+star = "{{star}}"
+age = "3-5"              # the read-aloud band; a flow that suits a younger book says "under-3"
+
+[flow]
+name = "The Pile-Up"
+about = "One sentence a parent would understand."
+good-for = "When to pick this shape."
+pages = [9, 13]          # the finished book's story pages
+words = [250, 450]       # the finished book's words
+needs = "many"           # 1, 2 or many
+
+[[flow.beats]]
+name = "First link"
+pages = 1
+words = [15, 25]
+note = "Craft advice a first-time writer can act on in one sentence."
++++
+
+# street day shot=wide
+@{{star}} x=0.16 face=right happy
+// 15–20 words: one actor, one small sound, and a lot of empty street.
+[One small sound in an empty street.]
+```
+
+`pages` and `words` take one number or a `[min, max]` pair. `{{title}}`, `{{author}}`, `{{year}}` and `{{star}}` are filled in from the command; a flow whose `needs` is `2` or `many` writes `{{friend}}` where the second character goes. Every flow file names its `age` band; `fables new` writes `age = "3-5"` into a world recipe or a world flow that leaves one out, so every new book is read aloud at the same pace unless it says otherwise. A flow may also write `flow = "{{flow}}"` in its front matter; without it, `fables new` adds `flow = "<name>"` after the `star` line, so a book always remembers the shape it started from. The beats' page counts must add up to the pages below them, and every `[bracketed]` line is a line for the writer: `fables review` says plainly how many are still unwritten instead of critiquing them.
 
 ## Drawing styles
 
@@ -187,6 +246,7 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `voice_providers`, `voice_list` | Which voice providers can speak now, and the offline macOS voices. |
 | `voice_cast`, `voice_audition` | Give a character their voice, and hear a line in it, delivered in a mood, as audio. |
 | `story_write`, `story_read`, `story_check` | Write a book's script into a world, checked against the cast (a script that doesn't rehearse is refused, with the line to fix), or read and check one. |
+| `flow_list`, `flow_describe`, `story_start` | The story flows a world's books can start from and one flow's beats; and the whole `story.md` scaffold for a flow, with the star and friend staged, ready to fill in and `story_write`. |
 | `story_review` | A director's critique of a book: findings with a severity, the script line and a suggestion. Advice, never a refusal. |
 | `storyboard_render`, `storyboard_pin` | The storyboard as images and as a text shot list (page, script line, timing, shot size, subjects, move, entry, source and words); and the same plan pinned into the script as editable `@camera` directions marked `// pinned`, or removed again. |
 | `animatic_render`, `video_frames` | An animatic that holds each shot for its real duration over the soundtrack, with each shot's caption and a progress bar, and the shot list; `silent: true` records no voice; and sampled frames of the video as one tiled image, offline. |
@@ -205,7 +265,9 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables world new "<Name>" --style <drawing style> [--about "…"] [--author "…"]` | `worlds/<slug>/` with `world.toml`, a commented cast example, a `puppets/` folder and a `stories/` folder. |
 | `fables character new <id> --name "…" [--kind kid\|grown-up] [--about "…"] [--skin … --hair-colour … --top … --trim … --bottom … --shoes … --eyes … --pattern …] [--draw]` | A new cast member, drawn from the world's drawing style's template; `--draw` also writes their part file. |
 | `fables setting new <name> [--from <setting>] [--about "…"]` | A world's own setting, blank or repainted from one it already uses. |
-| `fables new "<Title>" --star <id>` | A new book in the world's `stories/<title>/story.md`, laid out from its `recipe.md` with the star already staged. |
+| `fables new "<Title>" --star <id> [--friend <id>] [--flow <name>]` | A new book in the world's `stories/<title>/story.md`, laid out from the named flow, else the world's `recipe.md`, else `three-tries`, with the star already staged. |
+| `fables flow list` | The story flows: each one's about, what it is good for, how many characters it needs and its length. |
+| `fables flow show <name>` | One flow's beats as a table, with its page and word budgets and its craft notes. |
 | `fables check <story>` | Validates the script and reports the drawing style and page skin, page and word counts, and any cast fields a drawn character ignores. Errors give line numbers and list valid options. |
 | `fables review <story>` | A director's critique of the rehearsed script ([`docs/directing.md`](docs/directing.md)): line-numbered findings and suggestions about staging, mood arcs, pacing, light and shots. Advice, never a refusal; ends with a count of findings. |
 | `fables puppet parts <id> [part…]` | A character's parts as SVG path data: their own (or their style's template) and the kit's, each marked. |
@@ -530,6 +592,7 @@ Sourcing voices, provider prices and policies, local models, human actors and ke
 ```text
 src/
   story.rs        script parser (front matter, pages, beats, markup)
+  flow.rs         story flows: the `[flow]` table, the built-in recipes and starting a book
   cast.rs         cast file → puppet looks
   stage.rs        scene model, stage directions, rehearsal across pages
   compose.rs      scene → positioned puppets (blendable for animation)
@@ -544,9 +607,10 @@ src/
   art/            puppets (figure.rs), the rig (rig.rs), styles (style.rs), critters, settings, effects
   press/          proofs, ePub, KDP print PDFs, model sheets
   video/          voices (TTS providers), lip-sync, timeline, the director's camera setups, frame renderer, soundtrack, ffmpeg
-worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe and books
+worlds/           one folder per series: world.toml, bible, cast, puppets, settings, recipe, flows and books
 settings/         the built-in settings, as part files
 styles/           drawing styles: style.toml, kit and template per look
+flows/            the built-in story flows, one laid-out recipe per shape
 docs/             the five-minute guide, voices and turning the books into a show
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```
