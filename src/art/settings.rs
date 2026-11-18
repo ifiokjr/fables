@@ -53,6 +53,7 @@ use super::Color;
 use super::Path;
 use super::Pt;
 use super::STAGE;
+use super::Solid;
 use super::Svg;
 use super::critters;
 use super::critters::CritterState;
@@ -718,6 +719,12 @@ impl Part {
 	}
 
 	fn draw(&self, svg: &mut Svg, weather: &Weather) {
+		self.paint(svg, weather, false);
+	}
+
+	/// Draws the part, or with `cast` only the shadow it throws: its shape in flat ink, for a
+	/// layer that stands off the one behind it as a sheet of card.
+	fn paint(&self, svg: &mut Svg, weather: &Weather, cast: bool) {
 		if let Some(under) = &self.lit
 			&& !under.contains(&weather.light.preset)
 		{
@@ -755,14 +762,46 @@ impl Part {
 
 		// Far things draw thinner lines, until the farthest have none.
 		let weight = svg.line * (1.0 - self.depth * 0.6);
+		// A shadow theatre paints the part as a shadow on the screen; the sun and moon are
+		// the lamp behind it, the brightest thing there.
+		let lit = svg.solid();
+
+		if svg.style.silhouette {
+			svg.set_solid(Some(if self.night_only.is_none() {
+				self.shadow(svg, weather)
+			} else {
+				let lamp = svg.backlight().lighten(0.55);
+				Solid::figure(lamp, lamp)
+			}));
+		}
+
+		if cast {
+			svg.set_solid(Some(Solid::figure(palette::INK, palette::INK)));
+		}
 
 		match &self.mark {
+			// Light casts no shadow, and a cast shadow has no paint of its own.
+			Mark::Sparkle { .. } | Mark::Glow { .. } if cast => {}
+			Mark::Shape { path, .. } if cast => svg.fill(path, palette::INK),
+			Mark::Line { path, width, .. } if cast => {
+				svg.stroke_alpha(path, palette::INK, *width, 1.0);
+			}
 			Mark::Shape {
 				path,
 				fill,
 				outline,
 			} => {
-				if *fill == Paint::Sky && !weather.light.is_day() {
+				if *fill == Paint::Sky && svg.style.silhouette {
+					// A shadow theatre's sky is its screen, lit from behind: the light's own
+					// sky, brighter towards the ground, or lamplight in flat daylight.
+					let (top, bottom) = if weather.light.is_day() {
+						super::style::SCREEN
+					} else {
+						(weather.light.zenith.lighten(0.1), svg.backlight())
+					};
+					let paint = part_gradient(svg, top, bottom, (0.0, -OVER, STAGE, STAGE + OVER));
+					svg.fill_paint(path, &paint);
+				} else if *fill == Paint::Sky && !weather.light.is_day() {
 					// The light paints the whole sky itself.
 					let paint = sky_gradient(svg, &weather.light);
 					svg.fill_paint(path, &paint);
@@ -871,7 +910,36 @@ impl Part {
 			svg.end();
 		}
 
+		svg.set_solid(lit);
 		svg.set_plane(around);
+	}
+
+	/// The part as a shadow theatre casts it: the one ink, paler the farther back the part
+	/// stands, so the layers of a setting read one behind another and the actors, who are
+	/// the darkest things on stage, read in front of them all.
+	fn shadow(&self, svg: &Svg, weather: &Weather) -> Solid {
+		let cut = svg.backlight();
+		// Shadows thin towards the colour of the screen behind them.
+		let haze = if weather.light.is_day() {
+			super::style::SCREEN.0
+		} else {
+			cut
+		};
+		// A part's own lightness lifts its shadow, most of all far away: a pale wall is a
+		// thinner card than a dark roof, and bare paper is the bare screen.
+		let (fade, vary) = match self.layer {
+			Layer::Front => (0.0, 0.1),
+			Layer::Near => (0.26 + self.depth * 0.3, 0.3),
+			Layer::Far => (0.5 + self.depth * 0.25, 0.48),
+		};
+
+		Solid {
+			ink: svg.style.ink,
+			cut,
+			haze,
+			fade,
+			vary,
+		}
 	}
 }
 
@@ -1077,6 +1145,22 @@ pub fn backdrop_layer(svg: &mut Svg, setting: &Setting, weather: &Weather, layer
 		.map(|body| body == Body::Moon);
 	let mut bloomed = false;
 
+	// Paper theatre: each layer in front of the far one is a sheet of card standing off the
+	// one behind, and drops a hard shadow on it.
+	let sheet = svg.style.planes.filter(|_| layer != Layer::Far);
+
+	if let Some((offset, opacity)) = sheet {
+		svg.begin_opacity(opacity);
+		svg.begin(&format!("translate({:.1} {:.1})", offset.x, offset.y));
+
+		for part in setting.0.parts.iter().filter(|part| part.layer == layer) {
+			part.paint(svg, weather, true);
+		}
+
+		svg.end();
+		svg.end();
+	}
+
 	for part in setting.0.parts.iter().filter(|part| part.layer == layer) {
 		part.draw(svg, weather);
 
@@ -1232,6 +1316,70 @@ mod tests {
 				crate::raster::render(&doc).unwrap();
 			}
 		}
+	}
+
+	/// The street drawn in a page skin, under `light`.
+	fn street_in(skin: super::super::style::StyleName, light: Light) -> String {
+		let mut svg = Svg::styled(super::super::style::Style::named(skin));
+		let weather = Weather {
+			light,
+			..Weather::default()
+		};
+		let street = Library::built_in().find("street").unwrap();
+		svg.set_light(light);
+		backdrop(&mut svg, &street, &weather);
+		foreground(&mut svg, &street, &weather);
+		let doc = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
+		crate::raster::render(&doc).unwrap();
+		doc
+	}
+
+	#[test]
+	fn the_shadow_skin_paints_a_setting_as_shadows_on_a_lit_screen() {
+		use super::super::style::SCREEN;
+		use super::super::style::StyleName;
+
+		// In flat daylight the screen is lamplight, and nothing keeps its own colour: every
+		// paint is the ink thinned towards the screen, so no channel is brighter than it.
+		let day = street_in(StyleName::Shadow, Light::day());
+		assert!(
+			day.contains(&format!("stop-color=\"{}\"", SCREEN.0)),
+			"{day}"
+		);
+		let riso = street_in(StyleName::Riso, Light::day());
+		let fills = |doc: &str| -> Vec<Color> {
+			doc.split("<path ")
+				.filter_map(|path| path.split("fill=\"#").nth(1))
+				.filter_map(|rest| Color::parse(&format!("#{}", &rest[..6])))
+				.collect()
+		};
+		let green = |colours: &[Color]| {
+			colours.iter().any(|colour| {
+				let (r, g, b) = colour.rgb();
+				g > r && g > b
+			})
+		};
+		assert!(green(&fills(&riso)), "the street has green in it");
+		assert!(!green(&fills(&day)), "but its shadow does not");
+
+		// Under a scene light the screen is the light's own sky, brightest at the ground.
+		let dusk = Light::of(Preset::Dusk);
+		let lit = street_in(StyleName::Shadow, dusk);
+		assert!(lit.contains(&format!("stop-color=\"{}\"", dusk.horizon.lighten(0.3))));
+	}
+
+	#[test]
+	fn the_card_skin_stands_each_layer_off_the_one_behind() {
+		use super::super::style::StyleName;
+
+		let card = street_in(StyleName::Card, Light::day());
+		assert_eq!(
+			card.matches("<g opacity=\"0.240\">").count(),
+			2,
+			"the near and front layers each cast on the layer behind"
+		);
+		assert!(card.contains(&format!("stroke=\"{}\"", palette::WHITE)));
+		assert!(!street_in(StyleName::Riso, Light::day()).contains("<g opacity=\"0.240\">"));
 	}
 
 	#[test]

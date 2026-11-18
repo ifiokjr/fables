@@ -30,6 +30,7 @@ use crate::art::dials::Palette;
 use crate::art::dials::Tone;
 use crate::art::light::Light;
 use crate::art::settings::Library;
+use crate::art::style::Card;
 use crate::art::style::Style;
 use crate::art::style::StyleName;
 use crate::video::audio::Music;
@@ -279,11 +280,15 @@ pub struct Meta {
 	pub light: Option<String>,
 	#[serde(default)]
 	pub cover: Option<CoverSpec>,
-	/// The page skin: riso, tv, bold, cut-paper, crayon, storybook or clear. This is the
+	/// The page skin: riso, tv, bold, cut-paper, crayon, storybook, clear, shadow or card. This is the
 	/// printing look, not the drawing style; without it, the world's drawing style names the
 	/// skin that suits it (default riso).
 	#[serde(default)]
 	pub style: Option<String>,
+	/// What the words sit on: `paper` or `caption`. Without it, the world's drawing style
+	/// says (`[page] card` in its `style.toml`, default paper).
+	#[serde(default)]
+	pub card: Option<Card>,
 	/// The narrator; without one, the world's narrator reads (see [`Story::narrator`]).
 	#[serde(default)]
 	pub voice: Option<Voice>,
@@ -664,6 +669,8 @@ pub struct Drawing {
 	pub tone: Tone,
 	pub palette: Palette,
 	pub motion: Motion,
+	/// What the words sit on, unless the book's own `card` says.
+	pub card: Card,
 }
 
 impl Story {
@@ -699,6 +706,7 @@ impl Story {
 			.unwrap_or_default();
 		style.finish.tone = (self.drawing.fill == Fill::Screentone).then_some(self.drawing.tone);
 		style.finish.palette = (self.drawing.fill == Fill::Palette).then_some(self.drawing.palette);
+		style.card = self.meta.card.unwrap_or(self.drawing.card);
 		style
 	}
 
@@ -1585,6 +1593,18 @@ Hello.
 		assert!(
 			message.contains("line 5") && message.contains("0 to 60"),
 			"{message}"
+		);
+	}
+
+	#[test]
+	fn a_card_the_page_cannot_draw_is_an_error_naming_the_ones_it_can() {
+		let error = format!(
+			"{:#}",
+			parse("+++\ntitle = \"T\"\ncard = \"plaque\"\n+++\n# plain\nHi.\n").unwrap_err()
+		);
+		assert!(
+			error.contains("plaque") && error.contains("paper") && error.contains("caption"),
+			"{error}"
 		);
 	}
 }

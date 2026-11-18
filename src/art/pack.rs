@@ -6,7 +6,7 @@
 //! styles/cartoon/
 //!   style.toml      the finish (line weights, light, cel shadow), the face cylinder, the kit's
 //!                   shared inks, the bodies characters are built on (kid, grown-up), and the
-//!                   page skin that suits the look
+//!                   page that suits the look (`[page]`: its skin, text card and transition)
 //!   kit.svg         parts every character in the style starts with: hands, eyes, mouths, props
 //!   template.svg    a plain kid's own parts, which new kids are drawn from
 //!   template-grown-up.svg
@@ -50,13 +50,15 @@ use super::puppet;
 use super::puppet::Authored;
 use super::puppet::Physique;
 use super::puppet::Proportions;
+use super::style::Card;
+use crate::story::Transition;
 
 /// The style a world draws in unless its `world.toml` names another.
 pub const DEFAULT: &str = "cartoon";
 
 /// The packs compiled into fables: name, `style.toml`, `kit.svg`, `template.svg` and
 /// `template-grown-up.svg`.
-const BUILT_IN: [(&str, &str, &str, &str, &str); 11] = [
+const BUILT_IN: [(&str, &str, &str, &str, &str); 14] = [
 	(
 		"cartoon",
 		include_str!("../../styles/cartoon/style.toml"),
@@ -137,6 +139,31 @@ const BUILT_IN: [(&str, &str, &str, &str, &str); 11] = [
 		include_str!("../../styles/chibi/template.svg"),
 		include_str!("../../styles/chibi/template-grown-up.svg"),
 	),
+	// Shadow puppets are the clear-line figure, whose knees and elbows read in silhouette,
+	// with a head of their own that has a profile; they use the cartoon kit, as it does.
+	(
+		"silhouette",
+		include_str!("../../styles/silhouette/style.toml"),
+		include_str!("../../styles/cartoon/kit.svg"),
+		include_str!("../../styles/silhouette/template.svg"),
+		include_str!("../../styles/silhouette/template-grown-up.svg"),
+	),
+	// Paper theatre cuts the mid-century figure's straight-edged shapes out of card.
+	(
+		"paper-theatre",
+		include_str!("../../styles/paper-theatre/style.toml"),
+		include_str!("../../styles/mid-century/kit.svg"),
+		include_str!("../../styles/mid-century/template.svg"),
+		include_str!("../../styles/mid-century/template-grown-up.svg"),
+	),
+	// Soft flat is the cartoon's round figure with the line taken away.
+	(
+		"soft-flat",
+		include_str!("../../styles/soft-flat/style.toml"),
+		include_str!("../../styles/cartoon/kit.svg"),
+		include_str!("../../styles/cartoon/template.svg"),
+		include_str!("../../styles/cartoon/template-grown-up.svg"),
+	),
 ];
 
 /// A loaded style pack.
@@ -148,6 +175,8 @@ pub struct StylePack {
 	/// The page skin that suits the look (riso, clear, tv…): the skin a book drawn in this
 	/// style prints in unless the script or `--style` names another.
 	pub skin: String,
+	/// The rest of the page the look sits on (see [`Page`]).
+	pub page: Page,
 	pub finish: Finish,
 	pub face: Face,
 	pub features: Features,
@@ -334,8 +363,12 @@ pub const NO_NOSE: &str = "none";
 struct Entry {
 	name: String,
 	description: String,
-	/// The page skin the look prints in (see [`style`](super::style)).
-	skin: String,
+	/// The page skin the look prints in, as styles named it before `[page]`: the same as
+	/// `[page] skin`, which is the place for it now.
+	#[serde(default)]
+	skin: Option<String>,
+	#[serde(default)]
+	page: PageEntry,
 	finish: Finish,
 	face: Face,
 	features: Features,
@@ -349,6 +382,26 @@ struct Entry {
 	inks: KitInks,
 	bodies: BTreeMap<String, Proportions>,
 	own: Own,
+}
+
+/// `[page]` as `style.toml` writes it.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct PageEntry {
+	skin: Option<String>,
+	#[serde(default)]
+	card: Card,
+	transition: Option<Transition>,
+}
+
+/// The page a style's drawings sit on, so the whole page is one look: `[page]` in
+/// `style.toml`. A world's books inherit it, and a book's own front matter overrides it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Page {
+	/// What the words sit on.
+	pub card: Card,
+	/// How a video enters each page, unless the book or the page's heading says.
+	pub transition: Option<Transition>,
 }
 
 /// The name of the body a build is drawn on, as `style.toml` and the cast file spell it.
@@ -418,17 +471,32 @@ impl StylePack {
 			.iter()
 			.map(|(name, _)| *name)
 			.collect();
+		let skin = match (entry.skin, entry.page.skin) {
+			(Some(_), Some(_)) => {
+				bail!("style.toml names its page skin twice: keep `skin` under [page] only")
+			}
+			(Some(skin), None) | (None, Some(skin)) => skin,
+			(None, None) => {
+				bail!(
+					"style.toml names no page skin; add `skin` under [page], one of: {}",
+					skins.join(", ")
+				)
+			}
+		};
 		ensure!(
-			skins.contains(&entry.skin.as_str()),
-			"style.toml's skin `{}` is not a page skin; use one of: {}",
-			entry.skin,
+			skins.contains(&skin.as_str()),
+			"style.toml's skin `{skin}` is not a page skin; use one of: {}",
 			skins.join(", ")
 		);
 
 		let pack = StylePack {
 			name: entry.name,
 			description: entry.description,
-			skin: entry.skin,
+			skin,
+			page: Page {
+				card: entry.page.card,
+				transition: entry.page.transition,
+			},
 			finish: entry.finish,
 			face: entry.face,
 			features: entry.features,
@@ -845,5 +913,72 @@ mod tests {
 			format!("{error:#}").contains("bodies.grown-up"),
 			"{error:#}"
 		);
+	}
+
+	/// The cartoon style with its top-level `skin` taken out and `page` put at the end.
+	fn with_page(page: &str, keep_skin: bool) -> Result<StylePack> {
+		let mut source = include_str!("../../styles/cartoon/style.toml").to_owned();
+
+		if !keep_skin {
+			source = source.replace("skin = \"riso\"\n", "");
+		}
+
+		StylePack::parse(&format!("{source}\n{page}\n"), "<svg/>", "<svg/>", "<svg/>")
+	}
+
+	#[test]
+	fn a_page_table_names_the_skin_the_card_and_the_page_turn() {
+		let shadow = StylePack::named("silhouette").unwrap();
+		assert_eq!(shadow.skin, "shadow");
+		assert_eq!(shadow.page.card, Card::Caption);
+		assert_eq!(shadow.page.transition, Some(Transition::Dissolve));
+
+		// A style that says only `skin`, as every style did before `[page]`, keeps a paper
+		// card and leaves the page turn to the book.
+		let cartoon = StylePack::default_pack();
+		assert_eq!(cartoon.skin, "riso");
+		assert_eq!(cartoon.page, Page::default());
+
+		let moved = with_page("[page]\nskin = \"tv\"\ncard = \"caption\"", false).unwrap();
+		assert_eq!(moved.skin, "tv");
+		assert_eq!(moved.page.card, Card::Caption);
+		assert_eq!(moved.page.transition, None);
+	}
+
+	#[test]
+	fn a_bad_page_table_says_what_it_wants() {
+		let error =
+			|page: &str, keep_skin: bool| format!("{:#}", with_page(page, keep_skin).unwrap_err());
+
+		let twice = error("[page]\nskin = \"tv\"", true);
+		assert!(
+			twice.contains("twice") && twice.contains("[page]"),
+			"{twice}"
+		);
+
+		let none = error("[page]\ncard = \"paper\"", false);
+		assert!(
+			none.contains("no page skin") && none.contains("riso"),
+			"{none}"
+		);
+
+		let skin = error("[page]\nskin = \"velvet\"", false);
+		assert!(skin.contains("velvet") && skin.contains("shadow"), "{skin}");
+
+		let card = error("[page]\nskin = \"tv\"\ncard = \"plaque\"", false);
+		assert!(
+			card.contains("plaque") && card.contains("caption"),
+			"{card}"
+		);
+
+		let turn = error("[page]\nskin = \"tv\"\ntransition = \"swirl\"", false);
+		assert!(
+			turn.contains("swirl") && turn.contains("dissolve"),
+			"{turn}"
+		);
+
+		// A key the page table does not have is refused rather than ignored.
+		let key = error("[page]\nskin = \"tv\"\ntypeface = \"slab\"", false);
+		assert!(key.contains("typeface"), "{key}");
 	}
 }

@@ -9,6 +9,7 @@ use crate::art::Path;
 use crate::art::Plane;
 use crate::art::Pt;
 use crate::art::STAGE;
+use crate::art::Solid;
 use crate::art::Svg;
 use crate::art::critters;
 use crate::art::critters::CritterState;
@@ -576,9 +577,15 @@ pub fn draw_puppet(svg: &mut Svg, puppet: &Puppet) {
 	draw_shadow(svg, puppet);
 	// The actor takes the light as a figure, which keeps it forward of the setting.
 	let ground = svg.set_plane(Plane::Figure);
+	// On a shadow theatre's screen the critters are shadow puppets too; people are when
+	// their own drawing style says so.
+	let shadow = (svg.style.silhouette && !matches!(puppet.kind, Kind::Figure(_)))
+		.then(|| Solid::figure(svg.style.ink, svg.backlight()));
+	let lit = svg.set_solid(shadow);
 	svg.begin(&subject_transform(puppet));
 	draw_subject(svg, puppet);
 	svg.end();
+	svg.set_solid(lit);
 	svg.set_plane(ground);
 
 	if puppet.opacity < 0.99 {

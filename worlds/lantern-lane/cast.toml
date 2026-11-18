@@ -1,0 +1,51 @@
+# The folk of Lantern Lane. Every table is one character.
+#
+# A person has a `kind` of kid or grown-up, and colours from the palette (or #rrggbb).
+# Without a `puppet` line they are drawn from the silhouette style's template in their own
+# colours. `fables character new <id> --name "…"` writes this table for you.
+#
+# [pip]
+# name = "Pip Pocket"
+# kind = "kid"
+# skin = "tangerine"
+# hair-colour = "plum"
+# top = "teal"
+# trim = "cream"
+# bottom = "night"
+# shoes = "ink"
+# eyes = "cocoa"
+# pattern = "plain"
+
+[wren]
+name = "Wren Wick"
+about = "The lamplighter's helper, who is small enough to ride on the ladder."
+habit = "Counts the lamps out loud, and always gets one more than there are."
+kind = "kid"
+hair = "pigtails"
+build = "plain"
+brows = "thin"
+nose = "button"
+skin = "tangerine"
+hair-colour = "plum"
+top = "teal"
+trim = "cream"
+bottom = "night"
+shoes = "ink"
+eyes = "cocoa"
+
+[tobble]
+name = "Old Tobble"
+about = "The lamplighter of Lantern Lane, who lights every lamp at dusk and yawns at every one."
+habit = "Yawns once for every lamp he lights."
+kind = "grown-up"
+hair = "bun"
+build = "stout"
+brows = "arched"
+nose = "long"
+skin = "#d9a066"
+hair-colour = "cream"
+top = "cocoa"
+trim = "cream"
+bottom = "ink"
+shoes = "ink"
+eyes = "cocoa"

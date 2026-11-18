@@ -117,6 +117,9 @@ What each style makes of them:
 | `manga-shojo` | gentle: soft takes, light breath and weight, poses that drift |
 | `chibi` | springy: deeper takes, more overlap, never still for long |
 | `clear-line` | restrained: half-depth everything, slightly quieter arcs |
+| `silhouette` | a jointed shadow puppet: on twos, `squash` 0 and `breath` 0 (card neither stretches nor breathes), small wind-ups, shallow `takes`, a little `weight-shift` |
+| `paper-theatre` | card on sliders: on twos, snapping between held keys like `mid-century`, with `squash`, `breath`, `weight-shift` and `business` off |
+| `soft-flat` | the cartoon's motion turned down: on ones, eased, with gentler wind-ups, overshoot and squash |
 
 `[video] acting = "plain"` in a script's front matter switches the whole layer off: one
 easing curve per move, entrances slide, no performance. Useful for checking that a staging

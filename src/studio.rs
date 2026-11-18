@@ -284,6 +284,10 @@ pub struct StyleReport {
 	pub description: String,
 	/// The page skin the look prints in (riso, clear…).
 	pub skin: String,
+	/// What its pages' words sit on: `paper` or `caption`.
+	pub card: &'static str,
+	/// How its videos enter each page, if the style says (else the book's own, or a wipe).
+	pub transition: Option<&'static str>,
 	pub finish: Finish,
 	pub face: Face,
 	pub bodies: Vec<BodyReport>,
@@ -1715,6 +1719,8 @@ impl Studio {
 			name: pack.name.clone(),
 			description: pack.description.clone(),
 			skin: pack.skin.clone(),
+			card: pack.page.card.name(),
+			transition: pack.page.transition.map(Transition::name),
 			finish: pack.finish,
 			face: pack.face,
 			bodies: [Build::Kid, Build::Grownup]
