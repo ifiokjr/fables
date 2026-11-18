@@ -117,10 +117,12 @@ impl Puppet {
 				let frame = look.frame();
 				self.at + frame.head * self.scale
 			}
+			// The eye goes a little above a prop's middle, where the thing itself is: a kite's
+			// tail and a balloon's string hang below it.
 			(Kind::Prop(prop), Body::Prop) => {
 				let (lo, hi) = prop.bounds();
 				let base = pt(f32::midpoint(lo.x, hi.x), hi.y);
-				let centre = pt(f32::midpoint(lo.x, hi.x), f32::midpoint(lo.y, hi.y));
+				let centre = pt(f32::midpoint(lo.x, hi.x), lo.y + (hi.y - lo.y) * 0.3);
 				self.at + (centre - base) * self.scale
 			}
 			_ => self.at + pt(0.0, -80.0 * self.scale),

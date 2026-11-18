@@ -418,7 +418,7 @@ impl Pose {
 			}
 			Pose::Pick => (idle, reach(Anchor::Nose, 0.0, 0.18)),
 			// A hand up and out above the head, open to catch what comes down.
-			Pose::Catch => (idle, reach(Anchor::Shoulder, 0.8, -1.45)),
+			Pose::Catch => (idle, reach(Anchor::Shoulder, 1.0, -1.3)),
 		}
 	}
 
