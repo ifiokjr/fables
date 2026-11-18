@@ -1528,7 +1528,7 @@ mod tests {
 			(dropout_gain(&spans, 1.985) - 0.5).abs() < 0.1,
 			"the ramp's middle"
 		);
-		assert!(dropout_gain(&spans, 1.99) < 0.4);
+		assert!(dropout_gain(&spans, 1.98) < 0.4);
 		assert!(dropout_gain(&spans, 1.96) > 0.99, "before the ramp");
 		assert!(dropout_gain(&spans, 4.02) < 0.4);
 		assert!(dropout_gain(&spans, 4.05) > 0.99, "after the ramp");
