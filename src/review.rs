@@ -454,21 +454,41 @@ fn word_budget(story: &Story) -> Vec<Finding> {
 	}
 
 	let words = story_words(story);
+	let flow = flow_words(story);
+	let (min, max) = flow.unwrap_or(BOOK_WORDS);
 
-	if words < BOOK_WORDS.0 || words > BOOK_WORDS.1 {
+	if words < min || words > max {
+		let observation = if flow.is_some() {
+			format!("The book reads {words} words; the flow it names wants {min}–{max}.")
+		} else {
+			format!("The book reads {words} words; picture books land between {min} and {max}.")
+		};
+		let suggestion = if flow.is_some() {
+			"Trim to the flow's budget, or choose a flow that fits the story."
+		} else {
+			"Grow the middle beats, or trim towards one clear idea per page."
+		};
+
 		findings.push(Finding::new(
 			"word-budget",
 			Severity::Consider,
 			story.pages[0].line,
-			format!(
-				"The book reads {words} words; picture books land between {} and {}.",
-				BOOK_WORDS.0, BOOK_WORDS.1
-			),
-			"Grow the middle beats, or trim towards one clear idea per page.",
+			observation,
+			suggestion,
 		));
 	}
 
 	findings
+}
+
+/// The word range a flow sets for the books that name it, when its front matter does.
+fn flow_words(story: &Story) -> Option<(usize, usize)> {
+	let name = story.meta.flow.as_deref()?;
+	let world = crate::world::World::for_story(story, None).ok();
+
+	crate::flow::find(world.as_ref(), name)
+		.ok()
+		.map(|flow| flow.words)
 }
 
 /// The words a reader says aloud, as `fables check` counts them.
@@ -1244,6 +1264,52 @@ mod tests {
 			 happy\nLater, two.\n# park transition=fade\n@mo x=0.6 happy\nThe next day, three.\n",
 		);
 		assert!(!has(&dissolved, "time-jumps"), "{:?}", rules(&dissolved));
+	}
+
+	#[test]
+	fn a_flow_sets_the_book_word_range() {
+		let short = pages_of(6);
+		let plain = review_script("", &short);
+		assert!(plain.iter().any(|finding| {
+			finding.rule == "word-budget" && finding.observation.contains("picture books land")
+		}));
+
+		let flowed = review_script("flow = \"gag-short\"\n", &short);
+		assert!(
+			!flowed.iter().any(|finding| {
+				finding.rule == "word-budget" && finding.observation.contains("book reads")
+			}),
+			"{flowed:#?}"
+		);
+
+		let long = pages_of(20);
+		let over = review_script("flow = \"gag-short\"\n", &long);
+		assert!(
+			over.iter().any(|finding| {
+				finding.rule == "word-budget"
+					&& finding.observation.contains("flow it names wants 40–120")
+			}),
+			"{over:#?}"
+		);
+	}
+
+	/// Seven pages of one repeated word, `words` words a page, with lights that change.
+	fn pages_of(words: usize) -> String {
+		let text = std::iter::repeat_n("cake", words)
+			.collect::<Vec<_>>()
+			.join(" ");
+		let mut script = String::new();
+
+		for index in 0..7 {
+			let _ = write!(
+				script,
+				"# street light={}\n@mo x=0.{} happy\n{text}\n",
+				if index % 2 == 0 { "golden" } else { "dusk" },
+				3 + index % 3
+			);
+		}
+
+		script
 	}
 
 	#[test]
