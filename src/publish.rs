@@ -240,8 +240,8 @@ pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Res
 }
 
 /// The timeline with estimated durations: a cached take when there is one, else the line's
-/// words read at about 2.6 a second, so boards, sampled frames and reviews run offline
-/// without a microphone or ffmpeg.
+/// characters at its voice's rate (see [`estimated_seconds`]), paced as the video is, so
+/// boards, sampled frames and reviews run offline without a microphone or ffmpeg.
 pub fn estimated_timeline(
 	story: &Story,
 	cast: &Cast,
@@ -263,8 +263,23 @@ pub fn review(story: &Story, cast: &Cast, out: &Path) -> Result<Vec<crate::revie
 	Ok(crate::review::review(story, &rehearsals, &timeline))
 }
 
+/// Characters a second a voice reads at the default 165 words a minute, measured on the
+/// recorded takes of The Visitor, Mo Mumble and Stinky McStinkbreath: characters vary far less
+/// than words do from one line to the next.
+const CHARACTERS_A_SECOND: f32 = 16.0;
+
+/// How long a line takes to say without a recording: its characters at the voice's own rate,
+/// sped up or slowed down by its delivery, as `say` is asked to read it.
+fn estimated_seconds(line: &crate::video::voice::Utterance<'_>) -> f32 {
+	let characters = plain_text(line.text).chars().count() as f32;
+	let pace =
+		line.voice.rate() as f32 * line.delivery.rate_scale() / crate::video::voice::RATE as f32;
+
+	(characters / (CHARACTERS_A_SECOND * pace)).max(0.3)
+}
+
 /// The length of a spoken line without a microphone: the cached take when there is one, else
-/// the words read at about 2.6 words a second.
+/// [`estimated_seconds`].
 fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Speech {
 	use crate::art::seed_of;
 	use crate::video::lipsync::Track;
@@ -275,7 +290,7 @@ fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Spee
 	let wav = cache.join(format!("{:016x}.wav", seed_of(&key)));
 	let seconds = match crate::video::voice::read_wav(&wav) {
 		Ok((samples, _rate)) => samples.len() as f32 / SAMPLE_RATE as f32,
-		Err(_) => (plain_text(line.text).split_whitespace().count() as f32 / 2.6).max(0.3),
+		Err(_) => estimated_seconds(line),
 	};
 
 	Speech {
@@ -290,6 +305,54 @@ fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Spee
 mod tests {
 	use super::*;
 	use crate::story;
+
+	#[test]
+	fn an_unrecorded_line_is_timed_by_its_characters_at_its_voices_rate() {
+		use crate::video::voice::Delivery;
+		use crate::video::voice::Utterance;
+		use crate::video::voice::Voice;
+
+		let text = "The wind carried every single word away.";
+		let plain = Delivery::default();
+		let normal = Voice::default();
+		let slow = Voice {
+			rate: Some(135),
+			..Voice::default()
+		};
+		let seconds = |voice: &Voice, delivery: Delivery| {
+			estimated_seconds(&Utterance {
+				text,
+				voice,
+				delivery,
+			})
+		};
+
+		// Forty characters at sixteen a second.
+		let at_default = seconds(&normal, plain);
+		assert!((at_default - 40.0 / 16.0).abs() < 1e-4, "{at_default}");
+
+		// A slower narrator (a young age band's) takes longer in proportion.
+		let at_slow = seconds(&slow, plain);
+		assert!(
+			(at_slow / at_default - 165.0 / 135.0).abs() < 1e-4,
+			"{at_slow}"
+		);
+
+		// A shout is read faster, as `say` is asked to read it.
+		let shout = Delivery {
+			shout: true,
+			..Delivery::default()
+		};
+		assert!(seconds(&normal, shout) < at_default);
+
+		// A word is never shorter than the floor.
+		let one = estimated_seconds(&Utterance {
+			text: "Oh.",
+			voice: &normal,
+			delivery: plain,
+		});
+		assert!((one - 0.3).abs() < 1e-4, "{one}");
+	}
 
 	#[test]
 	fn a_field_only_the_parametric_puppet_reads_is_noted_once() {

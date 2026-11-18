@@ -70,7 +70,7 @@ pub struct Voice {
 }
 
 /// The rate a voice reads at when nobody sets one: the pace every book had before age bands.
-const RATE: u32 = 165;
+pub(crate) const RATE: u32 = 165;
 
 impl std::fmt::Debug for Voice {
 	/// Prints the effective rate, so a take's cache key is the same as it was when the rate was
@@ -176,7 +176,7 @@ impl Delivery {
 		})
 	}
 
-	fn rate_scale(self) -> f32 {
+	pub(crate) fn rate_scale(self) -> f32 {
 		if self.shout {
 			return 1.08;
 		}
