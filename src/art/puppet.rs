@@ -824,6 +824,31 @@ fn hose(root: Pt, joint: Pt, end: Pt, length: f32) -> [Pt; 9] {
 	})
 }
 
+/// The centre line of a rubber-hose leg. It bows like an arm while the foot is near its full
+/// reach, but a leg folded deep, in a crouch or a sit, bends round the `knee` the rig puts there
+/// instead: one smooth curve through it, so a squat reads as a squat, not as bowed legs.
+fn hose_leg(hip: Pt, knee: Pt, ankle: Pt, length: f32) -> [Pt; 9] {
+	/// How short of its length the hip-to-ankle line gets before the leg starts to fold, and
+	/// how much shorter again before it has folded all the way round its knee.
+	const FOLD_FROM: f32 = 0.15;
+	const FOLD_OVER: f32 = 0.25;
+	let bow = hose(hip, knee, ankle, length);
+	let fold = ((1.0 - (ankle - hip).len() / length - FOLD_FROM) / FOLD_OVER).clamp(0.0, 1.0);
+
+	if fold <= 0.0 {
+		return bow;
+	}
+
+	// A quadratic through the knee halfway along.
+	let control = knee * 2.0 - hip.lerp(ankle, 0.5);
+
+	std::array::from_fn(|i| {
+		let s = i as f32 / 8.0;
+		let round = hip.lerp(control, s).lerp(control.lerp(ankle, s), s);
+		bow[i].lerp(round, fold)
+	})
+}
+
 /// A bent knee seen front-on: it comes towards the viewer, so only `reach` of its sideways
 /// offset from the hip–ankle line shows, and the thigh and shin foreshorten.
 fn splay(hip: Pt, knee: Pt, ankle: Pt, reach: f32) -> Pt {
@@ -1242,7 +1267,8 @@ fn wrap(p: Pt, t: f32, radius: f32, turn: f32) -> Pt {
 }
 
 /// A leg's skin outline through its hip, knee and ankle. A rubber-hose leg has no knee: it's
-/// one tube that bows as the foot comes closer. Otherwise it is one shape bent through the knee,
+/// one tube that bows as the foot comes closer, and folds round where the knee would be when
+/// it bends deep. Otherwise it is one shape bent through the knee,
 /// so there's no seam at the joint: drawn with the body's anatomy if it has a leg profile, or
 /// tapering evenly from hip to ankle.
 fn leg_shape(puppet: &Authored, solved: &Solved, (hip, knee, ankle): (Pt, Pt, Pt)) -> Shape {
@@ -1250,7 +1276,7 @@ fn leg_shape(puppet: &Authored, solved: &Solved, (hip, knee, ankle): (Pt, Pt, Pt
 
 	if puppet.style.motion.limbs == Joints::Hose {
 		Shape::taper(
-			&hose(hip, knee, ankle, solved.limbs.thigh + solved.limbs.shin),
+			&hose_leg(hip, knee, ankle, solved.limbs.thigh + solved.limbs.shin),
 			start,
 			end,
 		)
@@ -3333,6 +3359,29 @@ mod tests {
 				"no kinks: {bowed:?}"
 			);
 		}
+	}
+
+	#[test]
+	fn a_hose_leg_bows_near_its_reach_and_folds_round_its_knee_in_a_squat() {
+		let hip = pt(0.0, 0.0);
+
+		// A foot near full reach bows the leg exactly as an arm would.
+		let standing = (pt(10.0, 30.0), pt(0.0, 92.0));
+		assert_eq!(
+			hose_leg(hip, standing.0, standing.1, 100.0),
+			hose(hip, standing.0, standing.1, 100.0)
+		);
+
+		// Squatting, the foot is close under the hip and the knee juts out high: the leg goes
+		// round the knee rather than bowing evenly between hip and foot.
+		let (knee, ankle) = (pt(45.0, 20.0), pt(5.0, 50.0));
+		let folded = hose_leg(hip, knee, ankle, 100.0);
+		assert!((folded[4] - knee).len() < 1.0, "{folded:?}");
+		let bowed = hose(hip, knee, ankle, 100.0);
+		assert!(
+			(bowed[4] - knee).len() > 10.0,
+			"a plain bow misses the knee: {bowed:?}"
+		);
 	}
 
 	#[test]
