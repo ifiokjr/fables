@@ -990,6 +990,13 @@ mod tests {
 					"{}",
 					text.text
 				);
+				assert_eq!(
+					text.text.matches("\nage").count(),
+					1,
+					"one age line: {}",
+					text.text
+				);
+				assert!(text.text.contains("age = \"3-5\""), "{}", text.text);
 			}
 			other => panic!("the scaffold comes back as text: {other:?}"),
 		}

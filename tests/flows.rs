@@ -12,9 +12,9 @@ use fables::world::World;
 
 const BIN: &str = env!("CARGO_BIN_EXE_fables");
 
-/// The eight research flows that carry a worked example. `habit-tale` is Kerfuffle's own shape,
-/// whose worked example is the existing Kerfuffle book.
-const WORKED: [&str; 8] = [
+/// Every built-in flow carries a worked example in an example world, so the shapes are shown
+/// as books and not only as scaffolds.
+const WORKED: [&str; 9] = [
 	"three-tries",
 	"pile-up",
 	"there-and-back",
@@ -23,6 +23,7 @@ const WORKED: [&str; 8] = [
 	"wrong-end-of-the-stick",
 	"goodnight-tour",
 	"gag-short",
+	"habit-tale",
 ];
 
 /// A world with two cast members and a `stories/` folder, under a fresh root.
@@ -62,12 +63,57 @@ fn stderr(output: &std::process::Output) -> String {
 	String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// The lines `fables new` starts for a flow, and whether it needs a friend.
-fn starts(flow: &str) -> bool {
+/// Whether a flow stages a second character and so needs `--friend`.
+fn needs_friend(flow: &str) -> bool {
 	!matches!(
 		flow,
 		"three-tries" | "there-and-back" | "round-we-go" | "goodnight-tour" | "gag-short"
 	)
+}
+
+#[test]
+fn every_built_in_flow_scaffold_has_exactly_one_age() {
+	let (_root, home) = scratch();
+	let world = World::load(&home).unwrap();
+
+	for flow in flow::built_in_flows().unwrap() {
+		let friend = needs_friend(&flow.slug).then_some("nan");
+		let script = flow
+			.scaffold(&world, "A Tale", "mo", friend, "A. Writer")
+			.unwrap();
+
+		assert_eq!(
+			script.matches("\nage").count(),
+			1,
+			"{}: {script}",
+			flow.slug
+		);
+		assert!(script.contains("age = \"3-5\""), "{}: {script}", flow.slug);
+	}
+}
+
+#[test]
+fn a_worlds_flow_without_an_age_gets_the_default() {
+	let (root, home) = scratch();
+	std::fs::create_dir_all(home.join("flows")).unwrap();
+	std::fs::write(home.join("flows/plain-shape.md"), flow_file("Plain Shape")).unwrap();
+
+	let output = fables(
+		root.path(),
+		&[
+			"new",
+			"A Plain Tale",
+			"--star",
+			"mo",
+			"--flow",
+			"plain-shape",
+		],
+	);
+	assert!(output.status.success(), "{}", stderr(&output));
+
+	let script = std::fs::read_to_string(home.join("stories/a-plain-tale/story.md")).unwrap();
+	assert_eq!(script.matches("\nage").count(), 1, "{script}");
+	assert!(script.contains("age = \"3-5\""), "{script}");
 }
 
 #[test]
@@ -102,7 +148,7 @@ fn every_flow_starts_a_book_that_checks() {
 		let slug = fables::story::slugify(&title);
 		let mut args = vec!["new", &title, "--star", "mo", "--flow", &flow.slug];
 
-		if starts(&flow.slug) {
+		if needs_friend(&flow.slug) {
 			args.extend(["--friend", "nan"]);
 		}
 
