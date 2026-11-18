@@ -209,7 +209,7 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<skin>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. A hold a script-written cut leaves under 1.2 s is labelled `· short`. Never records a voice, so it runs offline in a second or two. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
-| `fables sheets [--moods <id>]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. |
+| `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
 | `fables styles <story>` | `out/<book>/styles.png`: the cover and three pages drawn in every page skin, side by side. |
 | `fables rig <id>` | `out/rig/<skin>/`: a rig sheet (every stance and gait phase with the skeleton drawn over the character), a motion-test video, and an acting-test video (the ten acting rules, in order, on two characters). |
 

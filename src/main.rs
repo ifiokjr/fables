@@ -147,6 +147,10 @@ enum Command {
 		/// Also draw every mood for this cast member.
 		#[arg(long)]
 		moods: Option<String>,
+		/// Outline, on every setting of the places sheet, where a typical text card and the
+		/// actors sit.
+		#[arg(long)]
+		zones: bool,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 	},
@@ -506,14 +510,20 @@ fn run(cli: Cli) -> Result<()> {
 				}
 			}
 		}
-		Command::Sheets { moods, out } => {
+		Command::Sheets { moods, zones, out } => {
 			let choices = style_choices(style.as_deref())?;
 			let world = world()?;
+			let zones = if zones {
+				Some(press::sheets::Zones::measure(&world.style()?)?)
+			} else {
+				None
+			};
 
 			for style in sheet_styles(&choices) {
 				sheets(
 					&world,
 					moods.as_deref(),
+					zones.as_ref(),
 					&out.join("sheets").join(style.name.name()),
 					style,
 				)?;
@@ -1085,7 +1095,13 @@ fn print(story: &Story, cast: &Cast, out: &Path) -> Result<()> {
 	Ok(())
 }
 
-fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Result<()> {
+fn sheets(
+	world: &World,
+	moods: Option<&str>,
+	zones: Option<&press::sheets::Zones>,
+	out: &Path,
+	style: Style,
+) -> Result<()> {
 	let started = Instant::now();
 	let cast = world.cast()?;
 	let slug = fables::story::slugify(&world.name);
@@ -1101,7 +1117,11 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	let path = out.join(format!("{slug}-places.png"));
 	std::fs::write(
 		&path,
-		raster::png(&press::sheets::places_sheet(&*world.settings()?, style)?)?,
+		raster::png(&press::sheets::places_sheet(
+			&*world.settings()?,
+			style,
+			zones,
+		)?)?,
 	)?;
 	done(&path, started)?;
 
