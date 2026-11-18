@@ -535,6 +535,10 @@ fn new_story(
 	let recipe = std::fs::read_to_string(&recipe)
 		.with_context(|| format!("could not read {}", recipe.display()))?;
 	let slug = fables::story::slugify(title);
+	anyhow::ensure!(
+		!slug.is_empty(),
+		"the title needs at least one letter or digit: it names the book's folder"
+	);
 	let folder = dir
 		.map_or_else(|| world.stories(), Path::to_path_buf)
 		.join(&slug);

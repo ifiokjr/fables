@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use serde::Deserialize;
 
 use crate::art::dials::Fill;
@@ -32,6 +33,10 @@ use crate::art::settings::Library;
 use crate::art::style::Style;
 use crate::art::style::StyleName;
 pub use crate::video::voice::Voice;
+
+/// The longest beat of silence a script can ask for: a `@pause` beyond it is a mistake, not a
+/// pause, and a video's buffers are sized from the total.
+const MAX_PAUSE: f32 = 60.0;
 
 /// Book-level metadata from the front matter.
 #[derive(Clone, Debug, Deserialize)]
@@ -459,6 +464,10 @@ pub fn parse(source: &str) -> Result<Story> {
 		.unwrap_or_else(Light::day);
 
 	let slug = slugify(&meta.title);
+	ensure!(
+		!slug.is_empty(),
+		"the title needs at least one letter or digit: it names the book's output folder"
+	);
 
 	Ok(Story {
 		meta,
@@ -498,6 +507,13 @@ fn parse_pages(body: &str, first_line: usize) -> Result<Vec<Page>> {
 	for (offset, raw) in body.lines().enumerate() {
 		let line_no = first_line + offset;
 		let line = raw.trim();
+
+		if line == "+++" {
+			bail!(
+				"line {line_no}: a stray `+++`; the front matter already closed with the `+++` \
+				 before the first page"
+			);
+		}
 
 		let is_text = !line.is_empty()
 			&& !line.starts_with('#')
@@ -595,6 +611,11 @@ fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
 				.with_context(|| {
 					format!("line {line}: `@pause` needs a number of seconds, e.g. `@pause 1.5`")
 				})?;
+
+			ensure!(
+				seconds.is_finite() && (0.0..=MAX_PAUSE).contains(&seconds),
+				"line {line}: `@pause` takes 0 to {MAX_PAUSE:.0} seconds, e.g. `@pause 1.5`"
+			);
 
 			Ok(Beat::Pause { seconds, line })
 		}
@@ -793,6 +814,61 @@ Hello.
 	fn requires_front_matter() {
 		assert!(parse("# park\nHi").is_err());
 		assert!(parse("+++\ntitle = \"T\"\n").is_err());
+	}
+
+	#[test]
+	fn a_pause_is_a_short_beat_and_nothing_longer() {
+		for (value, accepted) in [
+			("0", true),
+			("0.4", true),
+			("60", true),
+			("60.1", false),
+			("1e9", false),
+			("-1", false),
+			("inf", false),
+			("nan", false),
+		] {
+			let script =
+				format!("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n@pause {value}\n");
+			let parsed = parse(&script);
+
+			assert_eq!(
+				parsed.is_ok(),
+				accepted,
+				"@pause {value}: {:?}",
+				parsed.err().map(|error| format!("{error:#}"))
+			);
+
+			if !accepted {
+				let message = format!("{:#}", parsed.unwrap_err());
+				assert!(message.contains("line 6"), "{message}");
+				assert!(message.contains("60"), "{message}");
+			}
+		}
+	}
+
+	#[test]
+	fn a_title_needs_a_letter_or_digit_to_name_its_files() {
+		let error = parse("+++\ntitle = \"!!!\"\nauthor = \"A\"\n+++\n# park\nHi.\n").unwrap_err();
+		let message = format!("{error:#}");
+
+		assert!(
+			message.contains("title") && message.contains("letter or digit"),
+			"{message}"
+		);
+		assert_eq!(slugify("!!!"), "");
+	}
+
+	#[test]
+	fn a_stray_front_matter_fence_is_an_error_not_story_text() {
+		let error =
+			parse("+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\nHi.\n+++\n").unwrap_err();
+		let message = format!("{error:#}");
+
+		assert!(
+			message.contains("line 7") && message.contains("+++"),
+			"{message}"
+		);
 	}
 
 	#[test]
