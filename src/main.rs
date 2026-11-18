@@ -216,6 +216,10 @@ enum Command {
 		/// Which shape to cut.
 		#[arg(long, value_enum, default_value = "landscape")]
 		format: Shape,
+		/// Leave every line silent, timed by its estimate: nothing is recorded, so it needs no
+		/// voice at all. Without it, a line whose voice cannot record here is silent anyway.
+		#[arg(long)]
+		silent: bool,
 	},
 	/// Build the book and both videos.
 	All {
@@ -712,7 +716,12 @@ fn run(cli: Cli) -> Result<()> {
 				storyboard(story, cast, &out, format == Shape::Portrait)
 			})
 		}
-		Command::Animatic { story, out, format } => {
+		Command::Animatic {
+			story,
+			out,
+			format,
+			silent,
+		} => {
 			anyhow::ensure!(
 				format != Shape::Both,
 				"animatic cuts one shape; use --format landscape or portrait"
@@ -720,7 +729,7 @@ fn run(cli: Cli) -> Result<()> {
 			let choices = style_choices(style.as_deref())?;
 
 			each_style(&story, &choices, flag, |story, cast, _| {
-				animatic(story, cast, &out, format == Shape::Portrait)
+				animatic(story, cast, &out, format == Shape::Portrait, silent)
 			})
 		}
 		Command::All { story, out } => {
@@ -1664,15 +1673,25 @@ fn pages_spec(spec: &str, count: usize) -> Result<Option<Vec<usize>>> {
 	Ok(Some(pages))
 }
 
-fn animatic(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
+fn animatic(story: &Story, cast: &Cast, out: &Path, portrait: bool, silent: bool) -> Result<()> {
 	let started = Instant::now();
 	let format = if portrait {
 		Format::Portrait
 	} else {
 		Format::Landscape
 	};
-	let (path, _) = publish::animatic(story, cast, out, format)?;
-	done(&path, started)
+	let narration = if silent {
+		publish::Narration::Silent
+	} else {
+		publish::Narration::Voiced
+	};
+	let cut = publish::animatic(story, cast, out, format, narration)?;
+
+	if let Some(note) = &cut.note {
+		say!("  {note}")?;
+	}
+
+	done(&cut.path, started)
 }
 
 fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {

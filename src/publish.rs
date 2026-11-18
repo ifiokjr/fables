@@ -18,7 +18,6 @@ use crate::press::print::Spec;
 use crate::raster;
 use crate::stage;
 use crate::story::Story;
-use crate::story::plain_text;
 use crate::video::frames::Format;
 use crate::video::voice::Speech;
 
@@ -216,20 +215,60 @@ pub fn video(
 	)
 }
 
-/// The animatic in one shape: the storyboard's shots held for the video's real timing over its
-/// own soundtrack. Voices come from the video's take cache, recording any line not yet in it.
-/// Returns the MP4 and the timeline it was cut to.
+/// How an animatic's lines are voiced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Narration {
+	/// Every line as the video voices it: a cached take, or a new recording. A line whose voice
+	/// cannot record on this machine (no program, no API key) is silent instead, timed by its
+	/// estimate, so an animatic is always possible.
+	Voiced,
+	/// Every line silent and timed by its estimate; nothing is recorded or read from the cache.
+	Silent,
+}
+
+/// An animatic and what it was cut to.
+pub struct Animatic {
+	pub path: PathBuf,
+	pub timeline: crate::video::timeline::Timeline,
+	/// How many lines are silent, timed by their estimate.
+	pub silent: usize,
+	/// One line for the reader when any line is silent, else `None`.
+	pub note: Option<String>,
+}
+
+/// The animatic in one shape: the storyboard's shots held for the video's timing over its own
+/// soundtrack (music, effects, ambience and drop-outs exactly as the video mixes them). Voices
+/// come from the video's take cache, recording any line not yet in it, unless `narration`
+/// says otherwise; a video never falls back like this.
 pub fn animatic(
 	story: &Story,
 	cast: &Cast,
 	out: &Path,
 	format: Format,
-) -> Result<(PathBuf, crate::video::timeline::Timeline)> {
-	let timeline = crate::video::plan(
-		story,
-		cast,
-		&out.join(&story.slug).join("cache").join("voice"),
-	)?;
+	narration: Narration,
+) -> Result<Animatic> {
+	use crate::video::voice;
+
+	let cache = out.join(&story.slug).join("cache").join("voice");
+	let rehearsals = stage::rehearse(story, cast)?;
+	let mut silent = 0;
+	let mut reasons = std::collections::BTreeSet::new();
+	let timeline = crate::video::timeline::build(story, cast, &rehearsals, |line| {
+		let reason = match narration {
+			Narration::Silent => Some("silent was asked for".to_owned()),
+			Narration::Voiced if voice::is_cached(line, &cache) => None,
+			Narration::Voiced => voice::unavailable(line.voice),
+		};
+
+		match reason {
+			Some(reason) => {
+				silent += 1;
+				reasons.insert(reason);
+				Ok(voice::silent(line, voice::estimated_seconds(line)))
+			}
+			None => voice::speak(line, &cache),
+		}
+	})?;
 	let path = crate::video::animatic(
 		story,
 		cast,
@@ -237,8 +276,21 @@ pub fn animatic(
 		format,
 		&book_dir(out, story).join("animatic"),
 	)?;
+	let note = (silent > 0).then(|| {
+		format!(
+			"{silent} line{} had no voice and {} silent, timed by estimate ({})",
+			if silent == 1 { "" } else { "s" },
+			if silent == 1 { "is" } else { "are" },
+			reasons.into_iter().collect::<Vec<_>>().join("; ")
+		)
+	});
 
-	Ok((path, timeline))
+	Ok(Animatic {
+		path,
+		timeline,
+		silent,
+		note,
+	})
 }
 
 /// A storyboard's pictures and the shot list that reads them.
@@ -267,6 +319,8 @@ pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Res
 /// The timeline with estimated durations: a cached take when there is one, else the line's
 /// characters at its voice's rate (see [`estimated_seconds`]), paced as the video is, so
 /// boards, sampled frames and reviews run offline without a microphone or ffmpeg.
+///
+/// [`estimated_seconds`]: crate::video::voice::estimated_seconds
 pub fn estimated_timeline(
 	story: &Story,
 	cast: &Cast,
@@ -288,96 +342,27 @@ pub fn review(story: &Story, cast: &Cast, out: &Path) -> Result<Vec<crate::revie
 	Ok(crate::review::review(story, &rehearsals, &timeline))
 }
 
-/// Characters a second a voice reads at the default 165 words a minute, measured on the
-/// recorded takes of The Visitor, Mo Mumble and Stinky: characters vary far less than words do
-/// from one line to the next.
-const CHARACTERS_A_SECOND: f32 = 16.0;
-
-/// How long a line takes to say without a recording: its characters at the voice's own rate,
-/// sped up or slowed down by its delivery, as `say` is asked to read it.
-fn estimated_seconds(line: &crate::video::voice::Utterance<'_>) -> f32 {
-	let characters = plain_text(line.text).chars().count() as f32;
-	let pace =
-		line.voice.rate() as f32 * line.delivery.rate_scale() / crate::video::voice::RATE as f32;
-
-	(characters / (CHARACTERS_A_SECOND * pace)).max(0.3)
-}
-
 /// The length of a spoken line without a microphone: the cached take when there is one, else
-/// [`estimated_seconds`].
+/// [`estimated_seconds`](crate::video::voice::estimated_seconds).
 fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Speech {
 	use crate::art::seed_of;
-	use crate::video::lipsync::Track;
-	use crate::video::voice::SAMPLE_RATE;
+	use crate::video::voice;
 
 	// The same key `voice::speak` caches takes under, so a recorded take gives the real length.
-	let key = crate::video::voice::cache_key(line.voice, line.delivery, line.text);
+	let key = voice::cache_key(line.voice, line.delivery, line.text);
 	let wav = cache.join(format!("{:016x}.wav", seed_of(&key)));
-	let seconds = match crate::video::voice::read_wav(&wav) {
-		Ok((samples, _rate)) => samples.len() as f32 / SAMPLE_RATE as f32,
-		Err(_) => estimated_seconds(line),
+	let seconds = match voice::read_wav(&wav) {
+		Ok((samples, _rate)) => samples.len() as f32 / voice::SAMPLE_RATE as f32,
+		Err(_) => voice::estimated_seconds(line),
 	};
 
-	Speech {
-		text: line.text.to_owned(),
-		samples: vec![0.0; (seconds * SAMPLE_RATE as f32) as usize],
-		envelope: Vec::new(),
-		track: Track::default(),
-	}
+	voice::silent(line, seconds)
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::story;
-
-	#[test]
-	fn an_unrecorded_line_is_timed_by_its_characters_at_its_voices_rate() {
-		use crate::video::voice::Delivery;
-		use crate::video::voice::Utterance;
-		use crate::video::voice::Voice;
-
-		let text = "The wind carried every single word away.";
-		let plain = Delivery::default();
-		let normal = Voice::default();
-		let slow = Voice {
-			rate: Some(135),
-			..Voice::default()
-		};
-		let seconds = |voice: &Voice, delivery: Delivery| {
-			estimated_seconds(&Utterance {
-				text,
-				voice,
-				delivery,
-			})
-		};
-
-		// Forty characters at sixteen a second.
-		let at_default = seconds(&normal, plain);
-		assert!((at_default - 40.0 / 16.0).abs() < 1e-4, "{at_default}");
-
-		// A slower narrator (a young age band's) takes longer in proportion.
-		let at_slow = seconds(&slow, plain);
-		assert!(
-			(at_slow / at_default - 165.0 / 135.0).abs() < 1e-4,
-			"{at_slow}"
-		);
-
-		// A shout is read faster, as `say` is asked to read it.
-		let shout = Delivery {
-			shout: true,
-			..Delivery::default()
-		};
-		assert!(seconds(&normal, shout) < at_default);
-
-		// A word is never shorter than the floor.
-		let one = estimated_seconds(&Utterance {
-			text: "Oh.",
-			voice: &normal,
-			delivery: plain,
-		});
-		assert!((one - 0.3).abs() < 1e-4, "{one}");
-	}
 
 	#[test]
 	fn a_field_only_the_parametric_puppet_reads_is_noted_once() {

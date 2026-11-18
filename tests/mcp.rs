@@ -753,19 +753,47 @@ fn an_agent_pins_the_plan_and_cuts_an_animatic() {
 	assert_eq!(unpinned["unpinned"].as_u64(), Some(count), "{unpinned}");
 	assert!(!unpinned["script"].as_str().unwrap().contains("// pinned"));
 
-	// The animatic is written where the report says, and its shot list reads.
+	// The animatic is written where the report says, and its shot list reads. `silent` records
+	// nothing, so this runs on any machine with ffmpeg, voice or none.
 	let animatic = session.json(
 		"animatic_render",
-		&json!({ "world": "nibbleton", "story": "nell-nibbles" }),
+		&json!({ "world": "nibbleton", "story": "nell-nibbles", "silent": true }),
 	);
 	let file = root.path().join(animatic["file"].as_str().unwrap());
 	assert!(file.is_file(), "{file:?}");
 	assert!(animatic["seconds"].as_f64().unwrap() > 0.0, "{animatic}");
-	assert!(
-		animatic["shot_list"]
-			.as_str()
-			.unwrap()
-			.contains("shot list"),
-		"{animatic}"
+	assert_eq!(
+		animatic["silent_lines"].as_u64(),
+		Some(2),
+		"the title and the line: {animatic}"
 	);
+
+	let shot_list = animatic["shot_list"].as_str().unwrap();
+	assert!(shot_list.contains("shot list"), "{animatic}");
+	assert!(
+		shot_list.contains("2 lines had no voice and are silent, timed by estimate"),
+		"{shot_list}"
+	);
+
+	// Where macOS `say` can narrate, the same call without `silent` voices the line.
+	let say_speaks = cfg!(target_os = "macos")
+		&& Command::new("say")
+			.args(["-v", "?"])
+			.output()
+			.is_ok_and(|output| output.status.success());
+
+	if say_speaks {
+		let voiced = session.json(
+			"animatic_render",
+			&json!({ "world": "nibbleton", "story": "nell-nibbles" }),
+		);
+		assert_eq!(voiced["silent_lines"].as_u64(), Some(0), "{voiced}");
+		assert!(
+			!voiced["shot_list"]
+				.as_str()
+				.unwrap()
+				.contains("had no voice"),
+			"{voiced}"
+		);
+	}
 }

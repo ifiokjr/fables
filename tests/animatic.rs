@@ -61,10 +61,18 @@ fn the_animatic_soundtrack_is_the_preview_videos_byte_for_byte() {
 	// The video records the takes into the cache; the animatic reads them back from it, as the
 	// two commands do one after the other.
 	publish::video(&story, &cast, out.path(), &[Format::Landscape], true).unwrap();
-	let (animatic, timeline) =
-		publish::animatic(&story, &cast, out.path(), Format::Landscape).unwrap();
+	let cut = publish::animatic(
+		&story,
+		&cast,
+		out.path(),
+		Format::Landscape,
+		publish::Narration::Voiced,
+	)
+	.unwrap();
+	let timeline = &cut.timeline;
 
-	assert!(animatic.is_file(), "{}", animatic.display());
+	assert!(cut.path.is_file(), "{}", cut.path.display());
+	assert_eq!(cut.silent, 0, "every line has a take: {:?}", cut.note);
 	assert!(!timeline.holds.is_empty(), "the book has dead stops");
 	assert!(timeline.music.len() > 1, "the music changes cue");
 	assert!(

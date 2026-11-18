@@ -10,6 +10,7 @@
 //! a puppet unable to draw a figure are refused with the part check's findings, so a world on
 //! disk always loads.
 
+use std::fmt::Write as _;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -402,6 +403,10 @@ pub struct AnimaticReport {
 	pub file: String,
 	pub seconds: f32,
 	pub shots: usize,
+	/// Lines left silent and timed by their estimate: their voice could not record here, or
+	/// `silent` was asked for.
+	pub silent_lines: usize,
+	/// The shot list, ending with a note when any line is silent.
 	pub shot_list: String,
 }
 
@@ -1153,6 +1158,7 @@ impl Studio {
 		folder: &str,
 		story: &str,
 		shape: VideoShape,
+		silent: bool,
 	) -> Result<AnimaticReport> {
 		let (_, script, cast) = self.book(folder, story)?;
 		let format = match shape {
@@ -1163,10 +1169,21 @@ impl Studio {
 		// other; the book's slug names a folder under `out/` and nowhere else.
 		let out = self.root.join("out");
 		world::under(&out, "book", &script.slug)?;
-		let (path, timeline) = publish::animatic(&script, &cast, &out, format)?;
+		let narration = if silent {
+			publish::Narration::Silent
+		} else {
+			publish::Narration::Voiced
+		};
+		let cut = publish::animatic(&script, &cast, &out, format, narration)?;
+		let (path, timeline) = (cut.path, cut.timeline);
 		let portrait = shape == VideoShape::Portrait;
 		let rows = crate::press::storyboard::plan(&script, &timeline, &cast, portrait);
-		let shot_list = crate::press::storyboard::shot_list(&script, &timeline, &rows, portrait);
+		let mut shot_list =
+			crate::press::storyboard::shot_list(&script, &timeline, &rows, portrait);
+
+		if let Some(note) = &cut.note {
+			let _ = write!(shot_list, "\n**Voice.** {note}.\n");
+		}
 
 		Ok(AnimaticReport {
 			file: path
@@ -1176,6 +1193,7 @@ impl Studio {
 				.to_string(),
 			seconds: timeline.duration,
 			shots: rows.len(),
+			silent_lines: cut.silent,
 			shot_list,
 		})
 	}

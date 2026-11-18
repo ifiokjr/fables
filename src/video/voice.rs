@@ -70,7 +70,7 @@ pub struct Voice {
 }
 
 /// The rate a voice reads at when nobody sets one: the pace every book had before age bands.
-pub(crate) const RATE: u32 = 165;
+const RATE: u32 = 165;
 
 impl std::fmt::Debug for Voice {
 	/// Prints the effective rate, so a take's cache key is the same as it was when the rate was
@@ -176,7 +176,7 @@ impl Delivery {
 		})
 	}
 
-	pub(crate) fn rate_scale(self) -> f32 {
+	fn rate_scale(self) -> f32 {
 		if self.shout {
 			return 1.08;
 		}
@@ -287,6 +287,87 @@ pub fn speak(utterance: &Utterance<'_>, cache: &Path) -> Result<Speech> {
 struct Take {
 	audio: PathBuf,
 	alignment: Option<Vec<Timed>>,
+}
+
+/// Whether `utterance` already has a recorded take in `cache`.
+pub fn is_cached(utterance: &Utterance<'_>, cache: &Path) -> bool {
+	let key = cache_key(utterance.voice, utterance.delivery, utterance.text);
+	cache.join(format!("{:016x}.wav", seed_of(&key))).is_file()
+}
+
+/// Why `voice` cannot record on this machine, if it cannot: its program is not installed, or
+/// its service's API key is not set. `None` means it can try; a recording can still fail for
+/// other reasons, and that failure is reported, never hidden.
+pub fn unavailable(voice: &Voice) -> Option<String> {
+	let key = match voice.provider.as_str() {
+		"say" => {
+			// Asked once: a `say` that is on the path but cannot run counts as missing.
+			static SPEAKS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+			let speaks = *SPEAKS.get_or_init(|| {
+				Command::new("say")
+					.args(["-v", "?"])
+					.stdin(Stdio::null())
+					.stdout(Stdio::null())
+					.stderr(Stdio::null())
+					.status()
+					.is_ok_and(|status| status.success())
+			});
+
+			return (!speaks).then(|| "macOS `say` cannot run here".to_owned());
+		}
+		"command" => {
+			let program = voice.command.as_deref().and_then(<[String]>::first)?;
+			let found = if program.contains(std::path::MAIN_SEPARATOR) {
+				Path::new(program).is_file()
+			} else {
+				on_path(program)
+			};
+
+			return (!found).then(|| format!("the voice command `{program}` is not installed"));
+		}
+		"elevenlabs" => "ELEVENLABS_API_KEY",
+		"openai" => "OPENAI_API_KEY",
+		"cartesia" => "CARTESIA_API_KEY",
+		"hume" => "HUME_API_KEY",
+		_ => return None,
+	};
+
+	std::env::var_os(key)
+		.is_none_or(|value| value.is_empty())
+		.then(|| format!("`{key}` is not set"))
+}
+
+/// Whether `program` is a file in one of the `PATH` folders.
+fn on_path(program: &str) -> bool {
+	std::env::var_os("PATH").is_some_and(|path| {
+		std::env::split_paths(&path).any(|folder| folder.join(program).is_file())
+	})
+}
+
+/// Characters a second a voice reads at the default 165 words a minute, measured on the
+/// recorded takes of The Visitor, Mo Mumble and Stinky: characters vary far less than words do
+/// from one line to the next.
+const CHARACTERS_A_SECOND: f32 = 16.0;
+
+/// How long a line takes to say without a recording: its characters at the voice's own rate,
+/// sped up or slowed down by its delivery, as `say` is asked to read it.
+pub fn estimated_seconds(utterance: &Utterance<'_>) -> f32 {
+	let characters = crate::story::plain_text(utterance.text).chars().count() as f32;
+	let pace = utterance.voice.rate() as f32 * utterance.delivery.rate_scale() / RATE as f32;
+
+	(characters / (CHARACTERS_A_SECOND * pace)).max(0.3)
+}
+
+/// A line held for `seconds` with no sound and no mouth movement: the stand-in for a take
+/// nobody recorded.
+pub fn silent(utterance: &Utterance<'_>, seconds: f32) -> Speech {
+	Speech {
+		text: utterance.text.to_owned(),
+		samples: vec![0.0; (seconds * SAMPLE_RATE as f32) as usize],
+		envelope: Vec::new(),
+		track: Track::default(),
+	}
 }
 
 fn record(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
@@ -742,6 +823,76 @@ fn envelope(samples: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_voice_that_cannot_speak_says_why() {
+		let command = |program: &str| {
+			Voice {
+				provider: "command".to_owned(),
+				command: Some(vec![program.to_owned(), "{out}".to_owned()]),
+				..Voice::default()
+			}
+		};
+
+		assert_eq!(unavailable(&command("sh")), None, "sh is on every path");
+		assert_eq!(
+			unavailable(&command("fables-no-such-voice")).as_deref(),
+			Some("the voice command `fables-no-such-voice` is not installed")
+		);
+		assert!(unavailable(&command("/no/such/fables-voice")).is_some());
+		assert_eq!(
+			unavailable(&Voice {
+				provider: "command".to_owned(),
+				..Voice::default()
+			}),
+			None,
+			"a command voice with no command fails as before, with its own message"
+		);
+	}
+
+	#[test]
+	fn an_unrecorded_line_is_timed_by_its_characters_at_its_voices_rate() {
+		let text = "The wind carried every single word away.";
+		let plain = Delivery::default();
+		let normal = Voice::default();
+		let slow = Voice {
+			rate: Some(135),
+			..Voice::default()
+		};
+		let seconds = |voice: &Voice, delivery: Delivery| {
+			estimated_seconds(&Utterance {
+				text,
+				voice,
+				delivery,
+			})
+		};
+
+		// Forty characters at sixteen a second.
+		let at_default = seconds(&normal, plain);
+		assert!((at_default - 40.0 / 16.0).abs() < 1e-4, "{at_default}");
+
+		// A slower narrator (a young age band's) takes longer in proportion.
+		let at_slow = seconds(&slow, plain);
+		assert!(
+			(at_slow / at_default - 165.0 / 135.0).abs() < 1e-4,
+			"{at_slow}"
+		);
+
+		// A shout is read faster, as `say` is asked to read it.
+		let shout = Delivery {
+			shout: true,
+			..Delivery::default()
+		};
+		assert!(seconds(&normal, shout) < at_default);
+
+		// A word is never shorter than the floor.
+		let one = estimated_seconds(&Utterance {
+			text: "Oh.",
+			voice: &normal,
+			delivery: plain,
+		});
+		assert!((one - 0.3).abs() < 1e-4, "{one}");
+	}
 
 	fn voice(provider: &str) -> Voice {
 		Voice {

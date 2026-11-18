@@ -249,6 +249,10 @@ pub struct AnimaticParams {
 	/// `landscape` (16:9, the default) or `portrait` (9:16).
 	#[serde(default)]
 	pub shape: Option<VideoShape>,
+	/// Leave every line silent, timed by its estimate, so nothing is recorded and no voice is
+	/// needed: a quick timing check.
+	#[serde(default)]
+	pub silent: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -765,14 +769,16 @@ impl StudioServer {
 		               video's soundtrack, at half size. It draws each panel once and lets ffmpeg \
 		               hold it, so a ninety-second film takes seconds, not minutes. Returns the \
 		               MP4 and the shot list. Narrates any missing line once, then reuses the \
-		               voice cache."
+		               voice cache. A line whose voice cannot speak here (no `say`, no API key, \
+		               no command) is left silent and timed by its estimate, and the shot list \
+		               says so; `silent: true` does that for every line, recording nothing."
 	)]
 	fn animatic_render(&self, Parameters(params): Parameters<AnimaticParams>) -> CallToolResult {
 		let shape = params.shape.unwrap_or(VideoShape::Landscape);
 
 		json(
 			self.studio
-				.render_animatic(&params.world, &params.story, shape),
+				.render_animatic(&params.world, &params.story, shape, params.silent),
 		)
 	}
 
