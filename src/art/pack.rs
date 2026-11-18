@@ -8,19 +8,22 @@
 //!                   shared inks, the bodies characters are built on (kid, grown-up), and the
 //!                   page skin that suits the look
 //!   kit.svg         parts every character in the style starts with: hands, eyes, mouths, props
-//!   template.svg    a plain character's own parts, which new characters are drawn from
+//!   template.svg    a plain kid's own parts, which new kids are drawn from
+//!   template-grown-up.svg
+//!                   a plain grown-up's own parts, cut for the grown-up body
 //! ```
 //!
 //! An authored puppet ([`puppet`](super::puppet)) draws its part file over its style's kit and
 //! reads every number from its style, so a new look is a new folder rather than new code. A
-//! character with no part file is drawn from the template, so a new world needs no drawing at
-//! all to render. The built-in packs are compiled into fables, so a world anywhere on disk can
-//! name one in its `world.toml`.
+//! character with no part file is drawn from the template for their body, so a new world needs
+//! no drawing at all to render. The built-in packs are compiled into fables, so a world anywhere
+//! on disk can name one in its `world.toml`.
 //!
 //! These are not the page skins in [`style`](super::style) (riso, tv, bold…), which print the
 //! page; a style pack names the skin that suits it in `style.toml`.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::sync::Mutex;
@@ -41,24 +44,29 @@ use super::figure::Build;
 use super::parts::Finding;
 use super::parts::Level;
 use super::parts::Parts;
+use super::puppet;
+use super::puppet::Authored;
 use super::puppet::Proportions;
 
 /// The style a world draws in unless its `world.toml` names another.
 pub const DEFAULT: &str = "cartoon";
 
-/// The packs compiled into fables: name, `style.toml`, `kit.svg` and `template.svg`.
-const BUILT_IN: [(&str, &str, &str, &str); 11] = [
+/// The packs compiled into fables: name, `style.toml`, `kit.svg`, `template.svg` and
+/// `template-grown-up.svg`.
+const BUILT_IN: [(&str, &str, &str, &str, &str); 11] = [
 	(
 		"cartoon",
 		include_str!("../../styles/cartoon/style.toml"),
 		include_str!("../../styles/cartoon/kit.svg"),
 		include_str!("../../styles/cartoon/template.svg"),
+		include_str!("../../styles/cartoon/template-grown-up.svg"),
 	),
 	(
 		"anime",
 		include_str!("../../styles/anime/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
+		include_str!("../../styles/anime/template-grown-up.svg"),
 	),
 	// Every manga style is anime anatomy, so they all share the anime kit and template.
 	(
@@ -66,30 +74,35 @@ const BUILT_IN: [(&str, &str, &str, &str); 11] = [
 		include_str!("../../styles/manga/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
+		include_str!("../../styles/anime/template-grown-up.svg"),
 	),
 	(
 		"manga-colour",
 		include_str!("../../styles/manga-colour/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
+		include_str!("../../styles/anime/template-grown-up.svg"),
 	),
 	(
 		"manga-shojo",
 		include_str!("../../styles/manga-shojo/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
+		include_str!("../../styles/anime/template-grown-up.svg"),
 	),
 	(
 		"manga-shonen",
 		include_str!("../../styles/manga-shonen/style.toml"),
 		include_str!("../../styles/anime/kit.svg"),
 		include_str!("../../styles/anime/template.svg"),
+		include_str!("../../styles/anime/template-grown-up.svg"),
 	),
 	(
 		"rubber-hose",
 		include_str!("../../styles/rubber-hose/style.toml"),
 		include_str!("../../styles/rubber-hose/kit.svg"),
 		include_str!("../../styles/rubber-hose/template.svg"),
+		include_str!("../../styles/rubber-hose/template-grown-up.svg"),
 	),
 	// The same characters in a 1930s print, so it shares the rubber-hose kit and template.
 	(
@@ -97,6 +110,7 @@ const BUILT_IN: [(&str, &str, &str, &str); 11] = [
 		include_str!("../../styles/rubber-hose-1930s/style.toml"),
 		include_str!("../../styles/rubber-hose/kit.svg"),
 		include_str!("../../styles/rubber-hose/template.svg"),
+		include_str!("../../styles/rubber-hose/template-grown-up.svg"),
 	),
 	// Clear line draws its simple characters with the cartoon kit's hands, mouths and props.
 	(
@@ -104,18 +118,21 @@ const BUILT_IN: [(&str, &str, &str, &str); 11] = [
 		include_str!("../../styles/clear-line/style.toml"),
 		include_str!("../../styles/cartoon/kit.svg"),
 		include_str!("../../styles/clear-line/template.svg"),
+		include_str!("../../styles/clear-line/template-grown-up.svg"),
 	),
 	(
 		"mid-century",
 		include_str!("../../styles/mid-century/style.toml"),
 		include_str!("../../styles/mid-century/kit.svg"),
 		include_str!("../../styles/mid-century/template.svg"),
+		include_str!("../../styles/mid-century/template-grown-up.svg"),
 	),
 	(
 		"chibi",
 		include_str!("../../styles/chibi/style.toml"),
 		include_str!("../../styles/chibi/kit.svg"),
 		include_str!("../../styles/chibi/template.svg"),
+		include_str!("../../styles/chibi/template-grown-up.svg"),
 	),
 ];
 
@@ -139,8 +156,11 @@ pub struct StylePack {
 	bodies: BTreeMap<String, Proportions>,
 	/// Parts every character in the style starts with.
 	pub kit: Parts,
-	/// A plain character's own parts, drawn over the kit.
+	/// A plain kid's own parts, drawn over the kit.
 	pub template: Parts,
+	/// A plain grown-up's own parts: a torso, sleeves, legwear and whatever else the style
+	/// draws differently on a grown-up, cut for the grown-up body.
+	grown_up: Parts,
 }
 
 /// How ink goes on paper.
@@ -283,8 +303,8 @@ struct Entry {
 	bodies: BTreeMap<String, Proportions>,
 }
 
-/// The body a build is drawn on.
-fn body_name(build: Build) -> &'static str {
+/// The name of the body a build is drawn on, as `style.toml` and the cast file spell it.
+pub fn body_name(build: Build) -> &'static str {
 	match build {
 		Build::Kid => "kid",
 		Build::Grownup => "grown-up",
@@ -310,14 +330,17 @@ impl StylePack {
 			return Ok(Arc::clone(pack));
 		}
 
-		let Some((_, style, kit, template)) = BUILT_IN.iter().find(|(key, ..)| *key == name) else {
+		let Some((_, style, kit, template, grown_up)) =
+			BUILT_IN.iter().find(|(key, ..)| *key == name)
+		else {
 			bail!(
 				"unknown drawing style `{name}`; use one of: {}",
 				Self::names().collect::<Vec<_>>().join(", ")
 			);
 		};
 		let pack = Arc::new(
-			Self::parse(style, kit, template).with_context(|| format!("in styles/{name}"))?,
+			Self::parse(style, kit, template, grown_up)
+				.with_context(|| format!("in styles/{name}"))?,
 		);
 		loaded.insert(name.to_owned(), Arc::clone(&pack));
 
@@ -330,8 +353,9 @@ impl StylePack {
 			.unwrap_or_else(|error| panic!("the built-in {DEFAULT} style: {error:#}"))
 	}
 
-	/// Reads a pack from its `style.toml`, `kit.svg` and `template.svg`.
-	pub fn parse(style: &str, kit: &str, template: &str) -> Result<StylePack> {
+	/// Reads a pack from its `style.toml`, `kit.svg`, `template.svg` and
+	/// `template-grown-up.svg`.
+	pub fn parse(style: &str, kit: &str, template: &str, grown_up: &str) -> Result<StylePack> {
 		let entry: Entry = toml::from_str(style).context("style.toml is not valid")?;
 
 		for build in [Build::Kid, Build::Grownup] {
@@ -368,6 +392,7 @@ impl StylePack {
 			bodies: entry.bodies,
 			kit: Parts::parse(kit).context("in kit.svg")?,
 			template: Parts::parse(template).context("in template.svg")?,
+			grown_up: Parts::parse(grown_up).context("in template-grown-up.svg")?,
 		})
 	}
 
@@ -381,15 +406,63 @@ impl StylePack {
 		self.bodies.iter().map(|(name, body)| (name.as_str(), body))
 	}
 
-	/// The template character over the kit: a whole figure, ready to redraw.
-	pub fn template_figure(&self) -> Parts {
-		self.template.clone().over(self.kit.clone())
+	/// A plain character's own parts, drawn for a build's body: what `fables puppet template`
+	/// starts a character from.
+	pub fn template_for(&self, build: Build) -> Parts {
+		match build {
+			Build::Kid => self.template.clone(),
+			Build::Grownup => self.grown_up.clone(),
+		}
 	}
 
-	/// Checks the pack: the template over the kit must draw a whole figure, and every body must
-	/// stand up (feet below the hips, the neck above the shoulders, positive bones).
-	pub fn check(&self) -> Vec<Finding> {
-		let mut findings = self.template_figure().check();
+	/// The template character on a build's body, over the kit: a whole figure, ready to redraw.
+	pub fn template_figure(&self, build: Build) -> Parts {
+		self.template_for(build).over(self.kit.clone())
+	}
+
+	/// Where a build's template is drawn in the style's folder: `template.svg` for a kid,
+	/// `template-grown-up.svg` for a grown-up.
+	pub fn template_file(&self, build: Build) -> PathBuf {
+		let file = match build {
+			Build::Kid => "template.svg",
+			Build::Grownup => "template-grown-up.svg",
+		};
+		PathBuf::from(format!("styles/{}/{file}", self.name))
+	}
+
+	/// How a part file's title names the template it was started from: `the anime template`,
+	/// or `the anime grown-up template`.
+	pub fn template_origin(&self, build: Build) -> String {
+		match build {
+			Build::Kid => format!("the {} template", self.name),
+			Build::Grownup => format!("the {} grown-up template", self.name),
+		}
+	}
+
+	/// Checks the pack: the template over the kit must draw a whole figure on every body, every
+	/// body must stand up (feet below the hips, the neck above the shoulders, positive bones),
+	/// and the template's parts must join up on every body (see [`puppet::joins`]).
+	pub fn check(self: &Arc<Self>) -> Vec<Finding> {
+		let mut findings = Vec::new();
+
+		for build in [Build::Kid, Build::Grownup] {
+			let name = body_name(build);
+			let figure = self.template_figure(build);
+			let mut found = figure.check();
+			let file = PathBuf::from(format!("styles/{}/{name} template", self.name));
+
+			// A template that can't draw a whole figure (reported above) can't be posed either.
+			if let Ok(template) = Authored::from_parts(&file, figure, self) {
+				found.extend(puppet::joins(&template, build));
+			}
+
+			findings.extend(found.into_iter().map(|finding| {
+				Finding {
+					part: format!("{name} template: {}", finding.part),
+					..finding
+				}
+			}));
+		}
 
 		for (name, body) in self.bodies() {
 			let limbs = body.limbs;
@@ -467,7 +540,7 @@ mod tests {
 			.find("[bodies.kid.limbs]")
 			.expect("the cartoon style has a kid");
 		let source = format!("{}{dial}\n\n{}", &source[..at], &source[at..]);
-		StylePack::parse(&source, "<svg/>", "<svg/>")
+		StylePack::parse(&source, "<svg/>", "<svg/>", "<svg/>")
 	}
 
 	#[test]
@@ -495,10 +568,12 @@ mod tests {
 		assert!(error.contains("knee-bend"), "{error}");
 
 		// Values that parse but can't draw are errors in the style's check.
-		let pack = with_kid_dial(
-			"leg-profile = [40.0, 36.0, 0.0, 24.0, 30.0, 22.0, 16.0]\nknee-splay = 1.5",
-		)
-		.unwrap();
+		let pack = Arc::new(
+			with_kid_dial(
+				"leg-profile = [40.0, 36.0, 0.0, 24.0, 30.0, 22.0, 16.0]\nknee-splay = 1.5",
+			)
+			.unwrap(),
+		);
 		let errors: Vec<String> = pack
 			.check()
 			.iter()
@@ -515,7 +590,7 @@ mod tests {
 		let cut = source
 			.find("# A grown-up")
 			.expect("the cartoon style has a grown-up");
-		let error = StylePack::parse(&source[..cut], "<svg/>", "<svg/>").unwrap_err();
+		let error = StylePack::parse(&source[..cut], "<svg/>", "<svg/>", "<svg/>").unwrap_err();
 		assert!(
 			format!("{error:#}").contains("bodies.grown-up"),
 			"{error:#}"

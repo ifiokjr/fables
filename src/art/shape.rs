@@ -379,6 +379,99 @@ impl Shape {
 
 		if self.closed { path.close() } else { path }
 	}
+
+	/// The outline as a polygon (or a polyline, if the shape is open): the start point, then
+	/// `steps` points along each curve, ending on its end point.
+	pub fn polygon(&self, steps: usize) -> Vec<Pt> {
+		let steps = steps.max(1);
+		let mut points = vec![self.points[0]];
+
+		for curve in self.points.windows(4).step_by(3) {
+			for step in 1..=steps {
+				let t = step as f32 / steps as f32;
+				let u = 1.0 - t;
+				points.push(
+					curve[0] * (u * u * u)
+						+ curve[1] * (3.0 * u * u * t)
+						+ curve[2] * (3.0 * u * t * t)
+						+ curve[3] * (t * t * t),
+				);
+			}
+		}
+
+		points
+	}
+
+	/// Whether `p` lies inside the outline. An open shape has no inside.
+	pub fn contains(&self, p: Pt) -> bool {
+		self.closed && inside(&self.polygon(MEASURE_STEPS), p)
+	}
+
+	/// How far `p` is from the shape: 0 inside it, otherwise the distance to its outline.
+	pub fn distance(&self, p: Pt) -> f32 {
+		let outline = self.polygon(MEASURE_STEPS);
+
+		if self.closed && inside(&outline, p) {
+			return 0.0;
+		}
+
+		edges(&outline, self.closed)
+			.map(|(a, b)| to_segment(p, a, b))
+			.fold(f32::MAX, f32::min)
+	}
+
+	/// How far apart two shapes are: 0 when they touch or overlap, otherwise the shortest
+	/// distance between their outlines.
+	pub fn gap(&self, other: &Shape) -> f32 {
+		let (mine, theirs) = (self.polygon(MEASURE_STEPS), other.polygon(MEASURE_STEPS));
+		let overlap = (other.closed && mine.iter().any(|&p| inside(&theirs, p)))
+			|| (self.closed && theirs.iter().any(|&p| inside(&mine, p)));
+
+		if overlap {
+			return 0.0;
+		}
+
+		let nearest = |points: &[Pt], outline: &[Pt], closed: bool| {
+			points
+				.iter()
+				.flat_map(|&p| edges(outline, closed).map(move |(a, b)| to_segment(p, a, b)))
+				.fold(f32::MAX, f32::min)
+		};
+
+		nearest(&mine, &theirs, other.closed).min(nearest(&theirs, &mine, self.closed))
+	}
+}
+
+/// How many points along each curve [`Shape`] measurements flatten it to: about a tenth of a
+/// unit from the true curve for the parts a figure is drawn with.
+const MEASURE_STEPS: usize = 8;
+
+/// The polygon's edges, closing it back to the start if `closed`.
+fn edges(points: &[Pt], closed: bool) -> impl Iterator<Item = (Pt, Pt)> + '_ {
+	let back = closed.then(|| (points[points.len() - 1], points[0]));
+	points.windows(2).map(|pair| (pair[0], pair[1])).chain(back)
+}
+
+/// Whether `p` is inside the closed polygon, by the even-odd rule.
+fn inside(polygon: &[Pt], p: Pt) -> bool {
+	edges(polygon, true)
+		.filter(|&(a, b)| {
+			(a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
+		})
+		.count()
+		% 2 == 1
+}
+
+/// The distance from `p` to the segment from `a` to `b`.
+fn to_segment(p: Pt, a: Pt, b: Pt) -> f32 {
+	let along = b - a;
+	let length = along.x * along.x + along.y * along.y;
+	let t = if length > 0.0 {
+		(((p - a).x * along.x + (p - a).y * along.y) / length).clamp(0.0, 1.0)
+	} else {
+		0.0
+	};
+	(p - (a + along * t)).len()
 }
 
 /// Where two edges first cross, searching outwards from the joint between them: `upper` runs
@@ -543,6 +636,25 @@ mod tests {
 				assert!(off <= 20.01, "{degrees}°: {p:?} is {off} off the bones");
 			}
 		}
+	}
+
+	#[test]
+	fn shapes_measure_what_is_inside_and_how_far_apart_they_are() {
+		let disc = Shape::ellipse(pt(0.0, 0.0), 50.0, 50.0);
+		assert!(disc.contains(pt(30.0, 30.0)) && !disc.contains(pt(40.0, 40.0)));
+		assert!(disc.distance(pt(10.0, -5.0)).abs() < f32::EPSILON);
+		assert!((disc.distance(pt(80.0, 0.0)) - 30.0).abs() < 0.2);
+
+		// Apart, touching and overlapping.
+		let other = |x: f32| Shape::ellipse(pt(x, 0.0), 20.0, 20.0);
+		assert!((disc.gap(&other(100.0)) - 30.0).abs() < 0.2);
+		assert!(disc.gap(&other(70.0)) < 0.2);
+		assert!(disc.gap(&other(10.0)).abs() < f32::EPSILON);
+
+		// An open line has no inside, but is measured to.
+		let line = Shape::parse("M0 0 C0 10 0 20 0 30");
+		assert!(!line.contains(pt(0.0, 15.0)));
+		assert!((line.distance(pt(12.0, 15.0)) - 12.0).abs() < 0.01);
 	}
 
 	#[test]
