@@ -568,7 +568,7 @@ impl Studio {
 	/// A world by its folder.
 	pub fn world(&self, folder: &str) -> Result<World> {
 		check_slug("world", folder)?;
-		let dir = self.worlds_dir().join(folder);
+		let dir = world::under(&self.worlds_dir(), "world", folder)?;
 		ensure!(
 			dir.join(world::FILE).is_file(),
 			"there is no world `{folder}`; `world_list` shows the worlds"
@@ -585,7 +585,7 @@ impl Studio {
 		);
 		let style = brief.style.as_deref().unwrap_or(crate::art::pack::DEFAULT);
 		StylePack::named(style)?;
-		let dir = self.worlds_dir().join(&folder);
+		let dir = world::under(&self.worlds_dir(), "world", &folder)?;
 		ensure!(!dir.exists(), "a world already lives in worlds/{folder}");
 
 		let mut file = format!(
@@ -680,7 +680,11 @@ impl Studio {
 			"`{}` is already in the cast",
 			brief.id
 		);
-		let puppet = world.dir.join("puppets").join(format!("{}.svg", brief.id));
+		let puppet = world::under(
+			&world.dir,
+			"puppet",
+			Path::new("puppets").join(format!("{}.svg", brief.id)),
+		)?;
 		ensure!(!puppet.exists(), "{} already exists", puppet.display());
 
 		let drawings: Vec<(&str, &crate::art::shape::Shape)> = style.template.iter().collect();
@@ -938,7 +942,7 @@ impl Studio {
 	fn book(&self, folder: &str, story: &str) -> Result<(World, Story, crate::cast::Cast)> {
 		let world = self.world(folder)?;
 		check_slug("story", story)?;
-		let path = world.stories().join(story).join("story.md");
+		let path = world::under(&world.stories(), "story", Path::new(story).join("story.md"))?;
 		ensure!(
 			path.is_file(),
 			"{} has no story `{story}`; world_describe lists its stories",
@@ -960,19 +964,28 @@ impl Studio {
 	) -> Result<publish::CheckReport> {
 		let world = self.world(folder)?;
 		check_slug("story", story)?;
-		crate::story::parse(script)?;
-		let dir = world.stories().join(story);
+		let parsed = crate::story::parse(script)?;
+		ensure!(
+			parsed.meta.world.is_none(),
+			"a story written over MCP belongs to the world it is written into; remove `world =` \
+			 from its front matter (use `--world` or a relative `world =` at the command line)"
+		);
+		let dir = world::under(&world.stories(), "story", story)?;
 		let path = dir.join("story.md");
 		let before = std::fs::read_to_string(&path).ok();
+		let created = !dir.exists();
 		std::fs::create_dir_all(&dir)?;
 		std::fs::write(&path, script)?;
 
 		match self.check_story(folder, story) {
 			Ok(report) => Ok(report),
 			Err(error) => {
+				// Only what this call made is rolled back: the folder if it created it, else
+				// just the script, so a folder's other files are never lost.
 				match before {
 					Some(text) => std::fs::write(&path, text)?,
-					None => std::fs::remove_dir_all(&dir)?,
+					None if created => std::fs::remove_dir_all(&dir)?,
+					None => std::fs::remove_file(&path)?,
 				}
 
 				Err(error.context(format!("`{story}` was not written")))
@@ -984,7 +997,7 @@ impl Studio {
 	pub fn read_story(&self, folder: &str, story: &str) -> Result<String> {
 		let world = self.world(folder)?;
 		check_slug("story", story)?;
-		let path = world.stories().join(story).join("story.md");
+		let path = world::under(&world.stories(), "story", Path::new(story).join("story.md"))?;
 		std::fs::read_to_string(&path).with_context(|| format!("could not read {}", path.display()))
 	}
 
@@ -1196,21 +1209,21 @@ impl Studio {
 		let world = self.world(folder)?;
 		let own = world.dir.join("settings");
 
-		Ok(world
+		world
 			.settings()?
 			.settings()
 			.map(|setting| {
-				SettingSummary {
+				// A name read from the folder's file names: prove the file it names stays in
+				// the world before asking whether it is there.
+				let file = world::under(&own, "setting", format!("{}.svg", setting.name()))?;
+
+				Ok(SettingSummary {
 					name: setting.name().to_owned(),
 					about: setting.about().to_owned(),
-					from: if own.join(format!("{}.svg", setting.name())).is_file() {
-						"world"
-					} else {
-						"built-in"
-					},
-				}
+					from: if file.is_file() { "world" } else { "built-in" },
+				})
 			})
-			.collect())
+			.collect()
 	}
 
 	/// Starts a world's own setting: a copy of a setting it can already use (to repaint it), or
@@ -1224,7 +1237,11 @@ impl Studio {
 	) -> Result<SettingSummary> {
 		let world = self.world(folder)?;
 		check_slug("setting", name)?;
-		let file = world.dir.join("settings").join(format!("{name}.svg"));
+		let file = world::under(
+			&world.dir.join("settings"),
+			"setting",
+			format!("{name}.svg"),
+		)?;
 		ensure!(
 			!file.exists(),
 			"{} already has its own `{name}`",
@@ -1232,7 +1249,12 @@ impl Studio {
 		);
 		let source = match from {
 			Some(base) => {
-				let own = world.dir.join("settings").join(format!("{base}.svg"));
+				check_slug("setting", base)?;
+				let own = world::under(
+					&world.dir.join("settings"),
+					"setting",
+					format!("{base}.svg"),
+				)?;
 
 				if own.is_file() {
 					std::fs::read_to_string(&own)?
@@ -1278,7 +1300,11 @@ impl Studio {
 	pub fn setting_parts(&self, folder: &str, name: &str) -> Result<Vec<SettingPart>> {
 		let world = self.world(folder)?;
 		check_slug("setting", name)?;
-		let own = world.dir.join("settings").join(format!("{name}.svg"));
+		let own = world::under(
+			&world.dir.join("settings"),
+			"setting",
+			format!("{name}.svg"),
+		)?;
 		let source = if own.is_file() {
 			std::fs::read_to_string(&own)?
 		} else {
@@ -1304,7 +1330,11 @@ impl Studio {
 	) -> Result<SettingSummary> {
 		let world = self.world(folder)?;
 		check_slug("setting", name)?;
-		let file = world.dir.join("settings").join(format!("{name}.svg"));
+		let file = world::under(
+			&world.dir.join("settings"),
+			"setting",
+			format!("{name}.svg"),
+		)?;
 		ensure!(
 			file.is_file(),
 			"{} has no setting `{name}` of its own; setting_create it first (from a built-in to \
@@ -2279,9 +2309,138 @@ mod tests {
 
 	#[test]
 	fn names_outside_the_studio_are_refused() {
+		let (dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		studio
+			.create_setting("nibbleton", "harbour", "The harbour wall", None)
+			.unwrap();
+
+		for name in ["../etc", "/etc/passwd", "..", "a/b", "", "Nell"] {
+			assert!(studio.world(name).is_err(), "world {name:?}");
+			assert!(
+				studio.character_parts("nibbleton", name, &[]).is_err(),
+				"character {name:?}"
+			);
+			assert!(
+				studio.setting_parts("nibbleton", name).is_err(),
+				"setting {name:?}"
+			);
+			assert!(
+				studio.read_story("nibbleton", name).is_err(),
+				"story {name:?}"
+			);
+			assert!(
+				studio
+					.write_story(
+						"nibbleton",
+						name,
+						"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\nHi.\n"
+					)
+					.is_err(),
+				"written story {name:?}"
+			);
+		}
+
+		assert_eq!(studio.worlds().unwrap().len(), 1, "no world was created");
+		assert!(
+			!dir.path().join("etc").exists() && !dir.path().join("worlds/etc").exists(),
+			"nothing was created outside the worlds folder"
+		);
+	}
+
+	#[test]
+	fn a_setting_cannot_start_from_a_path_outside_the_world() {
+		let (dir, studio) = studio();
+		let outside = tempfile::tempdir().unwrap();
+		let decoy = outside.path().join("decoy.svg");
+		let parts = "<svg xmlns=\"http://www.w3.org/2000/svg\" data-ground=\"2000\"><path \
+		             id=\"near-x\" d=\"M0 0 L100 100 Z\" fill=\"moss\"/></svg>";
+		std::fs::write(&decoy, parts).unwrap();
+		// A relative `..` needs the settings folder to exist to walk through.
+		studio
+			.create_setting("nibbleton", "harbour", "The harbour wall", None)
+			.unwrap();
+
+		for from in [
+			decoy.display().to_string(),
+			"../../outside/decoy".into(),
+			"../harbour".into(),
+			"..".into(),
+			"/etc/passwd".into(),
+		] {
+			let error = format!(
+				"{:#}",
+				studio
+					.create_setting("nibbleton", "stolen", "Probe", Some(&from))
+					.unwrap_err()
+			);
+
+			assert!(error.contains("setting name"), "{from}: {error}");
+		}
+
+		assert_eq!(std::fs::read_to_string(&decoy).unwrap(), parts, "untouched");
+		assert!(
+			!dir.path()
+				.join("worlds/nibbleton/settings/stolen.svg")
+				.exists(),
+			"nothing was copied into the world"
+		);
+	}
+
+	#[test]
+	fn a_failed_write_leaves_a_folder_it_did_not_create_alone() {
 		let (_dir, studio) = studio();
-		assert!(studio.describe_world("../etc").is_err());
-		assert!(studio.character_parts("nibbleton", "../x", &[]).is_err());
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let folder = world.stories().join("draft");
+		std::fs::create_dir_all(&folder).unwrap();
+		std::fs::write(folder.join("notes.txt"), "keep me").unwrap();
+
+		let bad = "+++\ntitle = \"Who\"\nauthor = \"A\"\n+++\n# park\n@nobody wave\nHello.\n";
+		let error = format!(
+			"{:#}",
+			studio.write_story("nibbleton", "draft", bad).unwrap_err()
+		);
+
+		assert!(error.contains("nobody"), "{error}");
+		assert_eq!(
+			std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
+			"keep me",
+			"the folder's other files survive a refused write"
+		);
+		assert!(
+			!folder.join("story.md").exists(),
+			"the new script is rolled back"
+		);
+	}
+
+	#[test]
+	fn a_story_written_over_the_studio_belongs_to_its_world() {
+		let (_dir, studio) = studio();
+		studio
+			.create_character("nibbleton", &brief("nell"))
+			.unwrap();
+		let script = "+++\ntitle = \"Nell\"\nauthor = \"A\"\nstar = \"nell\"\nworld = \
+		              \"../elsewhere\"\n+++\n# park\n@nell happy\nHi.\n";
+		let error = format!(
+			"{:#}",
+			studio
+				.write_story("nibbleton", "nell-nibbles", script)
+				.unwrap_err()
+		);
+
+		assert!(
+			error.contains("written into") && error.contains("world"),
+			"{error}"
+		);
+		assert!(
+			studio.read_story("nibbleton", "nell-nibbles").is_err(),
+			"nothing is left behind"
+		);
 	}
 
 	#[test]
