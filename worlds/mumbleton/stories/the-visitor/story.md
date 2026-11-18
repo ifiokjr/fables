@@ -27,12 +27,13 @@ In Mumbleton, the wind carries words away, so Mo Mumble always spoke in a mumble
 "Good morning, wind," mumbled Mo, very quietly, and the wind carried it away.
 
 # street
-@mo x=0.3 shocked
+@mo x=0.3 worried
 @kite x=0.88 y=sky size=0.7
 @mo notice see=kite
 Then something new came blowing up the street: one long kite string, and a girl from far away holding on.
 @hana enter=right x=0.85 happy holds=kite-spool
 @kite tether=hana
+@mo shocked notice see=hana
 @hana x=0.6
 The girl walked up the hill, and up, and up, until her shadow reached Mo's shoes.
 
@@ -54,15 +55,14 @@ Hana held out the string to share. But the wind pulled, the way it always pulls,
 "Oh no," said Hana. "My kite! It is going and going and gone."
 
 # park light=storm transition=fade
-@mo x=0.25 run see=kite
+@mo x=0.2 worried see=kite
 @hana x=0.75 sad see=kite
 @kite x=0.55 y=sky size=0.5 tether=nothing
 The sky went grey, the kite went small, and the string sailed high out of Hana's hand.
-@mo x=0.4 jump catch proud talk
+@mo x=0.42 run jump catch proud talk
 @kite tether=mo
 So Mo ran, and jumped, and caught the string out of the storm. "**I HAVE IT!**" he shouted.
-@hana shocked
-@pause 0.8
+@hana shocked see=mo
 
 # garden light=dusk transition=dissolve
 @mo x=0.3 grin holds=kite-spool see=kite
