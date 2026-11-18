@@ -348,6 +348,7 @@ fn stamp(seconds: f32) -> String {
 /// An animatic: the storyboard's shots held for their real durations over the video's
 /// soundtrack, so timing can be judged before a full render. One plate is drawn per shot and
 /// ffmpeg holds it, cropping a push or pan across the plate rather than rendering every frame.
+/// The soundtrack is written beside it as `soundtrack.wav`, mixed exactly as the video's.
 pub fn animatic(
 	story: &Story,
 	cast: &Cast,
@@ -365,7 +366,8 @@ pub fn animatic(
 	let views = storyboard::views(story, timeline, &rows, portrait);
 	let bounds = storyboard::frame_bounds(&rows, fps);
 	let scratch = Scratch::new()?;
-	let soundtrack = scratch.path.join("soundtrack.wav");
+	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
+	let soundtrack = dir.join("soundtrack.wav");
 	audio::write(timeline, &soundtrack)?;
 
 	// The fonts are embedded in the binary, so ffmpeg draws the same faces anywhere.
@@ -435,7 +437,6 @@ pub fn animatic(
 		if portrait { 18 } else { 22 },
 	);
 
-	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
 	let path = dir.join(format!("{}-animatic.mp4", story.slug));
 	let mut command = Command::new("ffmpeg");
 	command.args(["-y", "-loglevel", "error"]);

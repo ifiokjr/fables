@@ -216,6 +216,31 @@ pub fn video(
 	)
 }
 
+/// The animatic in one shape: the storyboard's shots held for the video's real timing over its
+/// own soundtrack. Voices come from the video's take cache, recording any line not yet in it.
+/// Returns the MP4 and the timeline it was cut to.
+pub fn animatic(
+	story: &Story,
+	cast: &Cast,
+	out: &Path,
+	format: Format,
+) -> Result<(PathBuf, crate::video::timeline::Timeline)> {
+	let timeline = crate::video::plan(
+		story,
+		cast,
+		&out.join(&story.slug).join("cache").join("voice"),
+	)?;
+	let path = crate::video::animatic(
+		story,
+		cast,
+		&timeline,
+		format,
+		&book_dir(out, story).join("animatic"),
+	)?;
+
+	Ok((path, timeline))
+}
+
 /// A storyboard's pictures and the shot list that reads them.
 #[derive(Clone, Debug)]
 pub struct Storyboard {

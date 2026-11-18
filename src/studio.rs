@@ -1152,12 +1152,11 @@ impl Studio {
 			VideoShape::Landscape => Format::Landscape,
 			VideoShape::Portrait => Format::Portrait,
 		};
-		// The video's own take cache, so a line narrated for one is reused by the other.
+		// The video's own take cache and folder, so a line narrated for one is reused by the
+		// other; the book's slug names a folder under `out/` and nowhere else.
 		let out = self.root.join("out");
-		let book = world::under(&out, "book", &script.slug)?;
-		let timeline = crate::video::plan(&script, &cast, &book.join("cache").join("voice"))?;
-		let dir = publish::book_dir(&out, &script).join("animatic");
-		let path = crate::video::animatic(&script, &cast, &timeline, format, &dir)?;
+		world::under(&out, "book", &script.slug)?;
+		let (path, timeline) = publish::animatic(&script, &cast, &out, format)?;
 		let portrait = shape == VideoShape::Portrait;
 		let rows = crate::press::storyboard::plan(&script, &timeline, &cast, portrait);
 		let shot_list = crate::press::storyboard::shot_list(&script, &timeline, &rows, portrait);

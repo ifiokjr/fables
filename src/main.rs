@@ -1660,15 +1660,12 @@ fn pages_spec(spec: &str, count: usize) -> Result<Option<Vec<usize>>> {
 
 fn animatic(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
 	let started = Instant::now();
-	let cache = out.join(&story.slug).join("cache").join("voice");
-	let timeline = fables::video::plan(story, cast, &cache)?;
 	let format = if portrait {
 		Format::Portrait
 	} else {
 		Format::Landscape
 	};
-	let dir = publish::book_dir(out, story).join("animatic");
-	let path = fables::video::animatic(story, cast, &timeline, format, &dir)?;
+	let (path, _) = publish::animatic(story, cast, out, format)?;
 	done(&path, started)
 }
 
