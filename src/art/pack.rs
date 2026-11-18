@@ -7,9 +7,9 @@
 //!   style.toml      the finish (line weights, light, cel shadow), the face cylinder, the kit's
 //!                   shared inks and the bodies characters are built on (kid, grown-up)
 //!   kit.svg         parts every character in the style starts with: hands, eyes, mouths, props
-//!   template.svg    a plain kid's own parts, which new characters are started from
+//!   template.svg    a plain kid's own parts, which new kids are started from
 //!   template-grown-up.svg
-//!                   the parts a grown-up draws in place of the kid's (torso, sleeves, legwear…)
+//!                   a plain grown-up's own parts, cut for the grown-up body
 //! ```
 //!
 //! An authored puppet ([`puppet`](super::puppet)) draws its part file over its style's kit and
@@ -153,8 +153,8 @@ pub struct StylePack {
 	pub kit: Parts,
 	/// A plain kid's own parts, drawn over the kit.
 	pub template: Parts,
-	/// The parts a plain grown-up draws in place of the kid's: a torso, sleeves and legwear cut
-	/// for the grown-up body, and whatever else the style draws differently on a grown-up.
+	/// A plain grown-up's own parts: a torso, sleeves, legwear and whatever else the style
+	/// draws differently on a grown-up, cut for the grown-up body.
 	grown_up: Parts,
 }
 
@@ -387,13 +387,12 @@ impl StylePack {
 		self.bodies.iter().map(|(name, body)| (name.as_str(), body))
 	}
 
-	/// A plain character's own parts on a build's body: the template, with a grown-up's own
-	/// drawings in place of the kid's. This is what `fables puppet template` starts a character
-	/// from.
+	/// A plain character's own parts, drawn for a build's body: what `fables puppet template`
+	/// starts a character from.
 	pub fn template_for(&self, build: Build) -> Parts {
 		match build {
 			Build::Kid => self.template.clone(),
-			Build::Grownup => self.grown_up.clone().over(self.template.clone()),
+			Build::Grownup => self.grown_up.clone(),
 		}
 	}
 
