@@ -409,15 +409,15 @@ impl Shape {
 
 	/// How far `p` is from the shape: 0 inside it, otherwise the distance to its outline.
 	pub fn distance(&self, p: Pt) -> f32 {
-		let outline = self.polygon(MEASURE_STEPS);
+		self.outline().distance(p)
+	}
 
-		if self.closed && inside(&outline, p) {
-			return 0.0;
+	/// The shape flattened once, for measuring many points against it.
+	pub fn outline(&self) -> Outline {
+		Outline {
+			points: self.polygon(MEASURE_STEPS),
+			closed: self.closed,
 		}
-
-		edges(&outline, self.closed)
-			.map(|(a, b)| to_segment(p, a, b))
-			.fold(f32::MAX, f32::min)
 	}
 
 	/// How far apart two shapes are: 0 when they touch or overlap, otherwise the shortest
@@ -439,6 +439,41 @@ impl Shape {
 		};
 
 		nearest(&mine, &theirs, other.closed).min(nearest(&theirs, &mine, self.closed))
+	}
+}
+
+/// A [`Shape`] flattened to a polygon (or a polyline, if the shape is open), for measuring
+/// many points against it without flattening it again for each.
+#[derive(Clone, Debug)]
+pub struct Outline {
+	points: Vec<Pt>,
+	closed: bool,
+}
+
+impl Outline {
+	/// How far `p` is from the outline: 0 inside it, otherwise the distance to its edge.
+	pub fn distance(&self, p: Pt) -> f32 {
+		if self.closed && inside(&self.points, p) {
+			return 0.0;
+		}
+
+		edges(&self.points, self.closed)
+			.map(|(a, b)| to_segment(p, a, b))
+			.fold(f32::MAX, f32::min)
+	}
+
+	/// The outline with every point moved by `f`.
+	#[must_use]
+	pub fn map(&self, f: impl Fn(Pt) -> Pt) -> Outline {
+		Outline {
+			points: self.points.iter().map(|&p| f(p)).collect(),
+			closed: self.closed,
+		}
+	}
+
+	/// The lowest point's y: the largest, with y down the page.
+	pub fn bottom(&self) -> f32 {
+		self.points.iter().fold(f32::MIN, |low, p| low.max(p.y))
 	}
 }
 
