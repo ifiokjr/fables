@@ -805,8 +805,9 @@ fn camera_direction(shot: &Shot, setup: &Setup, index: usize) -> Result<String> 
 			}
 		}
 		Framing::Zoom { zoom, look } => {
-			tokens.push(format!("zoom={}", number(*zoom)));
-			tokens.push(format!("look={},{}", number(look.0), number(look.1)));
+			// A float's own display round-trips exactly; the pin must not round a look point.
+			tokens.push(format!("zoom={zoom}"));
+			tokens.push(format!("look={},{}", look.0, look.1));
 		}
 		Framing::Auto => {
 			anyhow::bail!("a shot with no shot size or zoom has no `@camera` word")
