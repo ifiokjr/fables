@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2060">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -160 2720 2720" data-ground="2060" data-ambience="wind,breeze">
   <title>Hilltop: open sky over a long view of fields, a river and blue mountains, a lone tree on the crest, and the Milky Way at night</title>
   <path id="far-sky" d="M-160 -160 Q1332.7 -160 2560 -160 Q2560 763.9 2560 1700 Q1057.7 1700 -160 1700 Q-160 666.5 -160 -160 Z" fill="sky" data-night="night" data-line="none"/>
   <circle id="far-haze" cx="1200" cy="1560" data-glow="1500 white 0.5" data-time="day"/>

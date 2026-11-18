@@ -41,7 +41,7 @@ pub const ENVELOPE_RATE: f32 = 60.0;
 
 /// Who speaks a line and how. Used for the narrator (`[voice]` in a script) and for characters
 /// (`[stinky.voice]` in the cast file).
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Voice {
 	/// `say` (default), `command`, `elevenlabs`, `openai`, `cartesia` or `hume`.
@@ -50,9 +50,10 @@ pub struct Voice {
 	/// The voice name: a macOS voice for `say`, a built-in voice for `openai` (e.g. "marin").
 	#[serde(default = "default_name")]
 	pub name: String,
-	/// Words per minute (`say`).
-	#[serde(default = "default_rate")]
-	pub rate: u32,
+	/// Words per minute (`say`). Left out, a book's age band sets it, and with no band either
+	/// the voice reads at [`Voice::rate`]'s 165, exactly as every book did before age bands.
+	#[serde(default)]
+	pub rate: Option<u32>,
 	/// The external program for `command`, with `{text}`, `{out}`, `{mood}` placeholders.
 	#[serde(default)]
 	pub command: Option<Vec<String>>,
@@ -68,6 +69,25 @@ pub struct Voice {
 	pub style: Option<String>,
 }
 
+/// The rate a voice reads at when nobody sets one: the pace every book had before age bands.
+const RATE: u32 = 165;
+
+impl std::fmt::Debug for Voice {
+	/// Prints the effective rate, so a take's cache key is the same as it was when the rate was
+	/// a plain number and no band was in play.
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Voice")
+			.field("provider", &self.provider)
+			.field("name", &self.name)
+			.field("rate", &self.rate())
+			.field("command", &self.command)
+			.field("id", &self.id)
+			.field("model", &self.model)
+			.field("style", &self.style)
+			.finish()
+	}
+}
+
 fn default_provider() -> String {
 	"say".to_owned()
 }
@@ -76,16 +96,12 @@ fn default_name() -> String {
 	"Daniel".to_owned()
 }
 
-const fn default_rate() -> u32 {
-	165
-}
-
 impl Default for Voice {
 	fn default() -> Self {
 		Self {
 			provider: default_provider(),
 			name: default_name(),
-			rate: default_rate(),
+			rate: None,
 			command: None,
 			id: None,
 			model: None,
@@ -95,6 +111,11 @@ impl Default for Voice {
 }
 
 impl Voice {
+	/// Words a minute this voice is asked to read at.
+	pub fn rate(&self) -> u32 {
+		self.rate.unwrap_or(RATE)
+	}
+
 	/// Checks the configuration up front, so a typo fails before any audio is made.
 	pub fn validate(&self) -> Result<()> {
 		match self.provider.as_str() {
@@ -277,7 +298,7 @@ fn record(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
 fn say(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
 	let audio = stem.with_extension("aiff");
 	let text_file = stem.with_extension("txt");
-	let rate = (utterance.voice.rate as f32 * utterance.delivery.rate_scale()).round() as u32;
+	let rate = (utterance.voice.rate() as f32 * utterance.delivery.rate_scale()).round() as u32;
 	std::fs::write(&text_file, utterance.text)
 		.with_context(|| format!("could not write {}", text_file.display()))?;
 
@@ -867,6 +888,27 @@ mod tests {
 				}
 			]
 		);
+	}
+
+	#[test]
+	fn an_unset_rate_reads_at_the_old_speed_and_keeps_the_cache_key() {
+		let voice = Voice::default();
+		assert_eq!(voice.rate(), 165);
+		// The take cache is keyed by this debug string, so an unset rate must print exactly the
+		// number the field held before age bands existed.
+		assert_eq!(
+			format!("{voice:?}"),
+			"Voice { provider: \"say\", name: \"Daniel\", rate: 165, command: None, id: None, \
+			 model: None, style: None }"
+		);
+
+		let explicit: Voice = toml::from_str("name = \"Daniel\"\nrate = 158\n").unwrap();
+		assert_eq!(explicit.rate(), 158);
+		assert!(format!("{explicit:?}").contains("rate: 158"));
+
+		let unset: Voice = toml::from_str("name = \"Moira\"\n").unwrap();
+		assert_eq!(unset.rate, None);
+		assert_eq!(unset.rate(), 165);
 	}
 
 	#[test]

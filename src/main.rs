@@ -604,6 +604,13 @@ fn check(story: &Story, cast: &Cast) -> Result<()> {
 		report.title, report.script_pages, report.book_pages, report.words, report.cast_members
 	);
 
+	if story.age.is_none() {
+		println!(
+			"· no `age` in the front matter, so the narrator keeps the older pace; add `age = \
+			 \"3-5\"` (or `under-3`, `5-7`) to pace the read-aloud."
+		);
+	}
+
 	Ok(())
 }
 
