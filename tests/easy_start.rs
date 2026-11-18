@@ -221,7 +221,14 @@ fn a_grown_up_is_drawn_from_the_grown_up_template_on_every_path() {
 	] {
 		let mut args = vec!["character", "new", id, "--name", id, "--kind", "grown-up"];
 		args.extend(extra);
-		run(root, &args);
+		let added = run(root, &args);
+
+		if extra.is_none() {
+			assert!(
+				added.contains("drawn from the rubber-hose grown-up template"),
+				"{added}"
+			);
+		}
 	}
 	run(root, &["puppet", "template", "nan"]);
 
@@ -275,5 +282,11 @@ fn a_grown_up_is_drawn_from_the_grown_up_template_on_every_path() {
 			"{id} has the grown-up's torso"
 		);
 		run(root, &["puppet", "check", id]);
+	}
+
+	// With no id the check covers everyone drawn from parts, Gran's template included.
+	let everyone = run(root, &["puppet", "check"]);
+	for id in ["gran", "pop", "nan", "ada"] {
+		assert!(everyone.contains(&format!("{id}: ")), "{everyone}");
 	}
 }

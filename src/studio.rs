@@ -153,7 +153,7 @@ impl BuildName {
 	}
 
 	/// The body this names.
-	fn build(self) -> Build {
+	pub fn build(self) -> Build {
 		match self {
 			BuildName::Kid => Build::Kid,
 			BuildName::GrownUp => Build::Grownup,

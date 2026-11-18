@@ -292,7 +292,8 @@ enum PuppetAction {
 	/// come apart when the figure is posed on its own body (a head clear of the torso, an arm or
 	/// leg starting outside it).
 	Check {
-		/// The cast id to check; leave it out to check every member with a part file.
+		/// The cast id to check; leave it out to check every person drawn from parts, their own
+		/// part file or their style's template for their body.
 		id: Option<String>,
 	},
 	/// Start a cast member's part file to redraw part by part, from the style's template or
@@ -907,7 +908,12 @@ fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
 				report.puppet.as_deref().unwrap_or_default()
 			)
 		}
-		Some("template") => format!("drawn from the {} template", world.style),
+		Some("template") => {
+			format!(
+				"drawn from {}",
+				world.style()?.template_origin(brief.build.build())
+			)
+		}
 		_ => "drawn by the parametric puppet".to_owned(),
 	};
 	say!(
@@ -1228,10 +1234,9 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 		None => {
 			cast.members
 				.values()
-				.filter(|member| {
-					matches!(&member.kind, fables::cast::Kind::Figure(look)
-						if look.puppet.as_ref().is_some_and(|puppet| !puppet.template))
-				})
+				.filter(
+					|member| matches!(&member.kind, fables::cast::Kind::Figure(look) if look.puppet.is_some()),
+				)
 				.map(|member| member.id.as_str())
 				.collect()
 		}
