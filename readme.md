@@ -139,7 +139,7 @@ The built-in drawing styles are compiled into fables, so a world anywhere on dis
 
 ## Settings
 
-A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page skin, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene. A page's `light=` grades every colour the scene paints exactly once, paints `fill="sky"` parts with the light's sky gradient, and washes a haze and a vignette over the art; the story text and captions keep their own colours.
+A setting is an SVG file of named parts on the square stage (2400 units, with 160 of overdraw past every edge). A part's id starts with its layer: `far-` (the sky and hills, which move least as the video camera travels), `near-` (behind the actors) or `front-` (in front of them). Parts are drawn through the page skin, so the same file is a riso print, a cartoon or crayon, and they say how they react to the scene. A page's `light=` grades every colour the scene paints exactly once (a part takes the full grade, losing a little more colour and contrast the higher its `data-depth`, while the characters in front take a gentler share), paints `fill="sky"` parts with the light's sky gradient, and washes a haze and a vignette over the art; the story text and captions keep their own colours.
 
 | Attribute | Meaning |
 | --- | --- |
@@ -149,8 +149,8 @@ A setting is an SVG file of named parts on the square stage (2400 units, with 16
 | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides: `dusk` shows the sun, `moonlit` the moon and stars, `overcast` and `storm` cover the sun with cloud, and an `indoor` or `candle` light shows neither. |
 | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows at dusk, stars at night). |
 | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, lawns, floors). Both colours wilt, fade with distance, dim on a bare night and grade with the light like a flat fill; on a bare night a part with a `data-night` colour turns that flat colour, and under a scene light both stops keep the gradient. |
-| `data-glow` | On a `<circle>`, `radius colour opacity`: a soft radial pool of light fading to transparent (a lamp, a window, the sun's bloom). |
-| `data-depth` | 0 to 1: far things fade into the sky and lose line. |
+| `data-glow` | On a `<circle>`, `radius colour opacity`: a soft radial pool of light fading to transparent (a lamp, a window, the sun's bloom). A `light=` colours it but does not dim it, so a lamp still glows at night. |
+| `data-depth` | 0 to 1: far things fade into the sky and lose line, and under a `light=` lose a little more colour and contrast. |
 | `data-dots` | A riso dot screen: `colour spacing radius opacity`. |
 | `data-drift`, `data-swing` | Clouds drift sideways; a swing swings from its pivot (`x y`). |
 
@@ -281,7 +281,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | --- | --- |
 | Setting | `plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`, `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`, or one of the world's own (see Settings). |
 | `night`, `wilt=1`, `stink=0.5`, `mint=1`, `tint=sunflower` | Starting weather (`tint` colours the `plain` blob). |
-| `light=golden`, `golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. A bare preset word means `light=<preset>` in a heading (`# street golden`) or an `@scene` direction (`@scene dusk`). It grades every colour in the scene once, paints the sky, aims the shadows and adds haze and a vignette. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. Bare `night` and `day` keep their weather meaning exactly: `night` turns the sky night without naming a light, so the book's default light still applies. Under a `light=` the light alone makes the night: parts keep their day colour and the light grades it, so `data-night` colours are for bare nights. |
+| `light=golden`, `golden` | The scene's light: `day` (the default), `dawn`, `golden`, `dusk`, `night`, `moonlit`, `overcast`, `storm`, `indoor` or `candle`. A bare preset word means `light=<preset>` in a heading (`# street golden`) or an `@scene` direction (`@scene dusk`). It grades every colour in the scene once, paints the sky, aims the shadows and adds haze and a vignette. Every colour stays recognisably itself: a hue turns only a little towards the light, lines stay ink, skin keeps its warmth in every light, and the characters sit a little forward of the setting. A world can set a default in `world.toml`, and a book can override it with `light = "…"` in its front matter. Bare `night` and `day` keep their weather meaning exactly: `night` turns the sky night without naming a light, so the book's default light still applies. Under a `light=` the light alone makes the night: parts keep their day colour and the light grades it, so `data-night` colours are for bare nights. |
 | `speed=1`, `impact=1` | Manga effects: focus lines rushing in towards the first person on stage, or a jagged burst behind them. They work in every style. |
 | `text=top`, `text=bottom`, `text=none` | Where the story text card goes. |
 | `size=0.9` | Scales the page's text. |

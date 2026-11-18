@@ -22,16 +22,17 @@
 //! | `data-time` | `day` or `night`: only drawn then (the sun, the moon). Under a scene light the light's sky body decides; `overcast` and `storm` hide the sun. |
 //! | `data-lit` | Comma-separated light presets (`dusk,night`): only drawn under one of those lights (lit windows, stars). |
 //! | `data-gradient` | `top colour bottom colour`: a vertical gradient over the part (walls, water, floors). Both colours wilt, fade with distance, darken on a bare night and grade like a flat fill; on a bare night a part with a `data-night` colour turns that flat colour, and under a scene light both stops keep the gradient. |
-//! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line. |
+//! | `data-depth` | 0 to 1: how far away it is. Far things fade into the sky and lose line, and under a scene light lose a little more colour and contrast. |
 //! | `data-dots` | A riso dot screen over it: `colour spacing radius opacity`. |
 //! | `data-drift` | Units a second it drifts sideways, wrapping (clouds). |
 //! | `data-swing` | `x y`: the pivot it swings from (a swing seat and its ropes). |
 //!
 //! `<circle data-glow="radius colour opacity">` paints a soft radial pool of light (a lamp, a
-//! window, the sun's bloom). Two kinds of part are not drawings: `<circle
-//! data-sparkle="size colour">` twinkles, and `<circle data-critter="flower|tree" r="height"
-//! data-colour data-seed>` places one of the living plants from [`critters`], which have faces
-//! and wilt. The root `<svg>` sets `data-ground`, where actors' feet rest.
+//! window, the sun's bloom); a scene light colours it but does not dim it. Two kinds of part
+//! are not drawings: `<circle data-sparkle="size colour">` twinkles, and `<circle
+//! data-critter="flower|tree" r="height" data-colour data-seed>` places one of the living
+//! plants from [`critters`], which have faces and wilt. The root `<svg>` sets `data-ground`,
+//! where actors' feet rest.
 //!
 //! The built-in settings (`plain`, `town`, `street`, `garden`, `park`, `bathroom`, `bedroom`,
 //! `kitchen`, `classroom`, `forest`, `beach`, `hilltop`, `shop`, `playroom`, `stage`) are
@@ -57,6 +58,7 @@ use super::critters::CritterState;
 use super::critters::FlowerKind;
 use super::light::Body;
 use super::light::Light;
+use super::light::Plane;
 use super::light::Preset;
 use super::palette;
 use super::pt;
@@ -602,6 +604,8 @@ impl Part {
 			return;
 		}
 
+		// The part takes the light as ground at its own depth: the far hills recede most.
+		let around = svg.set_plane(Plane::Ground(self.depth));
 		let moved = self.drift != 0.0 || self.swing.is_some();
 
 		if moved {
@@ -697,8 +701,9 @@ impl Part {
 				color,
 				opacity,
 			} => {
-				// The glow is a gradient def, outside the emit path: graded once here.
-				let color = svg.graded(color.resolve(weather));
+				// The glow is a gradient def, outside the emit path: lit once here. It is a
+				// light, so the scene light colours it without dimming it.
+				let color = svg.glowing(color.resolve(weather));
 				let paint = radial_glow(svg, *at, *radius, color, *opacity);
 				svg.fill_paint(&Path::circle(*at, *radius), &paint);
 			}
@@ -733,6 +738,8 @@ impl Part {
 		if moved {
 			svg.end();
 		}
+
+		svg.set_plane(around);
 	}
 }
 
@@ -1070,6 +1077,9 @@ fn fill_pattern(svg: &mut Svg, path: &Path, pattern: &str, opacity: f32) {
 mod tests {
 	use super::*;
 
+	/// A part with no `data-depth` stands right behind the actors.
+	const NEAR: Plane = Plane::Ground(0.0);
+
 	#[test]
 	fn every_built_in_setting_renders_by_day_and_night() {
 		let library = Library::built_in();
@@ -1154,7 +1164,10 @@ mod tests {
 					..Weather::default()
 				},
 			);
-			document.contains(&format!("fill=\"{}\"", light.grade(palette::SUNFLOWER)))
+			document.contains(&format!(
+				"fill=\"{}\"",
+				light.grade(palette::SUNFLOWER, NEAR)
+			))
 		};
 
 		for preset in [Preset::Day, Preset::Dawn, Preset::Golden, Preset::Dusk] {
@@ -1225,7 +1238,7 @@ mod tests {
 			},
 		);
 		assert!(
-			lit.contains(&dusk.grade(palette::LEAF).to_string()),
+			lit.contains(&dusk.grade(palette::LEAF, NEAR).to_string()),
 			"the lawn grades with the light: {lit}"
 		);
 	}
@@ -1328,8 +1341,8 @@ mod tests {
 			("fill", Color(0x3E_6B_22), "the outlined post"),
 			("stroke", Color(0x6B_5A_33), "the fence line"),
 		] {
-			let once = dusk.grade(authored);
-			let twice = dusk.grade(once);
+			let once = dusk.grade(authored, NEAR);
+			let twice = dusk.grade(once, NEAR);
 			assert!(
 				document.contains(&format!("{attribute}=\"{once}\"")),
 				"{note} is graded once: {document}"
@@ -1339,6 +1352,33 @@ mod tests {
 				"{note} is not graded twice: {document}"
 			);
 		}
+	}
+
+	/// A part takes the light as ground at its own depth, and hands the plane back when it is
+	/// done, so whatever is drawn next is graded as before.
+	#[test]
+	fn a_part_is_graded_as_ground_at_its_depth() {
+		let source = r##"<svg data-ground="2000"><path id="far-hill" d="M0 0 L100 0 L100 100 Z" fill="#5dbb63" data-depth="1" data-line="none"/></svg>"##;
+		let setting = Setting::parse("test", source).unwrap();
+		let dusk = Light::of(Preset::Dusk);
+		let weather = Weather {
+			light: dusk,
+			..Weather::default()
+		};
+		let mut svg = Svg::new();
+		svg.set_light(dusk);
+		let before = svg.set_plane(Plane::Figure);
+		backdrop(&mut svg, &setting, &weather);
+		assert_eq!(svg.set_plane(before), Plane::Figure, "the plane comes back");
+		let document = svg.finish((0.0, 0.0, STAGE, STAGE), 64, 64);
+
+		let hazed = palette::LEAF.mix(dusk.horizon, 0.45);
+		let far = dusk.grade(hazed, Plane::Ground(1.0));
+		assert_ne!(far, dusk.grade(hazed, NEAR), "depth changes the grade");
+		assert!(
+			document.contains(&format!("fill=\"{far}\"")),
+			"the far hill is graded at full depth: {document}"
+		);
 	}
 
 	#[test]
@@ -1354,13 +1394,13 @@ mod tests {
 		);
 
 		for authored in [Color(0x8E_D0_E8), Color(0x2E_62_8E)] {
-			let once = dusk.grade(authored);
+			let once = dusk.grade(authored, NEAR);
 			assert!(
 				document.contains(&format!("stop-color=\"{once}\"")),
 				"the stop is graded once: {document}"
 			);
 			assert!(
-				!document.contains(&dusk.grade(once).to_string()),
+				!document.contains(&dusk.grade(once, NEAR).to_string()),
 				"the stop is not graded twice: {document}"
 			);
 		}
@@ -1377,8 +1417,8 @@ mod tests {
 				..Weather::default()
 			},
 		);
-		let once = dusk.grade(palette::SAND);
-		let twice = dusk.grade(once);
+		let once = dusk.grade(palette::SAND, NEAR);
+		let twice = dusk.grade(once, NEAR);
 		assert!(
 			document.contains(&format!("fill=\"{once}\"")),
 			"the dot screen is graded once: {document}"
@@ -1406,7 +1446,7 @@ mod tests {
 			"the sky paints the light's own zenith and horizon: {document}"
 		);
 		assert!(
-			!document.contains(&storm.grade(storm.zenith).to_string()),
+			!document.contains(&storm.grade(storm.zenith, NEAR).to_string()),
 			"the light's sky colours are not graded again: {document}"
 		);
 	}
@@ -1423,23 +1463,28 @@ mod tests {
 			},
 		);
 
-		let glow_once = dusk.grade(Color(0xFF_D9_8F));
+		// A glow is a light, so it takes the light's colour (`glow`), not a surface's grade.
+		let glow_once = dusk.glow(Color(0xFF_D9_8F));
 		assert!(
 			document.contains(&format!("stop-color=\"{glow_once}\"")),
-			"the glow is graded once: {document}"
+			"the glow is lit once: {document}"
 		);
 		assert!(
-			!document.contains(&dusk.grade(glow_once).to_string()),
-			"the glow is not graded twice: {document}"
+			!document.contains(&dusk.glow(glow_once).to_string()),
+			"the glow is not lit twice: {document}"
+		);
+		assert!(
+			!document.contains(&dusk.grade(Color(0xFF_D9_8F), NEAR).to_string()),
+			"the glow is not dimmed like a surface: {document}"
 		);
 
-		let star_once = dusk.grade(palette::CREAM);
+		let star_once = dusk.grade(palette::CREAM, NEAR);
 		assert!(
 			document.contains(&format!("fill=\"{star_once}\"")),
 			"the sparkle is graded once: {document}"
 		);
 		assert!(
-			!document.contains(&dusk.grade(star_once).to_string()),
+			!document.contains(&dusk.grade(star_once, NEAR).to_string()),
 			"the sparkle is not graded twice: {document}"
 		);
 	}
@@ -1455,8 +1500,8 @@ mod tests {
 				..Weather::default()
 			},
 		);
-		let once = dusk.grade(Color(0xE2_56_4E));
-		let twice = dusk.grade(once);
+		let once = dusk.grade(Color(0xE2_56_4E), NEAR);
+		let twice = dusk.grade(once, NEAR);
 		assert!(
 			document.contains(&format!("fill=\"{once}\"")),
 			"the petals take the graded colour: {document}"
@@ -1487,7 +1532,7 @@ mod tests {
 		);
 
 		let night = Light::of(Preset::Night);
-		let once = night.grade(Color(0xAA_BB_77));
+		let once = night.grade(Color(0xAA_BB_77), NEAR);
 		let lit = draw_setting(
 			source,
 			&Weather {
@@ -1550,7 +1595,7 @@ mod tests {
 		);
 		for authored in [Color(0x8E_D0_E8), Color(0x2E_62_8E)] {
 			assert!(
-				lit.contains(&format!("stop-color=\"{}\"", night.grade(authored))),
+				lit.contains(&format!("stop-color=\"{}\"", night.grade(authored, NEAR))),
 				"both stops keep the gradient and grade once: {lit}"
 			);
 		}
@@ -1603,7 +1648,7 @@ mod tests {
 		let day = draw_setting(source, &Weather::default());
 		assert!(!day.contains("fill=\"#ffc93c\""), "hidden by day: {day}");
 
-		let graded = Light::of(Preset::Dusk).grade(palette::SUNFLOWER);
+		let graded = Light::of(Preset::Dusk).grade(palette::SUNFLOWER, NEAR);
 		let dusk = draw_setting(
 			source,
 			&Weather {
