@@ -493,7 +493,15 @@ impl<S: Speaker> Builder<'_, S> {
 						state.camera.shake = 0.0;
 					}
 
-					push(&mut keys, at, state, directive.line, after, start);
+					push(
+						&mut keys,
+						at,
+						state,
+						directive.line,
+						after,
+						start,
+						directive.actor == "camera",
+					);
 				}
 				Beat::Say {
 					medium: Medium::BookOnly,
@@ -673,23 +681,39 @@ fn land(
 			change.line,
 			Some(change.at - start),
 			start,
+			true,
 		);
 	}
 }
 
-/// Adds a key, or rewrites the one already at `at`: a direction and an action at one moment are
-/// one state. Only a landing that waits carries `after`; it names the setup's exact time.
-fn push(keys: &mut Vec<Key>, at: f32, scene: Scene, line: usize, after: Option<f32>, start: f32) {
+/// Adds a key, or rewrites the one already at `at`: a camera change and an action at one
+/// moment are one state. The action brings the stage, the camera direction brings the camera,
+/// and a change that waits carries `after` to name its exact time.
+fn push(
+	keys: &mut Vec<Key>,
+	at: f32,
+	scene: Scene,
+	line: usize,
+	after: Option<f32>,
+	start: f32,
+	camera: bool,
+) {
 	// Only a landing that waits names its own time; `after=0` or an inherited value is
 	// already where the key sits.
 	let after = after.filter(|after| *after > 1e-3 && (start + after - at).abs() < 1e-3);
 
 	match keys.last_mut() {
 		Some(last) if (last.time - at).abs() < 1e-3 => {
-			// An action landing on a pinned camera change keeps the change's exact time:
-			// the action carries no `after`, so it cannot say when the camera should land.
-			last.after = after.or(last.after);
-			last.scene = scene;
+			if camera {
+				last.scene = scene;
+				last.after = after.or(last.after);
+			} else {
+				// The action landed on a camera change: keep the framing and the move, take
+				// the action's stage.
+				let framing = last.scene.camera.clone();
+				last.scene = scene;
+				last.scene.camera = framing;
+			}
 		}
 		_ => {
 			keys.push(Key {
@@ -697,7 +721,7 @@ fn push(keys: &mut Vec<Key>, at: f32, scene: Scene, line: usize, after: Option<f
 				scene,
 				line,
 				after,
-			})
+			});
 		}
 	}
 }

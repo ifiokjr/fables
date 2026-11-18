@@ -1056,10 +1056,10 @@ fn wrap(text: &str, width: f32, size: f32, limit: usize) -> Vec<String> {
 			current = candidate;
 		} else {
 			if !current.is_empty() {
-				lines.push(current);
+				lines.push(std::mem::take(&mut current));
 			}
 
-			current = word.to_owned();
+			word.clone_into(&mut current);
 		}
 	}
 

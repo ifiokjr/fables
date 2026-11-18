@@ -375,7 +375,7 @@ pub fn animatic(
 		let frame = Plate {
 			union,
 			aspect: format.aspect(),
-			plate_aspect,
+			shape: plate_aspect,
 			width: plate_w,
 		};
 		let crop = crop(row, *start, *end, &frame, *first, *last, fps);
@@ -484,7 +484,7 @@ fn progress(first: usize, last: usize) -> String {
 struct Plate {
 	union: View,
 	aspect: f32,
-	plate_aspect: f32,
+	shape: f32,
 	width: u32,
 }
 
@@ -498,12 +498,12 @@ fn crop(
 	last: usize,
 	fps: u32,
 ) -> Crop {
-	let scale = plate.width as f32 / plate.union.width(plate.plate_aspect);
+	let scale = plate.width as f32 / plate.union.width(plate.shape);
 	let rect = |view: View| {
 		(
 			(view.centre.x
 				- view.width(plate.aspect) / 2.0
-				- (plate.union.centre.x - plate.union.width(plate.plate_aspect) / 2.0))
+				- (plate.union.centre.x - plate.union.width(plate.shape) / 2.0))
 				* scale,
 			(view.centre.y - view.height / 2.0 - (plate.union.centre.y - plate.union.height / 2.0))
 				* scale,
