@@ -32,6 +32,7 @@ use crate::studio::PartData;
 use crate::studio::SettingPart;
 use crate::studio::SettingWeather;
 use crate::studio::SheetKind;
+use crate::studio::StoryBrief;
 use crate::studio::Studio;
 use crate::studio::VideoShape;
 use crate::studio::VoiceChoice;
@@ -85,15 +86,19 @@ To make a book:
 1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
                             mixing and workflow.
 2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
-3. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
+3. `flow_list` shows the story flows a book can take, with each one's page and word budgets; \
+                            `flow_describe` prints one flow's beats. `story_start` returns the \
+                            whole laid-out story.md for a flow, with the star and friend staged; \
+                            fill in the [bracketed] lines and `story_write` it.
+4. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
                             pages that start `# setting`, with narration and `@actor` stage \
                             directions). It is checked against the cast and refused, with the \
                             line to fix, if it doesn't work. `story_read` reads one back, for \
                             example a world's existing books, to learn the format.
-4. `story_review` critiques it the way a director would: findings with line numbers and \
+5. `story_review` critiques it the way a director would: findings with line numbers and \
                             suggestions, never a refusal. `storyboard_render` and `video_frames` \
                             let you see the shots without encoding a video.
-5. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
+6. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
                             the ePub and KDP print files; `video_render` narrates and animates it.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -185,6 +190,28 @@ pub struct WriteStoryParams {
 	pub story: String,
 	/// The whole story.md.
 	pub script: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FlowParams {
+	pub world: String,
+	/// The flow's name, from `flow_list`: `three-tries`, `pile-up` and the rest.
+	pub flow: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StartStoryParams {
+	pub world: String,
+	/// The book's title.
+	pub title: String,
+	/// The cast id of the star.
+	pub star: String,
+	/// The cast id of the second character, for a flow that stages two or a crowd.
+	pub friend: Option<String>,
+	/// The flow to start from, from `flow_list`; the world's `recipe.md` when left out.
+	pub flow: Option<String>,
+	/// The author on the title page; the world's author when left out.
+	pub author: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -596,6 +623,44 @@ impl StudioServer {
 	}
 
 	#[tool(
+		description = "List the story flows a world's new books can start from: each one's name, \
+		               what it is for, how many characters it stages, its page and word budgets \
+		               and its beats. The world's own flows come before the built-ins."
+	)]
+	fn flow_list(&self, Parameters(params): Parameters<WorldParams>) -> CallToolResult {
+		json(self.studio.flows(&params.world))
+	}
+
+	#[tool(
+		description = "Describe one story flow: its about, what it is good for, the characters it \
+		               needs, its page and word budgets, and its beats as a table of what happens \
+		               over how many pages."
+	)]
+	fn flow_describe(&self, Parameters(params): Parameters<FlowParams>) -> CallToolResult {
+		json(self.studio.describe_flow(&params.world, &params.flow))
+	}
+
+	#[tool(
+		description = "Start a book from a story flow (or the world's recipe): returns the whole \
+		               story.md scaffold with the star and friend staged and every page laid out. \
+		               Fill in the [bracketed] lines, then write it with story_write."
+	)]
+	fn story_start(&self, Parameters(params): Parameters<StartStoryParams>) -> CallToolResult {
+		let brief = StoryBrief {
+			title: params.title,
+			star: params.star,
+			friend: params.friend,
+			flow: params.flow,
+			author: params.author,
+		};
+
+		match self.studio.start_story(&params.world, &brief) {
+			Ok(script) => CallToolResult::success(vec![ContentBlock::text(script)]),
+			Err(error) => failed(&error),
+		}
+	}
+
+	#[tool(
 		description = "Write a book's script (the whole story.md) into a world and check it \
 		               against the cast. A script that doesn't parse or rehearse is not kept; the \
 		               error says what to fix, by line. The story belongs to the world it is \
@@ -817,6 +882,9 @@ mod tests {
 			"story_read",
 			"story_check",
 			"story_review",
+			"flow_list",
+			"flow_describe",
+			"story_start",
 			"book_render",
 			"page_render",
 			"video_render",
@@ -879,6 +947,46 @@ mod tests {
 				assert!(text.text.contains("workflow"), "{}", text.text);
 			}
 			other => panic!("the error comes back as text: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn a_flow_lists_and_starts_a_book() {
+		let server = StudioServer::new(Path::new("."));
+		let listed = server.flow_list(Parameters(WorldParams {
+			world: "mumbleton".into(),
+		}));
+		assert_eq!(listed.is_error, None);
+
+		match &listed.content[0] {
+			ContentBlock::Text(text) => {
+				assert!(text.text.contains("three-tries"), "{}", text.text);
+				assert!(text.text.contains("good_for"), "{}", text.text);
+			}
+			other => panic!("the flow list comes back as JSON text: {other:?}"),
+		}
+
+		let started = server.story_start(Parameters(StartStoryParams {
+			world: "mumbleton".into(),
+			title: "A Test Tale".into(),
+			star: "mo".into(),
+			friend: None,
+			flow: Some("three-tries".into()),
+			author: None,
+		}));
+		assert_eq!(started.is_error, None);
+
+		match &started.content[0] {
+			ContentBlock::Text(text) => {
+				assert!(text.text.contains("flow = \"three-tries\""), "{}", text.text);
+				assert!(text.text.contains("@mo"), "{}", text.text);
+				assert!(
+					text.text.contains("[The star says what they want.]"),
+					"{}",
+					text.text
+				);
+			}
+			other => panic!("the scaffold comes back as text: {other:?}"),
 		}
 	}
 
