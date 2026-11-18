@@ -147,6 +147,12 @@ One clear action per beat.
   the smaller one, since they read as one shape,
   separate their levels (`size=`, `sit`, `stand`), and let facing tell the story: `face=`
   towards whoever matters.
+- **Where they stand: `x=` and `y=`.** `x=` runs across the stage from `0` (the left edge) to
+  `1` (the right edge); the words `far-left`, `left`, `center`, `right` and `far-right` are
+  0.12, 0.28, 0.5, 0.72 and 0.88. People and props stand on the ground unless `y=` says
+  otherwise, so leave `y=` out for anything on the floor (there is no `y=ground`). `y=` is for
+  what flies or hangs: `y=sky` (over the cast's heads), `y=high`, `y=low`, or a number from
+  `0` (the top of the stage) to `1` (the bottom): `@kite x=0.7 y=sky`, `@bird.a x=0.8 y=0.3`.
 - **Eyelines.** Everyone looks at whoever matters — the engine aims listeners at the speaker
   for you. When it is something else, say so: `see=kite`, `see=up`, `see=mine`. A held `see=`
   survives until it is changed; `see=front` lets the room pull the eyes again. Break the
