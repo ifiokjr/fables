@@ -24,9 +24,12 @@ use crate::art::figure::Legwear;
 use crate::art::figure::Look;
 use crate::art::figure::Nose;
 use crate::art::figure::Pattern;
+use crate::art::pack::Picks;
 use crate::art::pack::StylePack;
 use crate::art::palette;
+use crate::art::parts::Feature;
 use crate::art::puppet::Authored;
+use crate::art::puppet::Physique;
 use crate::art::seed_of;
 use crate::video::voice::Voice;
 
@@ -66,14 +69,39 @@ impl Kind {
 	}
 }
 
-/// A plain character drawn by a style's template, for showing the style itself.
+/// A plain character drawn by a style's template, for showing the style itself: its own hair,
+/// brows and nose on the plain body.
 pub fn template_look(style: &Arc<StylePack>, build: Build) -> Result<Look> {
+	template_look_with(style, build, &Picks::default(), Physique::Plain)
+}
+
+/// A character drawn by a style's template in its plain colours, with the hair, brows and nose
+/// they `picks` (the template's own where they pick none) on a `physique` built body: what
+/// the style's variants sheet lines up.
+pub fn template_look_with(
+	style: &Arc<StylePack>,
+	build: Build,
+	picks: &Picks,
+	physique: Physique,
+) -> Result<Look> {
 	let entry: Entry = toml::from_str(&format!(
 		"name = \"Template\"\nkind = \"{}\"\nskin = \"#f6d7c3\"\nhair-colour = \"#3d3a5c\"\ntop = \
 		 \"#eef1f8\"\ntrim = \"#d6455d\"\nbottom = \"#3a4a7a\"\nshoes = \"#2c2c3a\"\neyes = \
 		 \"#4a7ad0\"\n",
 		crate::art::pack::body_name(build)
 	))?;
+	let entry = Entry {
+		hair: Some(
+			picks
+				.hair
+				.clone()
+				.unwrap_or_else(|| style.own(build, Feature::Hair).to_owned()),
+		),
+		build: Some(physique.name().to_owned()),
+		brows: picks.brows.clone(),
+		nose: picks.nose.clone(),
+		..entry
+	};
 
 	// With no part file, a person is drawn from the template for their body.
 	build_look("template", &entry, Path::new(""), style)
@@ -90,10 +118,9 @@ pub struct Member {
 	/// The character's own voice for dialogue, consistent across every book.
 	pub voice: Option<Voice>,
 	pub kind: Kind,
-	/// The cast fields only the parametric puppet reads (`hair`, `head`, `body`, `nose`,
-	/// `mouth`), named. They are ignored when the character is drawn from parts, and `check`
-	/// says so once per member.
-	pub parametric_fields: Vec<&'static str>,
+	/// The cast fields set that this character's drawing doesn't read, named (see
+	/// [`Entry::unused_fields`]). `check` says so once per member.
+	pub unused_fields: Vec<&'static str>,
 }
 
 /// A visitor from another world, invited by a script's front matter (`guests = ["world/id"]`).
@@ -129,14 +156,24 @@ struct Entry {
 	kind: String,
 	#[serde(default)]
 	skin: Option<String>,
+	/// A figure drawn from parts: a hair variant its style offers. The parametric puppet: its
+	/// own hair shapes.
 	#[serde(default)]
 	hair: Option<String>,
+	/// How heavily built a figure drawn from parts is: slim, plain or stout.
+	#[serde(default)]
+	build: Option<String>,
+	/// A brows variant a figure drawn from parts' style offers.
+	#[serde(default)]
+	brows: Option<String>,
 	#[serde(default)]
 	hair_colour: Option<String>,
 	#[serde(default)]
 	head: Option<String>,
 	#[serde(default)]
 	body: Option<String>,
+	/// A figure drawn from parts: a nose variant its style offers, or `none`. The parametric
+	/// puppet: its own nose shapes.
 	#[serde(default)]
 	nose: Option<String>,
 	#[serde(default)]
@@ -178,24 +215,39 @@ fn default_kind() -> String {
 }
 
 impl Entry {
-	/// The cast fields only the parametric puppet reads, which an authored (or template-drawn)
-	/// character ignores.
-	fn parametric_fields(&self) -> Vec<&'static str> {
-		let mut fields = Vec::new();
+	/// The cast fields set that a figure's drawing doesn't read. A figure drawn from parts
+	/// ignores the parametric puppet's shapes (`head`, `body`, `mouth`); one drawn from its own
+	/// part file also keeps its own hair, and its own brows and nose when the file draws them.
+	/// The parametric puppet ignores the variants (`build`, `brows`).
+	fn unused_fields(&self, look: &Look) -> Vec<&'static str> {
+		let reads = |field: &str| {
+			match &look.puppet {
+				None => !matches!(field, "build" | "brows"),
+				Some(puppet) if puppet.template => !matches!(field, "head" | "body" | "mouth"),
+				Some(puppet) => {
+					match field {
+						"build" => true,
+						"brows" => !puppet.file_features.contains(&Feature::Brows),
+						"nose" => !puppet.file_features.contains(&Feature::Nose),
+						_ => false,
+					}
+				}
+			}
+		};
 
-		for (set, name) in [
+		[
 			(self.hair.is_some(), "hair"),
+			(self.build.is_some(), "build"),
+			(self.brows.is_some(), "brows"),
 			(self.head.is_some(), "head"),
 			(self.body.is_some(), "body"),
 			(self.nose.is_some(), "nose"),
 			(self.mouth.is_some(), "mouth"),
-		] {
-			if set {
-				fields.push(name);
-			}
-		}
-
-		fields
+		]
+		.into_iter()
+		.filter(|&(set, name)| set && !reads(name))
+		.map(|(_, name)| name)
+		.collect()
 	}
 }
 
@@ -224,7 +276,10 @@ impl Cast {
 		for (id, entry) in entries {
 			let kind = build_kind(&id, &entry, dir, style)
 				.with_context(|| format!("cast member `{id}`"))?;
-			let parametric_fields = entry.parametric_fields();
+			let unused_fields = match &kind {
+				Kind::Figure(look) => entry.unused_fields(look),
+				_ => Vec::new(),
+			};
 
 			if let Some(voice) = &entry.voice {
 				voice
@@ -242,7 +297,7 @@ impl Cast {
 					about: entry.about,
 					voice: entry.voice,
 					kind,
-					parametric_fields,
+					unused_fields,
 				},
 			);
 		}
@@ -395,14 +450,17 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 		"round" => BodyShape::Round,
 		other => bail!("unknown body `{other}`; use bell, bean, pear or round"),
 	};
-	let nose = match entry.nose.as_deref().unwrap_or("button") {
+	let parametric = entry.puppet.as_deref() == Some(PARAMETRIC);
+	// The parametric puppet reads `hair` and `nose` as its own shapes; a figure drawn from parts
+	// reads them as variants its style offers (see below).
+	let nose = match entry.nose.as_deref().filter(|_| parametric).unwrap_or("button") {
 		"button" => Nose::Button,
 		"round" => Nose::Round,
 		"long" => Nose::Long,
 		"none" => Nose::None,
 		other => bail!("unknown nose `{other}`; use button, round, long or none"),
 	};
-	let hair = match entry.hair.as_deref().unwrap_or("tuft") {
+	let hair = match entry.hair.as_deref().filter(|_| parametric).unwrap_or("tuft") {
 		"bald" => HairStyle::Bald,
 		"tuft" => HairStyle::Tuft,
 		"bun" => HairStyle::Bun,
@@ -419,6 +477,7 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 			)
 		}
 	};
+	let physique = entry.build.as_deref().map(Physique::named).transpose()?;
 	let pattern = match entry.pattern.as_deref().unwrap_or("plain") {
 		"plain" => Pattern::Plain,
 		"stripes" => Pattern::Stripes,
@@ -452,15 +511,35 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 		})
 		.collect::<Result<Vec<_>>>()?;
 
+	let picks = |hair: Option<String>| {
+		Picks {
+			hair,
+			brows: entry.brows.clone(),
+			nose: entry.nose.clone(),
+		}
+	};
 	let puppet = match entry.puppet.as_deref() {
 		Some(PARAMETRIC) => None,
+		// Their own part file draws their hair; the brows and nose they pick are drawn unless
+		// it draws its own. They are as heavily built as the cast says, plain by default.
 		Some(file) => {
-			Some(Authored::load(
-				&crate::world::under(dir, "puppet", file)?,
-				style,
-			)?)
+			let file = crate::world::under(dir, "puppet", file)?;
+			let puppet = Authored::load(&file, style, build, &picks(None))?;
+			Some(puppet.built(build, physique.unwrap_or_default()))
 		}
-		None => Some(Authored::from_template(style, build)?),
+		// Drawn from the template, they get a hair and build of their own unless the cast
+		// names them.
+		None => {
+			let hair = entry
+				.hair
+				.clone()
+				.unwrap_or_else(|| default_hair(id, style, build).to_owned());
+			let puppet = Authored::from_template(style, build, &picks(Some(hair)))?;
+			Some(puppet.built(
+				build,
+				physique.unwrap_or_else(|| default_build(id)),
+			))
+		}
 	};
 
 	Ok(Look {
@@ -484,6 +563,32 @@ fn build_look(id: &str, entry: &Entry, dir: &Path, style: &Arc<StylePack>) -> Re
 		puppet,
 	})
 }
+
+/// One of `choices` for a character, picked by their id and the cast `field` it fills, so the
+/// same character gets the same one in every book and different characters mostly don't.
+fn by_id<T: Copy>(id: &str, field: &str, choices: &[T]) -> T {
+	choices[(seed_of(&format!("{id}.{field}")) % choices.len() as u64) as usize]
+}
+
+/// The hair a template-drawn character gets when the cast names none: one of the style's for
+/// their body, picked by [`by_id`]. A kid only goes bald when the cast asks.
+pub fn default_hair<'a>(id: &str, style: &'a StylePack, build: Build) -> &'a str {
+	let mut offers = style.offers(build, Feature::Hair);
+
+	if build == Build::Kid && offers.len() > 1 {
+		offers.retain(|hair| *hair != BALD);
+	}
+
+	by_id(id, "hair", &offers)
+}
+
+/// The build a template-drawn character gets when the cast names none, picked by [`by_id`].
+pub fn default_build(id: &str) -> Physique {
+	by_id(id, "build", &Physique::ALL)
+}
+
+/// The hair variant that draws no hair, which a kid only gets by asking.
+const BALD: &str = "bald";
 
 #[cfg(test)]
 mod tests {
@@ -546,7 +651,7 @@ colour = "#c9865a"
 					)
 					.unwrap(),
 				),
-				parametric_fields: Vec::new(),
+				unused_fields: Vec::new(),
 			}
 		};
 
@@ -667,7 +772,7 @@ colour = "#c9865a"
 	fn a_character_without_a_puppet_is_drawn_from_the_style_template() {
 		let style = StylePack::named("chibi").unwrap();
 		let cast = Cast::parse_in(
-			"[pip]\nname = \"Pip\"\nskin = \"teal\"\nhair = \"bun\"\n",
+			"[pip]\nname = \"Pip\"\nskin = \"teal\"\nhair = \"bun\"\nhead = \"egg\"\n",
 			Path::new(""),
 			&style,
 		)
@@ -689,9 +794,9 @@ colour = "#c9865a"
 			"the style's kit comes along"
 		);
 		assert_eq!(
-			cast.member("pip").unwrap().parametric_fields,
-			vec!["hair"],
-			"the fields only the parametric puppet reads are named"
+			cast.member("pip").unwrap().unused_fields,
+			vec!["head"],
+			"the fields only the parametric puppet reads are named; the hair is a variant"
 		);
 
 		let cartoon = Cast::parse("[stinky]\nname = \"Stinky\"\n").unwrap();

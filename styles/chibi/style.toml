@@ -90,6 +90,14 @@ satchel = "#5a4a6c"
 apron = "#ffffff"
 mud = "#6e4a30"
 
+# What the templates and kit draw of their own, by the names a cast picks them with. The
+# templates and kit draw their other hair, brows and noses beside them as variants.
+[own]
+kid-hair = "bowl"
+grown-up-hair = "bowl"
+brows = "thin"
+nose = "button"
+
 # A kid: about two and a third heads tall (crown of the hair to chin), a big round head on a
 # small round body with short, chunky limbs.
 [bodies.kid]

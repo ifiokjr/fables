@@ -433,6 +433,161 @@ pub fn model_sheet(title: &str, look: &Look, px: u32) -> Result<Pixmap> {
 	raster::render(&svg.finish((0.0, 0.0, width, height), px, px_height))
 }
 
+/// How a lineup on a variants sheet shows each look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Crop {
+	/// Head and shoulders, front-on above three-quarters: for hair, brows and noses.
+	Head,
+	/// The whole figure, front-on beside three-quarters: for builds.
+	Body,
+}
+
+/// One row of a variants sheet: looks that differ in one way, each labelled with the name a
+/// cast picks it by.
+pub struct Lineup {
+	pub title: String,
+	pub crop: Crop,
+	pub looks: Vec<(String, Look)>,
+}
+
+/// A head cell's size, in figure units at scale 1.
+const HEAD_CELL: (f32, f32) = (380.0, 420.0);
+/// A body cell's size: one view of one figure.
+const BODY_CELL: (f32, f32) = (440.0, 620.0);
+/// Room above a lineup for its title, and below each cell for its label.
+const LINEUP_TITLE: f32 = 90.0;
+const CELL_LABEL: f32 = 50.0;
+
+/// A style's variants, lineup by lineup: every hair on one head, every build on one body and so
+/// on, so a designer can see at a glance that they are different people from the same show.
+/// `px` is the sheet's width.
+pub fn variants_sheet(title: &str, lineups: &[Lineup], px: u32) -> Result<Pixmap> {
+	let row_width = |lineup: &Lineup| {
+		lineup.looks.len() as f32
+			* match lineup.crop {
+				Crop::Head => HEAD_CELL.0,
+				Crop::Body => BODY_CELL.0 * 2.0,
+			}
+	};
+	let row_height = |lineup: &Lineup| {
+		LINEUP_TITLE
+			+ match lineup.crop {
+				Crop::Head => (HEAD_CELL.1 + CELL_LABEL) * 2.0,
+				Crop::Body => BODY_CELL.1 + CELL_LABEL,
+			}
+	};
+	let width = lineups.iter().map(row_width).fold(1600.0, f32::max) + 80.0;
+	let height = 140.0 + lineups.iter().map(row_height).sum::<f32>() + 40.0;
+	let mut svg = Svg::new();
+	svg.fill(&Path::rect(0.0, 0.0, width, height), palette::PAPER);
+	let label = |svg: &mut Svg, x: f32, y: f32, w: f32, size: f32, words: &str| {
+		let block = text::layout(
+			&[words],
+			Area {
+				x: x - w / 2.0,
+				y,
+				w,
+				h: size * 1.6,
+			},
+			size,
+			Anchor::Top,
+		);
+		svg.raw(&text::svg(&block, Ink::default()));
+	};
+	label(&mut svg, width / 2.0, 40.0, width, 46.0, &format!("**{title}**"));
+	let mut top = 140.0;
+
+	for lineup in lineups {
+		label(&mut svg, width / 2.0, top + 20.0, width, 34.0, &lineup.title);
+		let left = (width - row_width(lineup)) / 2.0;
+		top += LINEUP_TITLE;
+
+		for (index, (name, look)) in lineup.looks.iter().enumerate() {
+			let frame = look.frame();
+
+			match lineup.crop {
+				Crop::Head => {
+					// The head's own drawing sets the crop, so a style that draws big heads
+					// still fills its cells.
+					let (lo, hi) = look
+						.puppet
+						.as_ref()
+						.and_then(|puppet| puppet.parts.get("head.front"))
+						.map_or((pt(-100.0, -100.0), pt(100.0, 100.0)), Shape::bounds);
+					let size = (hi - lo).x.max((hi - lo).y);
+					let scale = HEAD_CELL.0 / (size * 1.6);
+					let x = left + HEAD_CELL.0 * (index as f32 + 0.5);
+
+					for (row, facing) in [0.0, THREE_QUARTER].into_iter().enumerate() {
+						let cell_top = top + (HEAD_CELL.1 + CELL_LABEL) * row as f32;
+						// The head's middle sits a little above the cell's, leaving room for
+						// the shoulders and long hair below.
+						let head = pt(x, cell_top + HEAD_CELL.1 * 0.42);
+						let at = head - (frame.head + pt(0.0, (lo.y + hi.y) / 2.0)) * scale;
+						let mut state = FigureState::new(&frame);
+						state.facing = facing;
+						state.hands = frame.hands(Pose::Idle, facing);
+						state.legs = frame.limbs().stance(Stance::Stand, facing);
+
+						svg.begin_clip(&Path::rect(
+							x - HEAD_CELL.0 / 2.0 + 6.0,
+							cell_top,
+							HEAD_CELL.0 - 12.0,
+							HEAD_CELL.1,
+						));
+						svg.begin(&format!(
+							"translate({:.1} {:.1}) scale({scale:.3})",
+							at.x, at.y
+						));
+						figure::draw(&mut svg, look, &state);
+						svg.end();
+						svg.end();
+						label(
+							&mut svg,
+							x,
+							cell_top + HEAD_CELL.1 + 6.0,
+							HEAD_CELL.0,
+							26.0,
+							name,
+						);
+					}
+				}
+				Crop::Body => {
+					let fit = (BODY_CELL.1 * 0.86 / frame.height()).min(0.9);
+
+					for (view, facing) in [0.0, THREE_QUARTER].into_iter().enumerate() {
+						let x = left + BODY_CELL.0 * ((index * 2 + view) as f32 + 0.5);
+						let ground = top + BODY_CELL.1 - 30.0;
+						let mut state = FigureState::new(&frame);
+						state.facing = facing;
+						state.hands = frame.hands(Pose::Idle, facing);
+						state.legs = frame.limbs().stance(Stance::Stand, facing);
+
+						svg.begin(&format!("translate({x:.1} {ground:.1}) scale({fit:.3})"));
+						figure::shadow(&mut svg, look, &state, 0.0);
+						figure::draw(&mut svg, look, &state);
+						svg.end();
+					}
+
+					label(
+						&mut svg,
+						left + BODY_CELL.0 * (index as f32 * 2.0 + 1.0),
+						top + BODY_CELL.1 + 6.0,
+						BODY_CELL.0 * 2.0,
+						26.0,
+						name,
+					);
+				}
+			}
+		}
+
+		top += row_height(lineup) - LINEUP_TITLE;
+	}
+
+	let px_height = (px as f32 * height / width).round() as u32;
+	raster::render(&svg.finish((0.0, 0.0, width, height), px, px_height))
+}
+
 /// Every setting in `settings`, by day, plus a few in other weather, labelled with their
 /// script names.
 pub fn places_sheet(settings: &Library, style: Style) -> Result<Pixmap> {

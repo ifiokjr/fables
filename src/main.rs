@@ -25,6 +25,7 @@ use fables::studio::BuildName;
 use fables::studio::CharacterBrief;
 use fables::studio::Colours;
 use fables::studio::PartData;
+use fables::studio::PhysiqueName;
 use fables::studio::SheetKind;
 use fables::studio::Studio;
 use fables::studio::WorldBrief;
@@ -262,6 +263,19 @@ enum CharacterAction {
 		/// The pattern on the top, in the trim colour: plain, stripes, dots or star.
 		#[arg(long)]
 		pattern: Option<String>,
+		/// A hairdo their style draws on their body (`fables style describe` lists them). Left
+		/// out, one is picked from their id.
+		#[arg(long)]
+		hair: Option<String>,
+		/// How heavily built they are. Left out, one is picked from their id.
+		#[arg(long, value_parser = ["slim", "plain", "stout"])]
+		build: Option<String>,
+		/// Brows their style draws; left out, the style's own.
+		#[arg(long)]
+		brows: Option<String>,
+		/// A nose their style draws, or `none`; left out, the style's own.
+		#[arg(long)]
+		nose: Option<String>,
 		/// Also write their part file from the style's template, so it can be redrawn.
 		#[arg(long)]
 		draw: bool,
@@ -476,9 +490,13 @@ fn run(cli: Cli) -> Result<()> {
 					shoes,
 					eyes,
 					pattern,
+					hair,
+					build,
+					brows,
+					nose,
 					draw,
 				} => {
-					let build = if kind == "grown-up" {
+					let kind = if kind == "grown-up" {
 						BuildName::GrownUp
 					} else {
 						BuildName::Kid
@@ -486,7 +504,11 @@ fn run(cli: Cli) -> Result<()> {
 					let brief = CharacterBrief {
 						id,
 						name,
-						build,
+						kind,
+						build: build.as_deref().map(physique_name).transpose()?,
+						hair,
+						brows,
+						nose,
 						born: None,
 						about,
 						habit: None,
@@ -898,6 +920,16 @@ fn world_new(
 	Ok(())
 }
 
+/// The build `--build` names. Clap only lets the three through.
+fn physique_name(name: &str) -> Result<PhysiqueName> {
+	match name {
+		"slim" => Ok(PhysiqueName::Slim),
+		"plain" => Ok(PhysiqueName::Plain),
+		"stout" => Ok(PhysiqueName::Stout),
+		other => anyhow::bail!("unknown build `{other}`; use slim, plain or stout"),
+	}
+}
+
 /// Adds a character to a world's cast, drawn from its style's template.
 fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
 	let report = fables::studio::create_character(world, brief)?;
@@ -911,7 +943,7 @@ fn character_new(world: &World, brief: &CharacterBrief) -> Result<()> {
 		Some("template") => {
 			format!(
 				"drawn from {}",
-				world.style()?.template_origin(brief.build.build())
+				world.style()?.template_origin(brief.kind.build())
 			)
 		}
 		_ => "drawn by the parametric puppet".to_owned(),
@@ -981,9 +1013,23 @@ fn style_describe(name: &str) -> Result<()> {
 			body.template,
 			body.template_parts
 		)?;
+
+		for (field, offers) in [
+			("hair", &body.hair),
+			("brows", &body.brows),
+			("nose", &body.noses),
+		] {
+			say!("    {field:<6} {}", offers.join(", "))?;
+		}
+
+		say!("    {:<6} {}", "build", body.builds.join(", "))?;
 	}
 
 	say!("  (`kind = \"grown-up\"` in the cast file puts a person on the grown-up body)")?;
+	say!(
+		"  (a cast picks each with `hair`, `brows`, `nose` and `build`; the first is the style's \
+		 own, and without a `hair` or `build` a template-drawn person gets one picked from their id)"
+	)?;
 
 	say!("parts (name, views, need, home, space):")?;
 
@@ -1456,7 +1502,7 @@ fn style_sheet(name: &str, out: &Path) -> Result<()> {
 	let dir = out.join("styles");
 	std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
 
-	for (kind, image) in ["model", "parts"]
+	for (kind, image) in ["model", "parts", "variants"]
 		.iter()
 		.zip(Studio::style_sheets(name, 2600)?)
 	{

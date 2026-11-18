@@ -92,30 +92,41 @@ fn cast_notes(cast: &Cast) -> Vec<String> {
 			let Kind::Figure(look) = &member.kind else {
 				return None;
 			};
-			let puppet = look.puppet.as_ref()?;
 
-			if member.parametric_fields.is_empty() {
+			if member.unused_fields.is_empty() {
 				return None;
 			}
 
-			let drawn = if puppet.template {
-				format!("drawn from {}", puppet.style.template_origin(look.build))
-			} else {
-				"drawn from an authored puppet".to_owned()
-			};
 			let fields: Vec<String> = member
-				.parametric_fields
+				.unused_fields
 				.iter()
 				.map(|field| format!("`{field}`"))
 				.collect();
+			let fields = join_names(&fields);
+			let parametric = crate::cast::PARAMETRIC;
 
-			Some(format!(
-				"{} is {drawn}, so {} do nothing; remove them, or set `puppet = \"{}\"` to draw \
-				 the older parametric puppet.",
-				member.id,
-				join_names(&fields),
-				crate::cast::PARAMETRIC
-			))
+			Some(match &look.puppet {
+				None => {
+					format!(
+						"{} is drawn by the parametric puppet, so {fields} do nothing; remove \
+						 them, or remove `puppet = \"{parametric}\"` to draw them from parts.",
+						member.id
+					)
+				}
+				Some(puppet) => {
+					let drawn = if puppet.template {
+						format!("drawn from {}", puppet.style.template_origin(look.build))
+					} else {
+						"drawn from an authored puppet".to_owned()
+					};
+
+					format!(
+						"{} is {drawn}, so {fields} do nothing; remove them, or set `puppet = \
+						 \"{parametric}\"` to draw the older parametric puppet.",
+						member.id
+					)
+				}
+			})
 		})
 		.collect()
 }

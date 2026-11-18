@@ -91,6 +91,14 @@ satchel = "#a85a3c"
 apron = "#f8f1e4"
 mud = "#6e4a30"
 
+# What the templates and kit draw of their own, by the names a cast picks them with. The
+# templates and kit draw their other hair, brows and noses beside them as variants.
+[own]
+kid-hair = "flat-top"
+grown-up-hair = "flat-top"
+brows = "bold"
+nose = "button"
+
 # A kid: a big faceted head on a wedge of a neck, an A-line body, and limbs cut as wedges: each
 # thigh and upper arm narrows straight to the joint, and the calf and forearm flare below it and
 # taper to a point at the ankle and wrist.
