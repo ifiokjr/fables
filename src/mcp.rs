@@ -29,6 +29,7 @@ use crate::studio::Frames;
 use crate::studio::Image;
 use crate::studio::Output;
 use crate::studio::PartData;
+use crate::studio::PropPart;
 use crate::studio::SettingPart;
 use crate::studio::SettingWeather;
 use crate::studio::SheetKind;
@@ -275,6 +276,36 @@ pub struct RenderSettingParams {
 	pub setting: String,
 	#[serde(default, flatten)]
 	pub weather: SettingWeather,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PropParams {
+	pub world: String,
+	/// The prop's name, as `holds=` or a stage direction uses it (`holds=kite`).
+	pub prop: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreatePropParams {
+	pub world: String,
+	/// The new prop's name: lowercase words joined by hyphens.
+	pub prop: String,
+	/// A line on what the thing is.
+	pub about: String,
+	/// A prop to start from (to redraw it); leave out for a plain shape.
+	pub from: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetPropPartsParams {
+	pub world: String,
+	pub prop: String,
+	/// Parts to write or replace, each one SVG element.
+	#[serde(default)]
+	pub parts: Vec<PropPart>,
+	/// Part ids to remove.
+	#[serde(default)]
+	pub remove: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -595,6 +626,56 @@ impl StudioServer {
 		)
 	}
 
+	#[tool(description = "List the props a world's books can use, built-in and its own.")]
+	fn prop_list(&self, Parameters(params): Parameters<WorldParams>) -> CallToolResult {
+		json(self.studio.props(&params.world))
+	}
+
+	#[tool(
+		description = "Start a world's own prop: a copy of one it can use (to redraw it), or a \
+		               plain shape. Props are SVG part files with a data-grip; prop_parts shows \
+		               the format."
+	)]
+	fn prop_create(&self, Parameters(params): Parameters<CreatePropParams>) -> CallToolResult {
+		json(self.studio.create_prop(
+			&params.world,
+			&params.prop,
+			&params.about,
+			params.from.as_deref(),
+		))
+	}
+
+	#[tool(
+		description = "Read a prop's parts as SVG elements. The root data-grip is the point in \
+		               the fist, data-hands says one or two, data-angle leans it in a relaxed \
+		               hand, and data-use=\"brush\" is a toothbrush's behaviour. Fills are \
+		               palette names or hex; data-shade, data-line and data-opacity tune each \
+		               part."
+	)]
+	fn prop_parts(&self, Parameters(params): Parameters<PropParams>) -> CallToolResult {
+		json(self.studio.prop_parts(&params.world, &params.prop))
+	}
+
+	#[tool(
+		description = "Write or replace parts of a world's own prop, each one SVG element, or \
+		               remove parts. A file that wouldn't read is not written."
+	)]
+	fn prop_set_parts(&self, Parameters(params): Parameters<SetPropPartsParams>) -> CallToolResult {
+		json(
+			self.studio
+				.set_prop_parts(&params.world, &params.prop, &params.parts, &params.remove),
+		)
+	}
+
+	#[tool(description = "Show a prop as an image, alone and fitted to the sheet, with its grip.")]
+	fn prop_render(&self, Parameters(params): Parameters<PropParams>) -> CallToolResult {
+		images(
+			self.studio
+				.render_prop(&params.world, &params.prop)
+				.map(|image| vec![image]),
+		)
+	}
+
 	#[tool(
 		description = "Write a book's script (the whole story.md) into a world and check it \
 		               against the cast. A script that doesn't parse or rehearse is not kept; the \
@@ -828,6 +909,11 @@ mod tests {
 			"setting_parts",
 			"setting_set_parts",
 			"setting_render",
+			"prop_list",
+			"prop_create",
+			"prop_parts",
+			"prop_set_parts",
+			"prop_render",
 		] {
 			assert!(
 				names.iter().any(|listed| listed == name),

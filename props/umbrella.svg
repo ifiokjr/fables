@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -170 200 190" data-grip="0 0" data-hands="one" data-about="An open umbrella with a hooked handle.">
+  <title>An umbrella</title>
+  <path id="shaft" d="M0 -136 L0 0" fill="none" stroke="#c9865a" stroke-width="6"/>
+  <path id="hook" d="M0 0 C0 12 -18 14 -21 2" fill="none" stroke="#c9865a" stroke-width="6"/>
+  <path id="canopy" d="M-82 -100 C-64 -150 64 -150 82 -100 C62 -88 44 -108 22 -100 C4 -92 -18 -108 -36 -100 C-56 -92 -70 -88 -82 -100 Z" fill="tomato" data-shade="1"/>
+  <path id="finial" d="M0 -146 L0 -134" fill="none" stroke="#c9865a" stroke-width="5"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-80 -120 160 160" data-grip="0 8" data-hands="one" data-about="A brown paper parcel tied with string.">
+  <title>A parcel</title>
+  <path id="side" d="M40 -50 C46 -54 52 -58 58 -62 C59 -42 59 -22 58 -2 C52 2 46 6 40 10 C41 -10 41 -30 40 -50 Z" fill="#b18863"/>
+  <path id="top" d="M-40 -50 C-32 -55 -24 -60 -16 -64 C10 -65 34 -64 58 -62 C52 -58 46 -54 40 -50 C14 -51 -14 -51 -40 -50 Z" fill="#cfa67d"/>
+  <path id="box" d="M-40 -50 C-14 -51 14 -51 40 -50 C41 -30 41 -10 40 10 C14 11 -14 11 -40 10 C-41 -10 -41 -30 -40 -50 Z" fill="#c99a6b"/>
+  <path id="string-1" d="M0 -51 C0 -30 0 -10 0 10" fill="none" stroke="#c84a3d" stroke-width="6"/>
+  <path id="string-2" d="M-40 -20 C-14 -21 14 -21 40 -20" fill="none" stroke="#c84a3d" stroke-width="6"/>
+  <path id="string-3" d="M0 -51 C10 -55 22 -59 34 -63" fill="none" stroke="#c84a3d" stroke-width="6"/>
+</svg>

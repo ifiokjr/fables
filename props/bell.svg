@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -140 120 160" data-grip="0 -110" data-hands="one" data-about="A hand bell with a looped handle and a clapper.">
+  <title>A bell</title>
+  <path id="loop" d="M8 -116 C8 -111.6 4.4 -108 0 -108 C-4.4 -108 -8 -111.6 -8 -116 C-8 -120.4 -4.4 -124 0 -124 C4.4 -124 8 -120.4 8 -116 Z" fill="#c9865a"/>
+  <path id="handle" d="M0 -108 L0 -96" fill="none" stroke="#c9865a" stroke-width="6"/>
+  <path id="dome" d="M-40 -20 C-40 -70 -18 -96 0 -96 C18 -96 40 -70 40 -20 Z" fill="mustard" data-shade="1"/>
+  <path id="lip" d="M-44 -20 L44 -20 L40 -6 L-40 -6 Z" fill="#c9865a"/>
+  <path id="clapper" d="M8 -2 C8 2.4 4.4 6 0 6 C-4.4 6 -8 2.4 -8 -2 C-8 -6.4 -4.4 -10 0 -10 C4.4 -10 8 -6.4 8 -2 Z" fill="#8a5a44"/>
+</svg>

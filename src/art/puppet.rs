@@ -42,12 +42,10 @@ use super::figure::HandShape;
 use super::figure::Look;
 use super::figure::Mood;
 use super::figure::Pattern;
-use super::figure::Prop;
 use super::figure::Teeth;
 use super::figure::Viseme;
 use super::fx;
 use super::lerp;
-use super::noise;
 use super::pack::Eyes;
 use super::pack::Face as FaceRules;
 use super::pack::Features;
@@ -57,6 +55,8 @@ use super::pack::StylePack;
 use super::palette;
 use super::parts::Level;
 use super::parts::Parts;
+use super::props;
+use super::props::Prop;
 use super::pt;
 use super::rig;
 use super::rig::Gait;
@@ -633,7 +633,7 @@ struct Posed {
 	/// slow drift at rest.
 	follow: f32,
 	/// A prop, and whether the far hand (rather than the near one) holds it.
-	prop: Option<(Prop, bool)>,
+	prop: Option<(Arc<Prop>, bool)>,
 	teeth: Teeth,
 	/// Turned three-quarters, the far arm is drawn behind the body and head: hanging down, or
 	/// raised (a cheer) so the hand shows beside the head instead of across the face.
@@ -744,7 +744,10 @@ impl Posed {
 			},
 			// The prop is in the page-right hand: the far one unless the figure is mirrored, and
 			// it moves with the hands if they swap.
-			prop: state.prop.map(|prop| (prop, mirrored == swapped)),
+			prop: state
+				.prop
+				.as_ref()
+				.map(|prop| (Arc::clone(prop), mirrored == swapped)),
 			teeth: state.teeth,
 			far_arm_behind,
 		}
@@ -1038,7 +1041,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 
 	// A far hand holding something keeps it in front, where it can be seen.
-	let far_holds = posed.prop.is_some_and(|(_, in_far)| in_far);
+	let far_holds = posed.prop.as_ref().is_some_and(|(_, in_far)| *in_far);
 	let far_arm_behind = posed.far_arm_behind && !far_holds;
 
 	// What each hand holds, and where the mouth is (a toothbrush near it is brushing).
@@ -1046,13 +1049,14 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	let held = |side: f32| {
 		posed
 			.prop
-			.filter(|&(_, in_far)| in_far == (side > 0.0))
+			.as_ref()
+			.filter(|(_, in_far)| *in_far == (side > 0.0))
 			.map(|(prop, _)| {
 				Held {
-					prop,
+					prop: Arc::clone(prop),
 					mouth,
 					time: state.time,
-					scale: body.hand_scale / puppet.style.body(Build::Kid).hand_scale,
+					scale: props::held_scale(&puppet.style, look.build),
 				}
 			})
 	};
@@ -1110,6 +1114,37 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	svg.brush = saved;
 
 	head
+}
+
+/// Draws only what a puppet holds, exactly where its hand draws it, for measuring.
+pub fn draw_held(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) {
+	let frame = look.frame();
+	let body = puppet.style.body(look.build);
+	let posed = Posed::of(state, &puppet.style, look.build);
+	let solved = Solved::new(&posed, body, hang(puppet, body, posed.t));
+	let inker = puppet.inker();
+	let inks = Inks::of(look, &puppet.style, state.teeth);
+	let saved = svg.use_brush(Brush::new(inker.line, &inker.shade, inks.line));
+
+	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
+
+	if let Some((prop, in_far)) = &posed.prop {
+		let side = if *in_far { 1.0 } else { -1.0 };
+		let (_, elbow, wrist) = solved.arm(&posed, side);
+		let along = (wrist - elbow).norm();
+		let scale = props::held_scale(&puppet.style, look.build);
+		let fist = wrist + along * grip(&puppet.required("hand-fist", 0.0)) * scale;
+		let held = Held {
+			prop: Arc::clone(prop),
+			mouth: mouth_on_body(&solved, &posed, inks.face, inks.features.mouth),
+			time: state.time,
+			scale,
+		};
+		draw_prop(svg, puppet, inks.line, &held, fist, along, side);
+	}
+
+	svg.end();
+	svg.brush = saved;
 }
 
 /// A soft contact shadow under the feet, so the figure stands on the ground.
@@ -1619,9 +1654,9 @@ fn draw_torso(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, solved
 }
 
 /// Something held, and what the hand needs to know to hold it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Held {
-	prop: Prop,
+	prop: Arc<Prop>,
 	/// Where the mouth is: a toothbrush near it is brushing.
 	mouth: Pt,
 	time: f32,
@@ -1808,7 +1843,7 @@ impl Arm<'_> {
 
 		if let Some(held) = held {
 			let fist = wrist + along * grip(&puppet.required("hand-fist", 0.0)) * held.scale;
-			draw_prop(svg, puppet, ink, held, fist, along, side);
+			draw_prop(svg, puppet, ink, &held, fist, along, side);
 		}
 
 		// The thumb faces the body from the front and forwards when turned.
@@ -1836,125 +1871,34 @@ impl Arm<'_> {
 	}
 }
 
-/// A prop from the kit, held in the fist at `fist`. Jars and parcels stay upright; a
-/// toothbrush sticks out of the fist, or points its bristles into the mouth while brushing.
+/// A held prop, drawn at the fist from its own part file (see [`props`]).
 fn draw_prop(
 	svg: &mut Svg,
 	puppet: &Authored,
 	ink: Color,
-	held: Held,
+	held: &Held,
 	fist: Pt,
 	along: Pt,
 	side: f32,
 ) {
-	let (finish, kit) = (puppet.style.finish, puppet.style.inks);
-	let fixed = |name: &str| puppet.part(name, 0.0);
-	let light = pt(-5.0, -5.0);
-
-	match held.prop {
-		Prop::Jam => {
-			svg.begin(&format!(
-				"translate({:.2} {:.2}) scale({:.3})",
-				fist.x, fist.y, held.scale
-			));
-			let jar = puppet.required("prop-jam", 0.0);
-			svg.brushed_shaded(&jar, kit.jam, light, finish.cel_shadow, ink, finish.line);
-
-			if let Some(label) = fixed("prop-jam-label") {
-				svg.brushed(&label.path(), kit.cream, ink, finish.detail);
-			}
-
-			if let Some(shine) = fixed("prop-jam-shine") {
-				svg.stroke_alpha(&shine.path(), palette::WHITE, 4.0, 0.7);
-			}
-
-			if let Some(lid) = fixed("prop-jam-lid") {
-				svg.brushed_shaded(&lid, kit.cream, light, finish.cel_shadow, ink, finish.line);
-			}
-
-			svg.end();
-		}
-		Prop::Parcel => {
-			svg.begin(&format!(
-				"translate({:.2} {:.2}) scale({:.3})",
-				fist.x,
-				fist.y - 8.0 * held.scale,
-				held.scale
-			));
-
-			for (name, color) in [
-				("prop-parcel-side", kit.kraft.darken(0.15)),
-				("prop-parcel-top", kit.kraft.lighten(0.12)),
-				("prop-parcel", kit.kraft),
-			] {
-				if let Some(face) = fixed(name) {
-					svg.brushed(&face.path(), color, ink, finish.line);
-				}
-			}
-
-			for string in puppet.copies("prop-parcel-string", 0.0) {
-				svg.brush_line(&string.path(), kit.string, 6.0);
-			}
-
-			svg.end();
-		}
-		Prop::Toothbrush => {
-			// Near the mouth, it is brushing; how near, and how far it scrubs, grow with the
-			// hand the kit draws.
-			let size = fist_size(&puppet.required("hand-fist", 0.0));
-			let brushing = (fist - held.mouth).len() < 70.0 * size;
-			let (dir, scrub) = if brushing {
-				let towards = if held.mouth.x < fist.x { -1.0 } else { 1.0 };
-				(pt(towards, 0.0), (held.time * 22.0).sin() * 8.0 * size)
-			} else {
-				// Sticking out of the fist, sideways from the forearm, away from the body.
-				(along.perp() * -side, 0.0)
-			};
-			let angle = dir.y.atan2(dir.x).to_degrees();
-			let flip = if dir.x < 0.0 { -1.0 } else { 1.0 };
-			svg.begin(&format!(
-				"translate({:.2} {:.2}) rotate({angle:.2}) scale({:.3} {:.3})",
-				fist.x + scrub,
-				fist.y,
-				held.scale,
-				flip * held.scale
-			));
-			let handle = puppet.required("prop-toothbrush", 0.0);
-			svg.brushed_shaded(
-				&handle,
-				kit.brush,
-				light,
-				finish.cel_shadow,
+	let finish = puppet.style.finish;
+	let fist_size = fist_size(&puppet.required("hand-fist", 0.0));
+	held.prop.draw_held(
+		svg,
+		&props::Held {
+			at: fist,
+			scale: held.scale,
+			along,
+			side,
+			mouth: held.mouth,
+			time: held.time,
+			fist_size,
+			ink: props::Ink::Brushed {
+				finish: &finish,
 				ink,
-				finish.line,
-			);
-
-			if let Some(bristles) = fixed("prop-toothbrush-bristles") {
-				svg.brushed(&bristles.path(), kit.bristles, ink, finish.detail);
-			}
-
-			for line in puppet.copies("prop-toothbrush-bristle-line", 0.0) {
-				svg.brush_line(&line.path(), kit.bristles.darken(0.15), 1.6);
-			}
-
-			if let Some(paste) = fixed("prop-toothpaste") {
-				svg.brushed(&paste.path(), kit.paste, ink, finish.detail);
-			}
-
-			svg.end();
-
-			// Foam round the mouth while brushing.
-			if brushing {
-				for i in 0..5 {
-					let at = held.mouth
-						+ pt(noise(77, i) * 34.0, 6.0 + noise(78, i) * 16.0)
-						+ pt(0.0, (held.time * 6.0 + i as f32).sin() * 2.0);
-					let r = 5.0 + noise(79, i).abs() * 5.0;
-					svg.brushed(&Path::circle(at, r), kit.bristles, ink, 1.6);
-				}
-			}
-		}
-	}
+			},
+		},
+	);
 }
 
 fn draw_hand(svg: &mut Svg, puppet: &Authored, hand: Hand, skin: Color, ink: Color, light: Pt) {
@@ -2960,10 +2904,14 @@ mod tests {
 		let mut state = FigureState::new(&frame);
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Hold, STAGED_FACING);
-		state.prop = Some(Prop::Jam);
+		state.prop = Some(props::Library::built_in().find("jam").unwrap());
 		let posed = Posed::of(&state, &cartoon(), Build::Kid);
 		// The jam is in the page-right hand, which is the far hand when facing right.
-		assert_eq!(posed.prop, Some((Prop::Jam, true)));
+		assert_eq!(
+			posed.prop.as_ref().map(|(prop, _)| prop.name.as_str()),
+			Some("jam")
+		);
+		assert!(posed.prop.as_ref().is_some_and(|(_, in_far)| *in_far));
 		assert!(drawn(&look, &state).contains(&format!("fill=\"{}\"", cartoon().inks.jam)));
 	}
 
@@ -2973,9 +2921,13 @@ mod tests {
 		let mut state = FigureState::new(&frame);
 		state.facing = STAGED_FACING;
 		state.hands = frame.hands(Pose::Brush, STAGED_FACING);
-		state.prop = Some(Prop::Toothbrush);
+		state.prop = Some(props::Library::built_in().find("toothbrush").unwrap());
 		let posed = Posed::of(&state, &cartoon(), Build::Kid);
-		assert_eq!(posed.prop, Some((Prop::Toothbrush, true)), "no wave swap");
+		assert_eq!(
+			posed.prop.as_ref().map(|(prop, _)| prop.name.as_str()),
+			Some("toothbrush"),
+			"no wave swap"
+		);
 		let solved = Solved::new(&posed, &kid(), 0.0);
 		let (_, _, wrist) = solved.arm(&posed, 1.0);
 		assert!(

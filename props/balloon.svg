@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-80 -240 160 260" data-grip="0 0" data-hands="one" data-about="A balloon on a string.">
+  <title>A balloon</title>
+  <path id="string" d="M0 0 C7 -22 -5 -40 2 -58 C7 -70 1 -82 2 -92" fill="none" stroke="#c9865a" stroke-width="3"/>
+  <path id="balloon" d="M48 -150 C48 -120.2 27.4 -96 2 -96 C-23.4 -96 -44 -120.2 -44 -150 C-44 -179.8 -23.4 -204 2 -204 C27.4 -204 48 -179.8 48 -150 Z" fill="bubblegum" data-shade="1"/>
+  <path id="knot" d="M-8 -98 L10 -98 L1 -86 Z" fill="bubblegum"/>
+  <path id="shine" d="M-16 -182 C-27 -170 -30 -156 -26 -144" fill="none" stroke="#ffffff" stroke-width="5" data-opacity="0.65"/>
+</svg>

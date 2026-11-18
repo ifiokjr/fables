@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -100 120 120" data-grip="0 -78" data-hands="one" data-about="A woven basket with an arched handle.">
+  <title>A basket</title>
+  <path id="handle" d="M-26 -48 C-20 -82 20 -82 26 -48" fill="none" stroke="#c9865a" stroke-width="6"/>
+  <path id="body" d="M-38 -44 L38 -44 L28 0 L-28 0 Z" fill="#c9865a" data-shade="1"/>
+  <path id="rim" d="M-40 -50 L40 -50 L37 -40 L-37 -40 Z" fill="#8a5a44"/>
+  <path id="weave-1" d="M-32 -28 L32 -28" fill="none" stroke="#8a5a44" stroke-width="3"/>
+  <path id="weave-2" d="M-30 -14 L30 -14" fill="none" stroke="#8a5a44" stroke-width="3"/>
+</svg>

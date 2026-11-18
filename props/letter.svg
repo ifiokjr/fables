@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -80 120 100" data-grip="0 0" data-hands="one" data-about="A sealed letter with a stamp.">
+  <title>A letter</title>
+  <path id="envelope" d="M-44 -56 L44 -56 L44 0 L-44 0 Z" fill="cream" data-shade="1"/>
+  <path id="flap" d="M-42 -54 L0 -26 L42 -54" fill="none" stroke="#c9865a" stroke-width="4"/>
+  <path id="stamp" d="M24 -50 L38 -50 L38 -38 L24 -38 Z" fill="tomato" data-line="none"/>
+</svg>

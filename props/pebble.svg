@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -80 100 100" data-grip="0 0" data-hands="one" data-about="A smooth grey pebble with a highlight.">
+  <title>A pebble</title>
+  <path id="pebble" d="M-34 -20 C-38 -44 -18 -58 2 -56 C24 -54 38 -40 34 -20 C30 -2 12 6 -4 4 C-20 2 -30 4 -34 -20 Z" fill="slate" data-shade="1"/>
+  <path id="highlight" d="M-14 -44 C-20 -42 -24 -36 -23 -30" fill="none" stroke="#d8e2f0" stroke-width="4" data-opacity="0.6"/>
+</svg>

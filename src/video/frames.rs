@@ -25,6 +25,7 @@ use crate::compose;
 use crate::compose::Puppet;
 use crate::raster;
 use crate::stage::Scene;
+use crate::stage::See;
 use crate::stage::ShotSize;
 use crate::stage::Travel;
 use crate::story::Acting;
@@ -336,8 +337,9 @@ impl<'a> Renderer<'a> {
 			let mut blended = match before.iter().find(|old| old.id == puppet.id) {
 				Some(old) if !fresh => {
 					let knocked_down = matches!((old_actor, new_actor), (Some(a), Some(b)) if b.knocked > a.knocked + 0.5);
+					let notice = new_actor.is_some_and(|actor| actor.eyes.notice);
 					// Falls bounce; every other change is acted by the rules in `acting`.
-					acting::tween(old, puppet, since, progress, knocked_down, &cx)
+					acting::tween(old, puppet, since, progress, knocked_down, notice, &cx)
 				}
 				_ if fresh => puppet.clone(),
 				_ => {
@@ -383,11 +385,31 @@ impl<'a> Renderer<'a> {
 		let speaking = speaker_at(shot, time)
 			.and_then(|id| puppets.iter().find(|p| p.id == id))
 			.map(|puppet| {
+				let looking = current
+					.scene
+					.actors
+					.iter()
+					.find(|actor| actor.id == puppet.id)
+					.and_then(|actor| actor.eyes.see.as_ref())
+					.and_then(|see| {
+						match see {
+							See::Actor(id) => {
+								puppets
+									.iter()
+									.find(|other| other.id == *id)
+									.map(Puppet::focus)
+							}
+							See::Mine => puppet.hand_near(puppet.focus()),
+							_ => None,
+						}
+					});
+
 				acting::Speaker {
 					id: puppet.id.clone(),
 					x: puppet.at.x,
 					heading: puppet.heading,
 					pointing: acting::pointing_at(puppet),
+					looking,
 				}
 			});
 

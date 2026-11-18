@@ -226,6 +226,11 @@ impl World {
 		Library::for_world(&self.dir)
 	}
 
+	/// The props the world's books can use: the built-in ones, and its own `props/`.
+	pub fn props(&self) -> Result<Arc<crate::art::props::Library>> {
+		crate::art::props::Library::for_world(&self.dir, &self.style()?)
+	}
+
 	/// The world's cast, drawn in its style.
 	pub fn cast(&self) -> Result<Cast> {
 		Cast::load(&self.cast_file(), &self.style()?)
@@ -333,6 +338,7 @@ impl World {
 		let style = self.style()?;
 		story.matter.clone_from(&self.matter);
 		story.settings = self.settings()?;
+		story.props = self.props()?;
 		story.drawing = Drawing {
 			fill: style.shade.fill,
 			tone: style.shade.tone,

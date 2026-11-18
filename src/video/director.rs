@@ -494,6 +494,11 @@ pub(crate) fn rough_extent(puppet: &Puppet) -> Bounds {
 		Kind::Tree(_) => (x - 400.0 * s, y - 1050.0 * s, x + 400.0 * s, y),
 		Kind::Flower(..) => (x - 110.0 * s, y - 520.0 * s, x + 110.0 * s, y),
 		Kind::Worm => (x - 40.0 * s, y - 120.0 * s, x + 40.0 * s, y),
+		Kind::Prop(prop) => {
+			let (lo, hi) = prop.bounds();
+			let (half, height) = ((hi.x - lo.x) * s / 2.0, (hi.y - lo.y) * s);
+			(x - half, y - height - 20.0, x + half, y + 20.0)
+		}
 	}
 }
 
@@ -1397,7 +1402,7 @@ mod tests {
 			Cast::parse("[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n")
 				.unwrap();
 		let page = &story.pages[0];
-		let mut scene = Scene::for_page(page, &story.settings).unwrap();
+		let mut scene = Scene::for_page(page, &story.settings, &story.props).unwrap();
 		let mut memory = std::collections::HashMap::new();
 
 		for beat in &page.beats {
@@ -1740,7 +1745,7 @@ mod tests {
 		let story = story::parse(source).unwrap();
 		let cast = Cast::parse("[kid]\nname = \"Kid\"\n").unwrap();
 		let page = &story.pages[0];
-		let mut scene = Scene::for_page(page, &story.settings).unwrap();
+		let mut scene = Scene::for_page(page, &story.settings, &story.props).unwrap();
 		let mut memory = std::collections::HashMap::new();
 
 		for beat in &page.beats {

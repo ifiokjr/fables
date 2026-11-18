@@ -5,10 +5,12 @@
 //! keyframes the video interpolates between.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 
 use crate::art::Color;
 use crate::art::figure::Build;
@@ -16,10 +18,11 @@ use crate::art::figure::Frame;
 use crate::art::figure::Look;
 use crate::art::figure::Mood;
 use crate::art::figure::Pose;
-use crate::art::figure::Prop;
 use crate::art::figure::Teeth;
 use crate::art::light::Light;
 use crate::art::pack::StylePack;
+use crate::art::props;
+use crate::art::props::Prop;
 use crate::art::rig::Gait;
 use crate::art::rig::Stance;
 use crate::art::settings::Library;
@@ -42,6 +45,56 @@ pub enum Side {
 	Right,
 }
 
+/// Where an actor looks, from `see=`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum See {
+	/// Another actor, or a prop standing on the stage, by id.
+	Actor(String),
+	/// The thing in their own hand.
+	Mine,
+	Up,
+	Down,
+	Left,
+	Right,
+	/// Out of the page at the reader.
+	Front,
+	/// Off stage, away from the middle of the page.
+	Away,
+}
+
+impl See {
+	/// The target named by a direction, or `None` for a word that is not a `see=` target.
+	pub fn parse(value: &str, cast: &Cast, props: &props::Library) -> Option<See> {
+		let word = match value {
+			"mine" => Some(See::Mine),
+			"up" => Some(See::Up),
+			"down" => Some(See::Down),
+			"left" => Some(See::Left),
+			"right" => Some(See::Right),
+			"front" => Some(See::Front),
+			"away" => Some(See::Away),
+			_ => None,
+		};
+
+		if word.is_some() {
+			return word;
+		}
+
+		(cast.resolve(value).is_ok() || props.get(value).is_some())
+			.then(|| See::Actor(value.to_owned()))
+	}
+}
+
+/// Where an actor's eyes are held by `see=`, and whether the direction that set it plays a
+/// notice beat before the rest of the reaction lands.
+#[derive(Clone, Debug, Default)]
+pub struct Eyes {
+	/// The target of the last `see=`, held until it is changed.
+	pub see: Option<See>,
+	/// This direction is a notice: the eyes flick first, hold, then react.
+	pub notice: bool,
+}
+
 /// One actor's complete state.
 #[derive(Clone, Debug)]
 pub struct Actor {
@@ -59,7 +112,11 @@ pub struct Actor {
 	pub pose: Pose,
 	pub mouth: Option<f32>,
 	pub teeth: Teeth,
-	pub prop: Option<Prop>,
+	pub prop: Option<Arc<Prop>>,
+	/// Where the eyes are held, and whether this direction notices first.
+	pub eyes: Eyes,
+	/// A prop standing on stage is tied by a string to this actor's hand.
+	pub tether: Option<String>,
 	pub knocked: f32,
 	pub stink: f32,
 	pub mint: f32,
@@ -108,6 +165,9 @@ impl Actor {
 			Kind::Worm => 1.4,
 			Kind::Toothbrush(_) => 1.5,
 			Kind::Flower(..) | Kind::Tree(_) => 1.0,
+			// A stage prop starts at its own drawing size: its file is drawn for a hand, and a
+			// lantern or a kite on stage reads true at 1.
+			Kind::Prop(_) => 1.0,
 		};
 
 		Actor {
@@ -123,6 +183,8 @@ impl Actor {
 			mouth: None,
 			teeth: Teeth::Clean,
 			prop: None,
+			eyes: Eyes::default(),
+			tether: None,
 			knocked: 0.0,
 			stink: 0.0,
 			mint: 0.0,
@@ -146,16 +208,19 @@ impl Actor {
 			teeth: self.teeth,
 			stink: self.stink,
 			mint: self.mint,
+			see: self.eyes.see.clone(),
 		}
 	}
 }
 
 /// Character traits that persist across pages until changed (grotty teeth stay grotty).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Traits {
 	pub teeth: Teeth,
 	pub stink: f32,
 	pub mint: f32,
+	/// A `see=` target holds until it is changed, so the look carries to the next page.
+	pub see: Option<See>,
 }
 
 /// The size of a shot: how much of its subject the camera frames.
@@ -310,6 +375,8 @@ impl Camera {
 #[derive(Clone, Debug)]
 pub struct Scene {
 	pub setting: Setting,
+	/// The props its actors can hold or stand on stage.
+	pub props: Arc<props::Library>,
 	pub weather: Weather,
 	pub actors: Vec<Actor>,
 	pub camera: Camera,
@@ -317,14 +384,15 @@ pub struct Scene {
 }
 
 impl Scene {
-	/// An empty scene for a page, with its setting found in `settings` and the page heading's
-	/// options applied.
-	pub fn for_page(page: &Page, settings: &Library) -> Result<Scene> {
+	/// An empty scene for a page, with its setting found in `settings`, its props found in
+	/// `props`, and the page heading's options applied.
+	pub fn for_page(page: &Page, settings: &Library, props: &Arc<props::Library>) -> Result<Scene> {
 		let setting = settings
 			.find(&page.setting)
 			.map_err(|error| anyhow::anyhow!("line {}: {error}", page.line))?;
 		let mut scene = Scene {
 			setting,
+			props: Arc::clone(props),
 			weather: Weather::default(),
 			actors: Vec::new(),
 			camera: Camera::default(),
@@ -369,15 +437,22 @@ impl Scene {
 		{
 			index
 		} else {
-			let kind = cast
-				.resolve(&directive.actor)
-				.map_err(|error| anyhow::anyhow!("line {line}: {error}"))?;
+			let kind = match cast.resolve(&directive.actor) {
+				Ok(kind) => kind,
+				Err(error) => {
+					match self.props.get(&directive.actor) {
+						Some(prop) => Kind::Prop(prop),
+						None => return Err(anyhow::anyhow!("line {line}: {error}")),
+					}
+				}
+			};
 			let mut actor = Actor::new(&directive.actor, kind);
 
 			if let Some(traits) = memory.get(&directive.actor) {
 				actor.teeth = traits.teeth;
 				actor.stink = traits.stink;
 				actor.mint = traits.mint;
+				actor.eyes.see.clone_from(&traits.see);
 			}
 
 			self.actors.push(actor);
@@ -387,7 +462,7 @@ impl Scene {
 		let actor = &mut self.actors[index];
 
 		for token in &directive.tokens {
-			apply_actor_token(actor, token, line)?;
+			apply_actor_token(actor, token, line, cast, &self.props)?;
 		}
 
 		memory.insert(actor.id.clone(), actor.traits());
@@ -569,7 +644,13 @@ fn side(value: &str, line: usize) -> Result<Side> {
 	}
 }
 
-fn apply_actor_token(actor: &mut Actor, token: &Token, line: usize) -> Result<()> {
+fn apply_actor_token(
+	actor: &mut Actor,
+	token: &Token,
+	line: usize,
+	cast: &Cast,
+	props: &props::Library,
+) -> Result<()> {
 	let Some(value) = token.value.as_deref() else {
 		return apply_actor_word(actor, &token.key, line);
 	};
@@ -636,16 +717,35 @@ fn apply_actor_token(actor: &mut Actor, token: &Token, line: usize) -> Result<()
 		}
 		"holds" => {
 			actor.prop = match value {
-				"toothbrush" => Some(Prop::Toothbrush),
-				"parcel" => Some(Prop::Parcel),
-				"jam" => Some(Prop::Jam),
 				"nothing" | "none" => None,
 				other => {
-					bail!(
-						"line {line}: holds `{other}` should be toothbrush, parcel, jam or nothing"
+					Some(
+						props
+							.find(other)
+							.map_err(|error| anyhow::anyhow!("line {line}: {error}"))?,
 					)
 				}
 			};
+		}
+		"see" => {
+			actor.eyes.see = Some(See::parse(value, cast, props).ok_or_else(|| {
+				anyhow::anyhow!(
+					"line {line}: see `{value}` is not an actor, a prop, or up, down, left, \
+					 right, front, away or mine"
+				)
+			})?);
+		}
+		"tether" => {
+			ensure!(
+				matches!(actor.kind, Kind::Prop(_)),
+				"line {line}: tether is for a prop standing on stage, not `{}`",
+				actor.id
+			);
+			ensure!(
+				cast.resolve(value).is_ok() || props.get(value).is_some(),
+				"line {line}: tether `{value}` is not an actor or a prop"
+			);
+			actor.tether = Some(value.to_owned());
 		}
 		"mouth" => actor.mouth = Some(number(token, value, line)?.clamp(0.0, 1.0)),
 		"stink" => actor.stink = number(token, value, line)?.max(0.0),
@@ -722,6 +822,7 @@ fn apply_actor_word(actor: &mut Actor, word: &str, line: usize) -> Result<()> {
 		"show" => actor.hidden = false,
 		"hop" => actor.hops += 1,
 		"flip" => actor.facing = Some(-actor.facing.unwrap_or(1.0)),
+		"notice" => actor.eyes.notice = true,
 		"walk" => actor.gait = Some(Gait::Walk),
 		"run" => actor.gait = Some(Gait::Run),
 		"still" => actor.gait = None,
@@ -731,7 +832,8 @@ fn apply_actor_word(actor: &mut Actor, word: &str, line: usize) -> Result<()> {
 			bail!(
 				"line {line}: `{word}` is not a mood, pose, stance or action.\n  moods: {}\n  \
 				 poses: {}\n  stances: stand, crouch, sit, kneel, jump, bow, tiptoe\n  actions: \
-				 talk, faint, wake, fly, land, wag, calm, hide, show, hop, flip, walk, run, still",
+				 talk, faint, wake, fly, land, wag, calm, hide, show, hop, flip, notice, walk, \
+				 run, still",
 				moods.join(", "),
 				poses.join(", ")
 			);
@@ -765,7 +867,7 @@ pub fn rehearse(story: &Story, cast: &Cast) -> Result<Vec<Rehearsal>> {
 	let mut out = Vec::with_capacity(story.pages.len());
 
 	for (index, page) in story.pages.iter().enumerate() {
-		let mut scene = Scene::for_page(page, &story.settings)?;
+		let mut scene = Scene::for_page(page, &story.settings, &story.props)?;
 
 		// A page takes the book's (or world's) default light unless its heading names one.
 		if page.option("light").is_none() {
@@ -888,7 +990,7 @@ mod tests {
 			"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n{script}"
 		))?;
 		let page = &story.pages[0];
-		let mut scene = Scene::for_page(page, &story.settings)?;
+		let mut scene = Scene::for_page(page, &story.settings, &story.props)?;
 		let mut memory = HashMap::new();
 
 		for beat in &page.beats {
@@ -1052,7 +1154,7 @@ mod tests {
 		assert_eq!(story.pages[0].transition(), Some(Transition::Iris));
 		assert_eq!(story.pages[1].transition(), Some(Transition::Cut));
 
-		let scene = Scene::for_page(&story.pages[0], &story.settings).unwrap();
+		let scene = Scene::for_page(&story.pages[0], &story.settings, &story.props).unwrap();
 		assert_eq!(scene.camera.shot, Some(ShotSize::Medium));
 		assert_eq!(scene.camera.on, vec!["stinky".to_owned()]);
 	}
@@ -1085,7 +1187,7 @@ mod tests {
 		let mut last = None;
 
 		for page in &story.pages {
-			let mut scene = Scene::for_page(page, &story.settings).unwrap();
+			let mut scene = Scene::for_page(page, &story.settings, &story.props).unwrap();
 
 			for beat in &page.beats {
 				if let Beat::Direct(directive) = beat {

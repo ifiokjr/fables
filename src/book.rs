@@ -187,7 +187,7 @@ pub fn star_scene(
 		beats: Vec::new(),
 		line: 0,
 	};
-	let mut scene = Scene::for_page(&page, &story.settings)?;
+	let mut scene = Scene::for_page(&page, &story.settings, &story.props)?;
 
 	if let Some(star) = &story.meta.star {
 		let directive = Directive {
@@ -301,6 +301,7 @@ pub fn back_cover(story: &Story, cast: &Cast) -> Result<BookPage> {
 					teeth: actor.teeth,
 					stink: actor.stink,
 					mint: actor.mint,
+					see: actor.eyes.see.clone(),
 				},
 			);
 		}
@@ -402,8 +403,12 @@ fn plain_scene(tint: crate::art::Color) -> Scene {
 		beats: Vec::new(),
 		line: 0,
 	};
-	let mut scene = Scene::for_page(&page, &Library::built_in())
-		.unwrap_or_else(|error| unreachable!("a bare plain page always builds: {error}"));
+	let mut scene = Scene::for_page(
+		&page,
+		&Library::built_in(),
+		&crate::art::props::Library::built_in(),
+	)
+	.unwrap_or_else(|error| unreachable!("a bare plain page always builds: {error}"));
 	scene.weather.tint = tint;
 	scene
 }

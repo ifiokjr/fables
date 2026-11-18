@@ -12,6 +12,7 @@ use fables::art::pack::StylePack;
 use fables::art::parts;
 use fables::art::parts::Level;
 use fables::art::parts::Parts;
+use fables::art::props;
 use fables::art::settings::built_in_names;
 use fables::art::style::Style;
 use fables::art::style::StyleName;
@@ -122,6 +123,11 @@ enum Command {
 		#[command(subcommand)]
 		action: PuppetAction,
 	},
+	/// Work with props (the world's `props/`): what a character can hold or stand on stage.
+	Prop {
+		#[command(subcommand)]
+		action: PropAction,
+	},
 	/// Serve the studio to an agent over MCP (stdio): worlds, styles and characters, with
 	/// model sheets returned as images.
 	Mcp {
@@ -192,6 +198,23 @@ enum PuppetAction {
 		id: String,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
+	},
+}
+
+#[derive(Subcommand)]
+enum PropAction {
+	/// Every prop the world can use, with where it comes from, its hands and its grip.
+	List,
+	/// Start a world's own prop to redraw, from a built-in or another prop.
+	New {
+		/// The prop's name: lowercase words joined by hyphens.
+		name: String,
+		/// A prop to start from (to redraw it); leave it out for a plain shape.
+		#[arg(long)]
+		from: Option<String>,
+		/// A line on what the thing is.
+		#[arg(long, default_value = "")]
+		about: String,
 	},
 }
 
@@ -295,6 +318,14 @@ fn run(cli: Cli) -> Result<()> {
 					puppet_template(&world()?, &id, from.as_deref())
 				}
 				PuppetAction::Sheet { id, out } => puppet_sheet(&world()?, &id, &out),
+			}
+		}
+		Command::Prop { action } => {
+			match action {
+				PropAction::List => prop_list(&world()?),
+				PropAction::New { name, from, about } => {
+					prop_new(&world()?, &name, from.as_deref(), &about)
+				}
 			}
 		}
 		Command::Mcp { root } => fables::mcp::serve(&root),
@@ -683,6 +714,19 @@ fn sheets(world: &World, moods: Option<&str>, out: &Path, style: Style) -> Resul
 	)?;
 	done(&path, started);
 
+	// Every prop the world can use: each alone and in the first figure's hand.
+	let path = out.join(format!("{slug}-props.png"));
+	std::fs::write(
+		&path,
+		raster::png(&press::sheets::props_sheet(
+			&*world.props()?,
+			&cast,
+			&world.name,
+			style,
+		)?)?,
+	)?;
+	done(&path, started);
+
 	// One setting with one cast member, drawn under every light: the world's colour script.
 	let settings = world.settings()?;
 	let own = settings
@@ -778,6 +822,100 @@ fn rig(world: &World, id: &str, motion: Option<&str>, out: &Path, style: Style) 
 	)?;
 	done(&acting, started);
 
+	Ok(())
+}
+
+/// Every prop the world can use: its name, source, hands, grip and what it is.
+fn prop_list(world: &World) -> Result<()> {
+	let own = world.dir.join("props");
+
+	for prop in world.props()?.props() {
+		let from = if own.join(format!("{}.svg", prop.name)).is_file() {
+			"world"
+		} else {
+			"built-in"
+		};
+		println!(
+			"{:<12} {:<9} {:<10} grip {:.0},{:.0}  {}",
+			prop.name,
+			from,
+			prop.hands.name(),
+			prop.grip.x,
+			prop.grip.y,
+			prop.about
+		);
+	}
+
+	Ok(())
+}
+
+/// Starts a world's own prop file, a copy of one it can use or a plain shape.
+fn prop_new(world: &World, name: &str, from: Option<&str>, about: &str) -> Result<()> {
+	anyhow::ensure!(
+		name.starts_with(|ch: char| ch.is_ascii_lowercase())
+			&& name
+				.chars()
+				.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-'),
+		"`{name}` is not a prop name: use lowercase letters, digits and hyphens"
+	);
+	let target = world.dir.join("props").join(format!("{name}.svg"));
+	anyhow::ensure!(
+		!target.exists(),
+		"{} already exists; edit it, or move it aside to start again",
+		target.display()
+	);
+	let source = match from {
+		Some(base) => {
+			let own = world.dir.join("props").join(format!("{base}.svg"));
+
+			if own.is_file() {
+				std::fs::read_to_string(&own)?
+			} else {
+				props::built_in_source(base)
+					.with_context(|| format!("there is no prop `{base}` to start from"))?
+					.to_owned()
+			}
+		}
+		None => {
+			props::PropFile {
+				grip: fables::art::pt(0.0, 0.0),
+				hands: props::Hands::One,
+				angle: 0.0,
+				about: about.to_owned(),
+				use_kind: props::Use::Plain,
+				foam: fables::art::palette::WHITE,
+				parts: vec![
+					(
+						"body".into(),
+						r#"<path id="body" d="M-30 -60 C-10 -66 10 -66 30 -60 C36 -40 36 -20 30 0 C10 6 -10 6 -30 0 C-36 -20 -36 -40 -30 -60 Z" fill="teal" data-shade="1"/>"#
+							.into(),
+					),
+				],
+			}
+			.write()
+		}
+	};
+	let mut file = props::PropFile::read(&source)?;
+	about.clone_into(&mut file.about);
+	let text = file.write();
+	props::Prop::parse(name, &text, &world.style()?)?;
+	std::fs::create_dir_all(world.dir.join("props"))
+		.with_context(|| format!("could not create {}", world.dir.join("props").display()))?;
+	std::fs::write(&target, text)
+		.with_context(|| format!("could not write {}", target.display()))?;
+	println!(
+		"✓ wrote {} ({} hand{}, grip {:.0},{:.0})\n  redraw its parts with the prop tools over \
+		 MCP; then use it with `holds={name}` or `@{name}`.",
+		target.display(),
+		file.hands.name(),
+		if file.hands == props::Hands::One {
+			""
+		} else {
+			"s"
+		},
+		file.grip.x,
+		file.grip.y
+	);
 	Ok(())
 }
 

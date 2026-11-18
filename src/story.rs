@@ -380,6 +380,8 @@ pub struct Story {
 	pub drawing: Drawing,
 	/// The settings its pages can use: the built-in ones and its world's.
 	pub settings: Arc<Library>,
+	/// The props its actors can hold or stand on stage: the built-in ones and its world's.
+	pub props: Arc<crate::art::props::Library>,
 	/// The light pages start in when their heading says nothing (`light = "dawn"` in front
 	/// matter, or the world's default).
 	pub light: Light,
@@ -468,6 +470,7 @@ pub fn parse(source: &str) -> Result<Story> {
 		matter: crate::world::Matter::default(),
 		drawing: Drawing::default(),
 		settings: Library::built_in(),
+		props: crate::art::props::Library::built_in(),
 		light,
 	})
 }

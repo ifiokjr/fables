@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -120 120 140" data-grip="0 0" data-hands="one" data-about="A lantern with a handle, a glass body and a flame.">
+  <title>A lantern</title>
+  <path id="handle" d="M-18 -76 C-14 -96 14 -96 18 -76" fill="none" stroke="#c9865a" stroke-width="6"/>
+  <path id="body" d="M-30 -70 L30 -70 L36 -12 L-36 -12 Z" fill="mustard" data-shade="1"/>
+  <path id="flame" d="M0 -50 C6 -42 8 -34 0 -30 C-8 -34 -6 -42 0 -50 Z" fill="sunflower" data-line="detail"/>
+  <path id="top" d="M-34 -76 L34 -76 L30 -66 L-30 -66 Z" fill="#c9865a"/>
+  <path id="base" d="M-38 -12 L38 -12 L34 0 L-34 0 Z" fill="#c9865a"/>
+</svg>
