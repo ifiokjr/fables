@@ -35,6 +35,7 @@ use super::Brush;
 use super::Color;
 use super::Path;
 use super::Pt;
+use super::Solid;
 use super::Svg;
 use super::dials::Fill;
 use super::dials::Joints;
@@ -492,6 +493,7 @@ struct Inks {
 	blush: Color,
 	hair: Color,
 	hair_light: Color,
+	brow: Color,
 	top: Color,
 	stripe: Color,
 	bottom: Color,
@@ -530,6 +532,7 @@ impl Inks {
 			blush: blush(look.skin, style.inks.blush),
 			hair: look.hair_color,
 			hair_light: look.hair_color.lighten(0.25),
+			brow: look.hair_color,
 			top: look.top,
 			stripe: look.trim,
 			bottom: look.bottom,
@@ -551,11 +554,30 @@ impl Inks {
 			blush: snap(self.blush),
 			hair: snap(self.hair),
 			hair_light: snap(self.hair_light),
+			brow: snap(self.brow),
 			top: snap(self.top),
 			stripe: snap(self.stripe),
 			bottom: snap(self.bottom),
 			shoes: snap(self.shoes),
 			pupil: snap(self.pupil),
+			..self
+		}
+	}
+
+	/// The inks of a shadow puppet, which is one ink all over (see [`Solid`]): what is cut
+	/// out of it is painted `cut`, the colour of the light behind the screen. The whites of
+	/// the eyes, the open mouth and the teeth are holes, and every line on the face (brows,
+	/// shut eyes, a closed mouth) is a slit.
+	fn cut_out(self, cut: Color) -> Inks {
+		Inks {
+			line: cut,
+			brow: cut,
+			teeth: cut,
+			kit: KitInks {
+				eye: cut,
+				maw: cut,
+				..self.kit
+			},
 			..self
 		}
 	}
@@ -1255,9 +1277,18 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 		inks = inks.snapped(|color| inker.shade.palette.nearest(color));
 	}
 
+	// Shadow theatre: the whole figure is the line's ink, with the face and the pins cut out.
+	let shadow =
+		(inker.shade.fill == Fill::Silhouette).then(|| Solid::figure(inks.line, svg.backlight()));
+
+	if let Some(solid) = shadow {
+		inks = inks.cut_out(solid.cut);
+	}
+
 	let t = solved.t;
 	// The style's line and shade dials, for this figure only.
 	let saved = svg.use_brush(Brush::new(inker.line, &inker.shade, inks.line));
+	let lit = svg.set_solid(shadow.or(svg.solid()));
 
 	svg.begin(&figure_transform(look, &posed, state, frame.head_r));
 
@@ -1321,6 +1352,22 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 		}
 	}
 
+	// A shadow puppet is pinned together, and the light shows at every pin.
+	if let Some(solid) = shadow {
+		let pin = inks.finish.detail * 1.5;
+		let mut pins = vec![solved.torso(body.neck)];
+
+		for side in [-1.0, 1.0] {
+			let (hip, knee, _) = solved.leg(side);
+			let (shoulder, elbow, _) = solved.arm(&posed, side);
+			pins.extend([hip, knee, shoulder, elbow]);
+		}
+
+		for at in pins {
+			svg.fill(&Path::circle(at, pin), solid.cut);
+		}
+	}
+
 	// Dizzy stars are an effect a mood draws over the figure, not part of it.
 	let measuring = svg.pause_measure();
 
@@ -1332,6 +1379,7 @@ pub fn draw(svg: &mut Svg, look: &Look, puppet: &Authored, state: &FigureState) 
 	svg.resume_measure(measuring);
 	svg.end();
 	svg.brush = saved;
+	svg.set_solid(lit);
 
 	head
 }
@@ -2545,7 +2593,7 @@ fn draw_head(svg: &mut Svg, puppet: &Authored, look: &Look, inks: &Inks, posed: 
 			.required("brow", t)
 			.map(|p| pt(p.x * side, p.y).rotate(-side * brow.tilt) + centre)
 			.map(warp);
-		svg.brushed(&shape.path(), inks.hair, ink, inks.features.brow_weight);
+		svg.brushed(&shape.path(), inks.brow, ink, inks.features.brow_weight);
 	}
 }
 
@@ -3866,5 +3914,74 @@ mod tests {
 				"{mood:?}"
 			);
 		}
+	}
+
+	/// Every `fill="…"` and `stroke="…"` colour a drawing uses.
+	fn colours(svg: &str) -> std::collections::BTreeSet<String> {
+		svg.split("fill=\"")
+			.chain(svg.split("stroke=\""))
+			.skip(1)
+			.filter_map(|rest| rest.split('"').next())
+			.filter(|colour| colour.starts_with('#'))
+			.map(str::to_owned)
+			.collect()
+	}
+
+	#[test]
+	fn a_shadow_puppet_is_one_ink_with_the_light_cut_out() {
+		let style = StylePack::named("silhouette").unwrap();
+		let look = crate::cast::template_look(&style, Build::Kid).unwrap();
+		let mut state = FigureState::new(&look.frame());
+		state.mood = Mood::Laugh;
+		state.facing = STAGED_FACING;
+		let drawn = drawn(&look, &state);
+		let ink = Color(0x2B_1D_2E).to_string();
+		let light = Svg::new().backlight().to_string();
+
+		assert_eq!(
+			colours(&drawn),
+			[ink, light.clone()].into_iter().collect(),
+			"whatever the cast's colours, a shadow puppet is ink and light"
+		);
+
+		// A pin at the neck, and at both shoulders, elbows, hips and knees: nine holes, each a
+		// circle of four curves, beside the face's own.
+		let pin = format!("fill=\"{light}\"");
+		assert!(drawn.matches(&pin).count() >= 9, "{drawn}");
+
+		// Under a scene light the holes take the light behind the screen, not the paper's.
+		let dusk = crate::art::light::Light::of(crate::art::light::Preset::Dusk);
+		let mut svg = Svg::new();
+		svg.set_light(dusk);
+		figure::draw(&mut svg, &look, &state);
+		let lit = svg.backlight().to_string();
+		assert_ne!(lit, light);
+		assert_eq!(
+			colours(&svg.finish((-300.0, -600.0, 600.0, 700.0), 256, 256)),
+			[Color(0x2B_1D_2E).to_string(), lit].into_iter().collect()
+		);
+	}
+
+	#[test]
+	fn paper_theatre_parts_are_card_with_a_white_edge_and_a_shadow() {
+		let style = StylePack::named("paper-theatre").unwrap();
+		let look = crate::cast::template_look(&style, Build::Kid).unwrap();
+		let card = drawn(&look, &FigureState::new(&look.frame()));
+		assert!(
+			card.contains(&format!("stroke=\"{}\"", palette::WHITE)),
+			"a white cut edge: {card}"
+		);
+		assert!(card.contains("opacity=\"0.3\""), "a hard shadow: {card}");
+		assert!(
+			!card.contains(&format!("stroke=\"{}\"", Color(0x2B_1D_2E))),
+			"and no ink line anywhere"
+		);
+
+		// The line-free styles draw no outline at all: nothing is stroked in ink.
+		let soft = StylePack::named("soft-flat").unwrap();
+		let look = crate::cast::template_look(&soft, Build::Kid).unwrap();
+		let soft = drawn(&look, &FigureState::new(&look.frame()));
+		assert!(!soft.contains(&format!("stroke=\"{}\"", Color(0x2B_1D_2E))));
+		assert!(soft.contains("mix-blend-mode:multiply"), "one soft shade");
 	}
 }

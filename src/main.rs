@@ -59,7 +59,7 @@ struct Cli {
 	#[command(subcommand)]
 	command: Command,
 	/// Draw in these page skins instead of the script's own: riso, tv, bold, cut-paper, crayon,
-	/// storybook, clear, a comma-separated list (bold,tv), or all. Each skin renders into its
+	/// storybook, clear, shadow, card, a comma-separated list (bold,tv), or all. Each skin renders into its
 	/// own folder. For the drawing styles figures are built with (chibi, clear-line…), see
 	/// `fables style list`.
 	#[arg(long, global = true)]
@@ -1145,7 +1145,15 @@ fn setting_new(world: &World, name: &str, from: Option<&str>, about: Option<&str
 fn style_describe(name: &str) -> Result<()> {
 	let report = Studio::describe_style(name)?;
 	say!("{}: {}", report.name, report.description)?;
-	say!("page skin: {}", report.skin)?;
+	say!(
+		"page skin: {} · text card: {}{}",
+		report.skin,
+		report.card,
+		report
+			.transition
+			.map(|transition| format!(" · page turn: {transition}"))
+			.unwrap_or_default()
+	)?;
 	let finish = &report.finish;
 	say!(
 		"finish: line {}, detail {}, light ({}, {}), cel shadow {}, far {}",
@@ -1224,8 +1232,8 @@ fn load(path: &Path, style: Option<&str>, world: Option<&Path>) -> Result<(Story
 	if let Some(name) = style {
 		if Style::parse(name).is_none() {
 			anyhow::bail!(
-				"unknown page skin `{name}`; use riso, tv, bold, cut-paper, crayon, storybook or \
-				 clear (for drawing styles, run `fables style list`)"
+				"unknown page skin `{name}`; use {} (for drawing styles, run `fables style list`)",
+				StyleName::ALL.map(|(name, _)| name).join(", ")
 			);
 		}
 

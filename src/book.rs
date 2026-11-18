@@ -781,13 +781,12 @@ pub fn draw_art(svg: &mut Svg, page: &BookPage) {
 	}
 
 	for (x, top, right, bottom) in card_rects(page) {
-		let card = Path::wobbly_poly(
+		svg.text_card(
 			&[pt(x, top), pt(right, top), pt(right, bottom), pt(x, bottom)],
 			46.0,
 			5.0,
 			crate::art::seed_of(&page.label),
 		);
-		svg.inked(&card, palette::PAPER);
 	}
 }
 
@@ -816,7 +815,12 @@ pub fn card_rects(page: &BookPage) -> Vec<Bounds> {
 /// The lettering layer.
 pub fn draw_text(svg: &mut Svg, page: &BookPage) {
 	for spec in &page.texts {
-		svg.raw(&text::svg(&spec.block, spec.ink));
+		let ink = if spec.card {
+			spec.ink.on(page.style.card)
+		} else {
+			spec.ink
+		};
+		svg.raw(&text::svg(&spec.block, ink));
 	}
 }
 

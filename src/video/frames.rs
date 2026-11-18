@@ -923,7 +923,7 @@ impl<'a> Renderer<'a> {
 			centre.x, centre.y, -centre.x, -centre.y
 		));
 		card(svg, &block.bounds, unit);
-		svg.raw(&text::svg(&block, Ink::default()));
+		svg.raw(&text::svg(&block, Ink::default().on(svg.style.card)));
 		svg.end();
 	}
 
@@ -989,7 +989,7 @@ impl<'a> Renderer<'a> {
 			RunStyle::Bold,
 		);
 		card(svg, &block.bounds, unit);
-		svg.raw(&text::svg(&block, Ink::default()));
+		svg.raw(&text::svg(&block, Ink::default().on(svg.style.card)));
 	}
 
 	/// The page turn at the edges of a shot: this page's `transition` arriving, and the next
@@ -1347,7 +1347,7 @@ fn balance_markers(chunks: Vec<String>) -> Vec<String> {
 fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 	let pad_x = 34.0 * unit;
 	let pad_y = CARD_PAD_Y * unit;
-	let card = Path::wobbly_poly(
+	svg.text_card(
 		&[
 			pt(bounds.x - pad_x, bounds.y - pad_y),
 			pt(bounds.x + bounds.w + pad_x, bounds.y - pad_y),
@@ -1358,7 +1358,6 @@ fn card(svg: &mut Svg, bounds: &Area, unit: f32) {
 		2.0 * unit,
 		svg.seed(17),
 	);
-	svg.inked(&card, palette::PAPER);
 }
 
 #[cfg(test)]
