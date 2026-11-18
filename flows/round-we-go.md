@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line: how the smallest thing comes all the way back round.]"
 blurb = "[The back-cover blurb: one tiny cause, seven consequences, and the same image at the end.]"
 

@@ -2,6 +2,7 @@
 title = "Mochi and the Fireworks"
 author = "Ifiok Jr."
 star = "mochi"
+age = "3-5"
 flow = "three-tries"
 moral = "A small thing can reach high when it leans with a friend."
 blurb = "The fireworks are tonight, and the garden wall is very tall. Mochi has three tries, and a garden full of small friends."
@@ -63,26 +64,26 @@ Then Mochi saw the flowers. All night they turned their faces to the moon, and t
 
 # garden moonlit shot=medium on=mochi
 @mochi x=0.4 reach-out
-@worm.a x=0.62 happy
-@worm.b x=0.72 happy
+@worm.a x=0.58 happy
+@worm.b x=0.74 happy
 Mochi called the worms. One by one they climbed the sunflower, and their weight bent it down, down.
 
 # garden moonlit shot=wide
 @mochi x=0.45 cheer happy
-@worm.a x=0.66 cheer
-@worm.b x=0.78 cheer
+@worm.a x=0.62 cheer
+@worm.b x=0.80 cheer
 The sunflower leaned right over the wall, and the whole sky bloomed above them. Every worm had a seat, and nobody was too small. The sky was full of light.
 
 # garden moonlit shot=wide on=mochi
 @mochi x=0.42 proud
-@worm.a x=0.62 proud
-@worm.b x=0.76 proud
+@worm.a x=0.60 proud
+@worm.b x=0.78 proud
 Mochi sat at the very top with the worms on either side, and the fireworks fell like silver rain on the teacup roofs.
 
 # garden moonlit shot=wide on=mochi
 @mochi x=0.4 proud
-@worm.a x=0.62 grin
-@worm.b x=0.76 grin
+@worm.a x=0.60 grin
+@worm.b x=0.78 grin
 They stayed until the last spark sank behind the wall, and the garden went quiet and silver.
 @camera shot=close on=mochi
 

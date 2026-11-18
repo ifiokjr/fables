@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line: the habit the star chose for themselves.]"
 blurb = "[The back-cover blurb: the habit everybody can see, the name it earns, and the day the star chooses it.]"
 
@@ -181,8 +182,8 @@ note = "The ask returns, and the answer answers it; then the end card, and out."
 # garden day shot=full on={{star}}
 @{{star}} x=0.3 wave grin talk
 @scene wilt=0
-@bird.a x=0.75 wake
-@dog x=0.85 wake
+@bird.a x=0.68 wake
+@dog x=0.86 wake
 // 20–30 words: the same three consequences, put right.
 [The callbacks.]
 

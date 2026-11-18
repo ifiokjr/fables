@@ -2,6 +2,7 @@
 title = "Mo and the Jar of Words"
 author = "Ifiok Jr."
 star = "mo"
+age = "3-5"
 flow = "goodnight-tour"
 moral = "The last word of the day is the softest."
 blurb = "The Mumbleton wind took every word Mo said. At bedtime he takes a jam jar and goes round the town to collect them, one place at a time."
@@ -71,4 +72,5 @@ At home he put the jar by his bed and climbed in under the duvet, with one word 
 
 # bedroom candle shot=close on=mo text=bottom transition=fade
 @mo x=0.45 dreamy talk holds=nothing
+@music none
 One word was left. "Goodnight," said Mo, very softly, and blew out the light.

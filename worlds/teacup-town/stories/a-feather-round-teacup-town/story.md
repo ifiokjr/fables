@@ -2,6 +2,7 @@
 title = "A Feather Round Teacup Town"
 author = "Ifiok Jr."
 star = "mochi"
+age = "3-5"
 flow = "round-we-go"
 moral = "A tiny thing can travel a very long way."
 blurb = "A sleeping dog sneezes, a feather leaves Mochi's hat, and one small thing sets off a chain all the way round Teacup Town."
@@ -53,7 +54,7 @@ The flower bent low and dropped one pale petal, which tumbled into the forest an
 
 # beach night transition=push shot=medium on=mochi
 @mochi x=0.4 happy
-@bird.b x=0.8 happy
+@bird.b x=0.88 happy
 @mochi x=0.7 face=right
 The wind took the petal over the beach, and Mochi ran after it with her apron flying.
 

@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line, only if the last gag needs one.]"
 blurb = "[The back-cover blurb: one want, three gags, and the twist nobody saw coming.]"
 
@@ -50,7 +51,7 @@ note = "The same framing as gag one, so the bigger failure reads as a variation,
 name = "Gag 3, biggest, fails with a take"
 pages = 1
 words = [0, 10]
-note = "A double-take, then the take, then silence: the music stops because the joke needs the hole."
+note = "A double-take, then the take, and leave a hole after the failure: the joke needs it."
 
 [[flow.beats]]
 name = "The twist: a payoff with no anticipation"
@@ -87,11 +88,11 @@ note = "Three to eight words, and the iris: end on the image, not the explanatio
 [The obstacle, up close.]
 
 // Beat 3: Gag 1, setup, beat, payoff. One page, 0–10 words.
-// When your version has it: @hold 0.6 before the payoff, and the sound effect just after
-// the action, not on it.
+// Hold the beat before the payoff, and land the sound effect just after the action, not on it.
 # street day shot=full
 @{{star}} x=0.4 grin
 @bird.a x=0.75 sleepy
+@hold 0.6
 @sfx pop
 // 0–10 words: the first gag, and no explanation.
 [Gag one.]
@@ -106,7 +107,7 @@ note = "Three to eight words, and the iris: end on the image, not the explanatio
 [Gag two, bigger.]
 
 // Beat 5: Gag 3, biggest, fails with a take. One page, 0–10 words.
-// When your version has it: a double-take before the take. The music stops here.
+// When your version has it: a double-take before the take.
 # street day shot=medium on={{star}}
 @{{star}} x=0.4 shocked
 @bird.a x=0.75 sleepy
@@ -126,5 +127,6 @@ note = "Three to eight words, and the iris: end on the image, not the explanatio
 # street day transition=iris shot=full
 @{{star}} x=0.4 grin
 @bird.a x=0.75 happy
+@sfx ding
 // 3–8 words: the button, and out.
 [The button.]

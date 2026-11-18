@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line: what the fourth try taught.]"
 blurb = "[The back-cover blurb: the want, the three failures, the turn.]"
 
@@ -97,7 +98,7 @@ note = "Return to the opening staging with the star changed, and end on the refr
 [It fails.]
 
 // Beat 3: Try 2 fails bigger. Two pages, 25–35 words a page.
-// When your version has it: @hold 0.8 here, before the failure.
+// Give the failure a beat to land before the next page.
 # garden day shot=full on={{star}}
 @{{star}} x=0.45 think
 // 25–35 words: the second try, bigger than the first.

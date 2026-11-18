@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line: what two opposite ways made together.]"
 blurb = "[The back-cover blurb: two characters who cannot agree, and the day they have to.]"
 

@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line: what the star was sure of, and what was true.]"
 blurb = "[The back-cover blurb: a half-heard sentence, a helpful star, and the truth in the background.]"
 
@@ -125,18 +126,18 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 // 25–35 words: the other character's face, and no words to explain it.
 [Puzzled.]
 
-# garden day shot=close on={{star}}
+# garden day text=bottom shot=close on={{star}}
 @{{star}} x=0.3 worried
 @{{friend}} x=0.7 worried
-// 25–35 words: the star sees the puzzle and misreads it too.
+// 25–35 words: the star sees the puzzle and misreads it too; the text card sits low, ready
+// for the page turn.
 [The mistake deepens.]
 
 // Beat 5: The reveal on the page turn. One page, 10–20 words.
-// When your version has it: text=bottom on the setup page and hold=2 on the reveal; today
-// the heading's close and the pause do that work.
-# garden dusk text=bottom shot=extreme-close on={{star}}
+// The setup above ends with its text card at the bottom; the reveal holds silently for two
+// seconds before a word is said.
+# garden dusk hold=2 shot=extreme-close on={{star}}
 @{{star}} x=0.4 shocked
-@pause 1.0
 @camera move=pull over=2
 @dog x=0.85 enter=right wag
 @{{friend}} x=0.7 laugh

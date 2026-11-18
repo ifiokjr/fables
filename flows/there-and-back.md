@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line: what the journey found that home already had.]"
 blurb = "[The back-cover blurb: why the star leaves, what they find far away, and the way home.]"
 

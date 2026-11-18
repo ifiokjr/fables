@@ -118,6 +118,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"              # the read-aloud band; a flow that suits a younger book says "under-3"
 
 [flow]
 name = "The Pile-Up"
@@ -140,7 +141,7 @@ note = "Craft advice a first-time writer can act on in one sentence."
 [One small sound in an empty street.]
 ```
 
-`pages` and `words` take one number or a `[min, max]` pair. `{{title}}`, `{{author}}`, `{{year}}` and `{{star}}` are filled in from the command; a flow whose `needs` is `2` or `many` writes `{{friend}}` where the second character goes. A flow may also write `flow = "{{flow}}"` in its front matter; without it, `fables new` adds `flow = "<name>"` after the `star` line, so a book always remembers the shape it started from. The beats' page counts must add up to the pages below them, and every `[bracketed]` line is a line for the writer: `fables review` says plainly how many are still unwritten instead of critiquing them.
+`pages` and `words` take one number or a `[min, max]` pair. `{{title}}`, `{{author}}`, `{{year}}` and `{{star}}` are filled in from the command; a flow whose `needs` is `2` or `many` writes `{{friend}}` where the second character goes. Every flow file names its `age` band; `fables new` writes `age = "3-5"` into a world recipe or a world flow that leaves one out, so every new book is read aloud at the same pace unless it says otherwise. A flow may also write `flow = "{{flow}}"` in its front matter; without it, `fables new` adds `flow = "<name>"` after the `star` line, so a book always remembers the shape it started from. The beats' page counts must add up to the pages below them, and every `[bracketed]` line is a line for the writer: `fables review` says plainly how many are still unwritten instead of critiquing them.
 
 ## Drawing styles
 

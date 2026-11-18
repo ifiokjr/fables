@@ -2,6 +2,7 @@
 title = "Zia and the Pigeon"
 author = "Ifiok Jr."
 star = "zia"
+age = "3-5"
 flow = "gag-short"
 moral = "Somebody else's bell is always louder."
 blurb = "A pigeon will not move off the tram line, whatever Zia rings at it. The tram has its own idea."
@@ -32,6 +33,7 @@ Zia rang her bicycle bell. The pigeon did not move.
 # square day shot=full
 @zia x=0.4 grin
 @bird.a x=0.78 sleepy
+@hold 0.6
 @sfx pop
 Ding! Nothing.
 @pause 0.5
@@ -44,17 +46,17 @@ Ding ding! Still nothing.
 @pause 0.5
 
 # square day shot=medium on=zia
-@zia x=0.4 shocked
-@bird.b x=0.16 cheer
-@dog x=0.26 wag
+@zia x=0.44 shocked
+@bird.b x=0.12 cheer
+@dog x=0.28 wag
 @bird.a x=0.78 sleepy
 @pause 0.8
 Zia fetched the whole brass band. The pigeon yawned.
 
 # square day transition=cut shot=wide
-@zia x=0.4 happy
-@bird.b x=0.16 cheer
-@dog x=0.26 wag
+@zia x=0.44 happy
+@bird.b x=0.12 cheer
+@dog x=0.28 wag
 @bird.a x=0.78 cheer
 The tram came without a sound and stopped beside them. The pigeon hopped aboard.
 @pause 0.5
@@ -62,4 +64,5 @@ The tram came without a sound and stopped beside them. The pigeon hopped aboard.
 # square day transition=iris shot=close on=zia
 @zia x=0.4 grin
 @bird.a x=0.78 happy
+@sfx ding
 The tram dinged its own bell, and left.

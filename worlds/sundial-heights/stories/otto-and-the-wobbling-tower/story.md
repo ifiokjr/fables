@@ -2,6 +2,7 @@
 title = "Otto and the Wobbling Tower"
 author = "Ifiok Jr."
 star = "otto"
+age = "3-5"
 flow = "odd-couple"
 moral = "The best things are measured and bounced."
 blurb = "Otto Angle measures everything. Mochi Mae measures nothing. When the fair makes them share a stall, the tent comes down around them."

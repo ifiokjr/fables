@@ -2,6 +2,7 @@
 title = "The Letter with No Address"
 author = "Ifiok Jr."
 star = "clem"
+age = "3-5"
 flow = "there-and-back"
 moral = "The door you are looking for may be your own."
 blurb = "A letter arrives in Hoppington with no address, only a drawing of a door. Clem hops from mill to hill to lighthouse looking for the door that fits."

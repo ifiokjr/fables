@@ -2,6 +2,7 @@
 title = "The New Kid"
 author = "Ifiok Jr."
 star = "mo"
+age = "3-5"
 flow = "wrong-end-of-the-stick"
 moral = "Half a sentence is not the whole story."
 blurb = "The wind takes half of everything in Mumbleton. When Mo hears 'a new kid tomorrow', he is sure he is being replaced, while Nan weaves a basket behind him."
@@ -53,14 +54,13 @@ He sang the new kid a welcome song, very loudly, in case it was shy, and the win
 @pause 0.8
 Nan put down the basket and stared. The pins in her mouth clicked. Mo gave her his biggest, most helpful smile.
 
-# garden day shot=close on=mo
+# garden day text=bottom shot=close on=mo
 @mo x=0.3 worried
 @nan x=0.7 worried
 Mo stared back. Maybe the new kid did not like songs. Maybe it wanted the socks a different way. He checked his pockets for a better answer.
 
-# garden dusk text=bottom shot=extreme-close on=mo
+# garden dusk hold=2 shot=extreme-close on=mo
 @mo x=0.4 shocked
-@pause 1.0
 @camera move=pull over=2
 @dog.a x=0.85 enter=right wag
 @nan x=0.7 laugh

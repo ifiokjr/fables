@@ -3,6 +3,7 @@ title = "{{title}}"
 author = "{{author}}"
 year = {{year}}
 star = "{{star}}"
+age = "3-5"
 moral = "[One line: the quiet thing the star kept for last.]"
 blurb = "[The back-cover blurb: a bedtime walk that says goodnight to the whole world, one place at a time.]"
 
@@ -59,7 +60,7 @@ note = "Three to eight words, no more; the music stops and the page fades."
 // `fables proofs` to see it.
 
 // Beat 1: Evening, and a small problem. Two pages, 30–35 words.
-// Golden light, and a calm camera. When your version has it: calm music from here.
+// Golden light, and a calm camera; golden already picks the calm cue.
 # town golden shot=wide on={{star}}
 @{{star}} x=0.4 worried
 // 30–35 words: the evening, and the small problem.
@@ -131,7 +132,7 @@ note = "Three to eight words, no more; the music stops and the page fades."
 [Goodnight, last place.]
 
 // Beat 4: Home and into bed. One page, 10–15 words.
-// Candle light, and the smallest, safest frame. When your version has it: music box here.
+// Candle light picks the sleepy music box, and the smallest, safest frame in the book.
 # bedroom candle shot=medium on={{star}}
 @{{star}} x=0.45 sleepy
 // 10–15 words: home, and into bed.
@@ -141,5 +142,6 @@ note = "Three to eight words, no more; the music stops and the page fades."
 // Three to eight words; the music stops and the page fades.
 # bedroom candle shot=close on={{star}} text=bottom transition=fade
 @{{star}} x=0.45 dreamy
+@music none
 // 3–8 words: the whisper.
 [The whisper.]
