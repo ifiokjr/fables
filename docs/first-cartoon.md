@@ -53,6 +53,8 @@ EOF
 The story has no `author`; the world's `author = "Your Name"` credits it. Bare `golden` and
 `dusk` are lights: `# garden golden` is `# garden light=golden`, and `@scene dusk` ends the day.
 `holds=bucket` puts a prop in Pip's hand; `fables prop list` names every one a world can use.
+`fables setting list` names every setting and light, and the pose and mood words. A "quoted"
+line needs its speaker on the line above it (`@pip talk`), or the review asks for one.
 
 ```bash
 fables check worlds/teacup-lane/stories/pip-and-the-puddle/story.md

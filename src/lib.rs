@@ -14,6 +14,7 @@ pub mod book;
 pub mod cast;
 pub mod compose;
 pub mod flow;
+pub mod hint;
 pub mod mcp;
 pub mod press;
 pub mod publish;

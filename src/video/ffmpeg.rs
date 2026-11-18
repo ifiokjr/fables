@@ -9,10 +9,13 @@
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::OnceLock;
 
+use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 
@@ -167,9 +170,66 @@ fn name_of(filter: &str) -> Option<String> {
 	(!name.is_empty()).then_some(name)
 }
 
+/// Where an encoder writes while it works: beside the target, under a name of this process's
+/// own that keeps the extension ffmpeg picks its container by. The target's own name only ever
+/// holds a finished file, even when a second render of the same book runs at the same time.
+pub fn partial(path: &Path) -> PathBuf {
+	let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+	let extension = path.extension().map_or(String::new(), |extension| {
+		format!(".{}", extension.to_string_lossy())
+	});
+
+	path.with_file_name(format!("{stem}.partial-{}{extension}", std::process::id()))
+}
+
+/// Moves a finished encode into place, or clears a failed one away.
+pub fn settle(partial: &Path, path: &Path, finished: bool) -> Result<()> {
+	if finished {
+		std::fs::rename(partial, path)
+			.with_context(|| format!("could not move the finished file to {}", path.display()))
+	} else {
+		let _ = std::fs::remove_file(partial);
+		Ok(())
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_partial_file_sits_beside_its_target_and_keeps_the_extension() {
+		let target = Path::new("out/book/video/book-16x9.mp4");
+		let partial = partial(target);
+		assert_eq!(partial.parent(), target.parent());
+		assert_eq!(partial.extension(), target.extension());
+		assert_ne!(partial, target);
+		assert!(
+			partial
+				.file_name()
+				.unwrap()
+				.to_string_lossy()
+				.starts_with("book-16x9.partial-"),
+			"{partial:?}"
+		);
+	}
+
+	#[test]
+	fn only_a_finished_encode_takes_the_target_name() {
+		let dir = tempfile::tempdir().unwrap();
+		let target = dir.path().join("a.mp4");
+		let working = partial(&target);
+
+		std::fs::write(&working, b"half").unwrap();
+		settle(&working, &target, false).unwrap();
+		assert!(!working.exists() && !target.exists());
+
+		std::fs::write(&target, b"old").unwrap();
+		std::fs::write(&working, b"whole").unwrap();
+		settle(&working, &target, true).unwrap();
+		assert!(!working.exists());
+		assert_eq!(std::fs::read(&target).unwrap(), b"whole");
+	}
 
 	#[test]
 	fn a_graph_names_its_filters_whatever_their_options_hold() {

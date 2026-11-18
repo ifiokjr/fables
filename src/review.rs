@@ -127,6 +127,7 @@ pub fn review(story: &Story, rehearsals: &[Rehearsal], timeline: &Timeline) -> V
 	findings.extend(return_image(story));
 	findings.extend(wind_down(story, rehearsals));
 	findings.extend(page_budget(story));
+	findings.extend(placeholders(story));
 
 	findings.sort_by_key(|finding| (finding.severity != Severity::Fix, finding.line));
 	findings
@@ -1850,6 +1851,47 @@ fn page_budget(story: &Story) -> Vec<Finding> {
 	)]
 }
 
+/// Whether a front-matter line is still the text a flow or a recipe started it with: a
+/// `[bracketed]` instruction, or one that says to write the line here.
+fn is_placeholder(text: &str) -> bool {
+	let text = text.trim();
+
+	(text.starts_with('[') && text.ends_with(']'))
+		|| (text.contains("Write the") && text.contains(" here"))
+}
+
+/// A `moral` or `blurb` nobody has written yet: it prints on the back cover and is read out at
+/// the end of the video exactly as it stands.
+fn placeholders(story: &Story) -> Vec<Finding> {
+	let left: Vec<&str> = [
+		("moral", story.meta.moral.as_deref()),
+		("blurb", story.meta.blurb.as_deref()),
+	]
+	.into_iter()
+	.filter(|(_, text)| text.is_some_and(is_placeholder))
+	.map(|(name, _)| name)
+	.collect();
+
+	if left.is_empty() {
+		return Vec::new();
+	}
+
+	let names: Vec<String> = left.iter().map(|name| format!("`{name}`")).collect();
+
+	vec![Finding::new(
+		"placeholder",
+		Severity::Consider,
+		1,
+		format!(
+			"The front matter's {} still {} the placeholder the book started with.",
+			names.join(" and "),
+			if left.len() == 1 { "holds" } else { "hold" }
+		),
+		"Write it (the blurb prints on the back cover; the moral is read out at the end of the \
+		 video), or delete the line.",
+	)]
+}
+
 #[cfg(test)]
 mod tests {
 	use std::fmt::Write as _;
@@ -2509,5 +2551,41 @@ mod tests {
 			Some("8 story pages leave 12 blank pages; a 24-page book has room for 12 more pages.")
 		);
 		assert!(has(&review_script("", &script), "page-budget"));
+	}
+
+	#[test]
+	fn an_untouched_moral_or_blurb_is_one_finding() {
+		let script = "# park\n@mo x=0.3 happy\nOne.\n";
+		let both = review_script(
+			"moral = \"[One line: what the fourth try taught.]\"\nblurb = \"[The blurb.]\"\n",
+			script,
+		);
+		let found: Vec<&Finding> = both
+			.iter()
+			.filter(|finding| finding.rule == "placeholder")
+			.collect();
+		assert_eq!(found.len(), 1, "{both:#?}");
+		assert_eq!(found[0].severity, Severity::Consider);
+		assert!(
+			found[0]
+				.observation
+				.contains("`moral` and `blurb` still hold"),
+			"{}",
+			found[0].observation
+		);
+
+		let one = review_script(
+			"moral = \"Small splashes start close.\"\nblurb = \"[The blurb.]\"\n",
+			script,
+		);
+		assert!(
+			one.iter()
+				.any(|finding| finding.observation.contains("`blurb` still holds")),
+			"{one:#?}"
+		);
+
+		let written = review_script("moral = \"Small splashes start close.\"\n", script);
+		assert!(!has(&written, "placeholder"), "{written:#?}");
+		assert!(!has(&review_script("", script), "placeholder"));
 	}
 }

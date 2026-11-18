@@ -93,6 +93,49 @@ fn every_built_in_flow_scaffold_has_exactly_one_age() {
 }
 
 #[test]
+fn every_built_in_flow_scaffold_says_who_must_speak_a_quoted_line() {
+	let (_root, home) = scratch();
+	let world = World::load(&home).unwrap();
+
+	for flow in flow::built_in_flows().unwrap() {
+		let friend = needs_friend(&flow.slug).then_some("nan");
+		let script = flow
+			.scaffold(&world, "A Tale", "mo", friend, "A. Writer")
+			.unwrap();
+
+		assert!(
+			script.contains("needs its speaker on the line above it: `@mo talk`"),
+			"{}: {script}",
+			flow.slug
+		);
+	}
+}
+
+#[test]
+fn a_new_book_with_a_friend_says_who_plays_whom() {
+	let (root, _home) = scratch();
+	let output = fables(
+		root.path(),
+		&[
+			"new",
+			"Mo and Nan",
+			"--star",
+			"mo",
+			"--friend",
+			"nan",
+			"--flow",
+			"odd-couple",
+		],
+	);
+	assert!(output.status.success(), "{}", stderr(&output));
+	let out = stdout(&output);
+	assert!(
+		out.contains("`mo` is the star and `nan` plays the second character"),
+		"{out}"
+	);
+}
+
+#[test]
 fn a_worlds_flow_without_an_age_gets_the_default() {
 	let (root, home) = scratch();
 	std::fs::create_dir_all(home.join("flows")).unwrap();

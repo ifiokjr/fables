@@ -121,6 +121,8 @@ pub struct Started {
 	/// How the command names where the book started: `the flow "Three Tries"`, or
 	/// `the Kerfuffle recipe`.
 	pub source: String,
+	/// Who plays whom, in a sentence, when the book started with a second character.
+	pub roles: Option<String>,
 }
 
 /// The built-in flows, in the order `fables flow list` prints them. The first is the default
@@ -368,8 +370,9 @@ impl Flow {
 			(Needs::One, None) => "",
 			(Needs::One, Some(id)) => {
 				bail!(
-					"the {} flow stages one character, so `{id}` has nobody to play; leave out \
-					 the friend",
+					"the {} flow stages one character, so leave out `--friend`; to bring `{id}` \
+					 in afterwards, add `@{id} x=0.7 enter=right` under any page heading of the \
+					 new script",
 					self.name
 				)
 			}
@@ -459,6 +462,7 @@ pub fn start(
 		return Ok(Started {
 			script: with_default_age(flow.scaffold(world, title, star, friend, author)?),
 			source: format!("the flow \"{}\"", flow.name),
+			roles: roles(star, friend),
 		});
 	}
 
@@ -470,6 +474,7 @@ pub fn start(
 		return Ok(Started {
 			script: with_default_age(script),
 			source: format!("the {} recipe", world.name),
+			roles: None,
 		});
 	}
 
@@ -478,6 +483,18 @@ pub fn start(
 	Ok(Started {
 		script: with_default_age(flow.scaffold(world, title, star, friend, author)?),
 		source: format!("the flow \"{}\"", flow.name),
+		roles: roles(star, friend),
+	})
+}
+
+/// Who plays whom in a book started with a second character. The script's `@` lines are the
+/// only record: the front matter names the star and nobody else.
+fn roles(star: &str, friend: Option<&str>) -> Option<String> {
+	friend.map(|friend| {
+		format!(
+			"`{star}` is the star and `{friend}` plays the second character: the script's \
+			 `@{friend}` lines are the record (there is no `friend` line in the front matter)"
+		)
 	})
 }
 
@@ -751,6 +768,8 @@ mod tests {
 				.unwrap_err()
 		);
 		assert!(error.contains("one character"), "{error}");
+		assert!(error.contains("leave out `--friend`"), "{error}");
+		assert!(error.contains("`@mo x=0.7 enter=right`"), "{error}");
 	}
 
 	#[test]
