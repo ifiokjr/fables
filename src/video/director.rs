@@ -62,6 +62,11 @@ const LONG_HOLD: f32 = 8.0;
 const LINE_GUARD: f32 = 0.2;
 /// A cut the guard moves lands this far before the line instead.
 const BEFORE_LINE: f32 = 0.25;
+/// A figure moved further than this fraction of the stage is crossing it: action to widen for.
+const CROSSING: f32 = 0.07;
+/// How long after a mood turns strong its reaction shot lands: the length of the take's
+/// squash and stretch.
+const REACTION_LANDS: f32 = 0.45;
 /// How far a right- or left-facing subject sits off centre, as a fraction of the view width.
 const LEAD_ROOM: f32 = 0.12;
 /// Headroom above the highest point of the head, hair and all: at least this fraction of the
@@ -187,6 +192,44 @@ pub fn shot_view(
 			tight_view(aspect, band, size, subjects)
 		}
 	}
+}
+
+/// The least air above the tallest head in a wide or full shot that has grown as tall as the
+/// drawn stage allows, as a fraction of the frame height.
+const CAPPED_HEADROOM: f32 = 0.02;
+
+/// A video shot: [`shot_view`], and no head out of the top of the frame. A wide shot, and a
+/// full shot of somebody tall, is as tall as the drawn stage allows with the ground on the
+/// caption card's line; a figure drawn from a template can stand taller than that leaves. The
+/// view then lifts until the head has a little air, and the feet sit that much lower.
+pub fn film_view(
+	aspect: f32,
+	band: (f32, f32),
+	size: ShotSize,
+	subjects: &[&Puppet],
+	ground: f32,
+) -> Option<View> {
+	let mut view = shot_view(aspect, band, size, subjects, ground)?;
+
+	// Only people standing on the ground: a kite or a bird in the sky may leave the frame.
+	let standing: Vec<&Puppet> = subjects
+		.iter()
+		.copied()
+		.filter(|puppet| puppet.kind.is_figure())
+		.collect();
+
+	if matches!(size, ShotSize::Wide | ShotSize::Full)
+		&& let Some(extent) = bounds(&standing)
+	{
+		let top = view.centre.y - view.height / 2.0;
+		let wanted = extent.1 - CAPPED_HEADROOM * view.height;
+
+		if wanted < top {
+			view.centre.y -= top - wanted;
+		}
+	}
+
+	Some(clamp(aspect, view))
 }
 
 /// A full shot: wide enough for everyone, the ground line and the tallest head inside the band,
@@ -655,6 +698,8 @@ enum EventKind {
 	Speech {
 		duration: f32,
 		speaker: Option<String>,
+		/// The actor a narrated line opens by naming.
+		about: Option<String>,
 	},
 	/// A strong mood on somebody who is not speaking: a reaction shot.
 	Reaction { actor: String },
@@ -680,12 +725,21 @@ fn events(shot: &Shot) -> Vec<Event> {
 			let faints = previous.is_some_and(|other| actor.knocked > other.knocked + 0.5);
 			let hops = previous.is_some_and(|other| actor.hops > other.hops);
 			let walks = actor.gait.is_some() && previous.and_then(|other| other.gait) != actor.gait;
+			// A figure crossing the stage is action too, whether it walks, runs or leaps there.
+			let crosses = actor.kind.is_figure()
+				&& previous.is_some_and(|other| {
+					!other.hidden
+						&& other
+							.x
+							.zip(actor.x)
+							.is_some_and(|(from, to)| (from - to).abs() > CROSSING)
+				});
 
 			// An actor walking in while they speak gets their own shot instead, which frames
 			// them anyway; the widening is for action the camera would otherwise miss.
 			let speaking = speakers.contains(&actor.id);
 
-			if (enters || leaves || faints || hops || walks) && !(enters && speaking) {
+			if (enters || leaves || faints || hops || walks || crosses) && !(enters && speaking) {
 				out.push(Event {
 					at,
 					line: pair[1].line,
@@ -695,8 +749,10 @@ fn events(shot: &Shot) -> Vec<Event> {
 				&& is_strong(actor.mood)
 				&& !speaking
 			{
+				// The close-up lands as the take settles: the squash and stretch play in the
+				// shot before, where there is room for them.
 				out.push(Event {
-					at,
+					at: at + REACTION_LANDS,
 					line: pair[1].line,
 					kind: EventKind::Reaction {
 						actor: actor.id.clone(),
@@ -713,12 +769,28 @@ fn events(shot: &Shot) -> Vec<Event> {
 			kind: EventKind::Speech {
 				duration: line.duration,
 				speaker: line.speakers.first().cloned(),
+				about: line.about.clone(),
 			},
 		});
 	}
 
 	out.sort_by(|a, b| a.at.total_cmp(&b.at));
 	out
+}
+
+/// Where a page must end for its last reaction to get a shot, when it ends too soon for one:
+/// the tail stretches to hold the reaction for the minimum shot length once its take has
+/// played, and never by more than those two together. `None` when there is room already, or
+/// nothing to react to.
+pub(crate) fn room_for_reaction(shot: &Shot) -> Option<f32> {
+	let at = events(shot)
+		.iter()
+		.rev()
+		.find(|event| matches!(event.kind, EventKind::Reaction { .. }))?
+		.at;
+	let needed = at + MIN_SHOT + 0.01;
+
+	(needed > shot.end).then(|| needed.min(shot.end + MIN_SHOT + REACTION_LANDS))
 }
 
 /// The moods that earn a reaction shot.
@@ -812,7 +884,22 @@ fn single_size(portrait: bool) -> ShotSize {
 /// The framing an event asks for; `None` holds the current one.
 fn framing_for(event: &Event, shot: &Shot, portrait: bool) -> Option<Framing> {
 	match &event.kind {
-		EventKind::Speech { duration, speaker } => {
+		EventKind::Speech {
+			speaker: None,
+			about,
+			..
+		} => {
+			// Narration frames its subject, when they are still on stage.
+			let about = about.clone()?;
+			shot.scene_at(event.at)
+				.actors
+				.iter()
+				.any(|actor| actor.id == about && !actor.hidden)
+				.then(|| framing_on(single_size(portrait), vec![about]))
+		}
+		EventKind::Speech {
+			duration, speaker, ..
+		} => {
 			let speaker = speaker.clone()?;
 
 			// Short lines share a two-shot, so the cutting never gets frantic.
@@ -1905,5 +1992,143 @@ mod tests {
 
 		let tilted = arrives_from(Travel::TiltUp, view, aspect);
 		assert!((tilted.centre.y - (view.centre.y - view.height * TILT)).abs() < 1e-3);
+	}
+
+	#[test]
+	fn a_reaction_at_the_end_of_a_page_gets_its_shot() {
+		let plain = "# park\n@kid x=0.3 talk\n@mum x=0.7\nLook at this very big worm I found.\n";
+		let without = timeline_of(plain, "");
+		let with = timeline_of(&format!("{plain}@mum shocked\n"), "");
+		let (before, after) = (&without.shots[1], &with.shots[1]);
+		let last = after.setups.last().unwrap();
+
+		assert_eq!(
+			last.framing,
+			Framing::Shot {
+				size: ShotSize::Close,
+				on: vec!["mum".to_owned()],
+			},
+			"the reaction is not dropped"
+		);
+		assert!(
+			after.end - last.time >= MIN_SHOT - 1e-3,
+			"it holds a whole shot"
+		);
+
+		let grown = after.duration() - before.duration();
+		assert!(
+			grown > 0.0 && grown <= MIN_SHOT + REACTION_LANDS + 1e-3,
+			"the page grows to fit it, by no more than the take and the shortest shot: {grown}"
+		);
+
+		// A page with room already keeps its length.
+		let roomy = format!("{plain}@mum shocked\n@pause 3\n");
+		let paused = timeline_of(&format!("{plain}@pause 3\n"), "");
+		assert!(
+			(timeline_of(&roomy, "").shots[1].duration() - paused.shots[1].duration()).abs() < 1e-3
+		);
+	}
+
+	#[test]
+	fn narration_that_opens_with_a_name_frames_that_actor() {
+		let framed = subjects(&page_setups(
+			"# park\n@kid x=0.3\n@mum x=0.7\nThe park was quiet this morning.\n\nMum stood tall \
+			 and smiled at everyone there.\n",
+		));
+		assert_eq!(framed, ["everyone", "mum"]);
+
+		// A name further in, or somebody who is not on stage, moves nothing.
+		let held = subjects(&page_setups(
+			"# park\n@kid x=0.3\nThe park was quiet and then Kid saw it there.\n\nMum was far \
+			 away at home.\n",
+		));
+		assert!(held.iter().all(|on| on == "everyone"), "{held:?}");
+	}
+
+	#[test]
+	fn a_figure_crossing_the_stage_is_action_to_widen_for() {
+		let setups = page_setups(
+			"# park\n@kid x=0.2 talk\n@mum x=0.8\nI am going over there now, Mum.\n@kid \
+			 x=0.7\nAnd off he went across the grass.\n",
+		);
+
+		assert_eq!(
+			setups.last().unwrap().framing,
+			Framing::Shot {
+				size: ShotSize::Full,
+				on: Vec::new(),
+			}
+		);
+	}
+
+	/// The headroom rule for figures drawn from a style's template, kid and grown-up, in every
+	/// shot size and both frame shapes: the rule was first written against the parametric
+	/// puppet, and a template's hair stands taller.
+	#[test]
+	fn template_drawn_figures_keep_their_headroom_in_every_shot() {
+		use crate::art::pack::StylePack;
+		use crate::video::frames::Format;
+
+		for style in ["cartoon", "anime", "chibi"] {
+			let pack = StylePack::named(style).unwrap();
+			let cast = Cast::parse_in(
+				"[kid]\nname = \"Kid\"\n[mum]\nname = \"Mum\"\nkind = \"grown-up\"\n",
+				std::path::Path::new(""),
+				&pack,
+			)
+			.unwrap();
+
+			for actor in ["kid", "mum"] {
+				let source = format!(
+					"+++\ntitle = \"T\"\nauthor = \"A\"\nstar = \"kid\"\n+++\n# park\n@{actor} \
+					 x=0.5\n"
+				);
+				let story = story::parse(&source).unwrap();
+				let page = &story.pages[0];
+				let mut scene = Scene::for_page(page, &story.settings, &story.props).unwrap();
+				let mut memory = std::collections::HashMap::new();
+
+				for beat in &page.beats {
+					if let Beat::Direct(directive) = beat {
+						scene.apply(directive, &cast, &mut memory).unwrap();
+					}
+				}
+
+				let puppets = compose::puppets(&scene, 0.0, false);
+				let subjects: Vec<&Puppet> = puppets.iter().collect();
+				let extent = puppets[0].extents().subject;
+				let ground = scene.setting.ground();
+
+				for format in [Format::Landscape, Format::Portrait] {
+					let aspect = format.aspect();
+
+					for size in [
+						ShotSize::Wide,
+						ShotSize::Full,
+						ShotSize::Medium,
+						ShotSize::Close,
+					] {
+						let view = film_view(aspect, format.action_band(), size, &subjects, ground)
+							.expect("a subject");
+						let top = view.centre.y - view.height / 2.0;
+
+						// The tallest view the drawn stage allows, with the ground on the
+						// caption card's line, is all a wide shot has, and all a full shot can
+						// grow to: a tall figure fills it, so there the head keeps a little air
+						// and the feet give way.
+						let capped = view.height >= tallest_view(aspect) - 1e-3;
+						let floor = if capped { CAPPED_HEADROOM } else { HEADROOM };
+
+						assert!(
+							extent.1 >= top + floor * view.height - 1e-3,
+							"{style} {actor} {size:?} {format:?}: head top {:.0} is only {:.1}% \
+							 below the frame top",
+							extent.1,
+							(extent.1 - top) / view.height * 100.0
+						);
+					}
+				}
+			}
+		}
 	}
 }

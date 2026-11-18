@@ -39,6 +39,7 @@
 //! overlap = 1.0           # parts arrive one after another, not together
 //! arcs = 1.0              # hands swing on arcs about the shoulder, heads nod through turns
 //! takes = 1.0             # mood changes play as takes: squash, stretch, settle
+//! hang = 1.0              # seconds a strong mood holds its peak before it relaxes (0 never relaxes)
 //! breath = 1.0            # a standing figure breathes
 //! weight-shift = 1.0      # and shifts its weight from foot to foot
 //! gesture = 1.0           # speakers beat time with head and hand, brows answer the line
@@ -311,6 +312,8 @@ pub struct Motion {
 	pub overlap: f32,
 	pub arcs: f32,
 	pub takes: f32,
+	/// Seconds a strong mood holds its peak before it relaxes; 0 holds the peak for good.
+	pub hang: f32,
 	pub breath: f32,
 	pub weight_shift: f32,
 	pub gesture: f32,
@@ -341,6 +344,7 @@ impl Default for Motion {
 			overlap: 1.0,
 			arcs: 1.0,
 			takes: 1.0,
+			hang: 1.0,
 			breath: 1.0,
 			weight_shift: 1.0,
 			gesture: 1.0,

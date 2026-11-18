@@ -461,6 +461,9 @@ pub struct FigureState {
 	pub gaze_y: f32,
 	/// A `see=` direction holds the eyes: the listening and idle rules leave them alone.
 	pub gaze_locked: bool,
+	/// A mood drawn with its eyes shut (`proud`, `laugh`, `sleepy`, `dreamy`) opens them: to
+	/// shout, or to look at whoever is speaking. Video only.
+	pub eyes_open: bool,
 	/// Head and face turn: -1 (left) to 1 (right).
 	pub facing: f32,
 	/// 0..1, eyelids closing for a blink.
@@ -785,6 +788,7 @@ impl FigureState {
 			gaze: 0.0,
 			gaze_y: 0.0,
 			gaze_locked: false,
+			eyes_open: false,
 			facing: 0.0,
 			blink: 0.0,
 			tilt: 0.0,
@@ -1347,7 +1351,11 @@ fn draw_head(svg: &mut Svg, look: &Look, frame: &Frame, state: &FigureState) {
 fn draw_face(svg: &mut Svg, look: &Look, frame: &Frame, state: &FigureState) {
 	let r = frame.head_r;
 	let face = frame.head + pt(state.facing * r * 0.2, 0.0);
-	let style = FaceStyle::of(state.mood);
+	let mut style = FaceStyle::of(state.mood);
+
+	if state.eyes_open && matches!(style.eyes, Eyes::Happy | Eyes::Shut) {
+		style.eyes = Eyes::Open;
+	}
 
 	for side in [-1.0, 1.0] {
 		let cheek = Path::circle(face + pt(side * r * 0.6, r * 0.32), r * 0.17);

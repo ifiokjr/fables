@@ -28,7 +28,9 @@ use crate::stage::Rehearsal;
 use crate::stage::Scene;
 use crate::stage::ShotSize;
 use crate::stage::Travel;
+use crate::story::Acting;
 use crate::story::Beat;
+use crate::story::Direction;
 use crate::story::Medium;
 use crate::story::Pacing;
 use crate::story::Story;
@@ -38,6 +40,7 @@ use crate::video::audio::Music;
 use crate::video::audio::MusicDefault;
 use crate::video::audio::Sound;
 use crate::video::director;
+use crate::video::perform;
 use crate::video::voice::Delivery;
 use crate::video::voice::Speech;
 use crate::video::voice::Utterance;
@@ -108,6 +111,8 @@ pub struct Line {
 	pub voiced_by: Option<String>,
 	/// The script line the paragraph starts on (zero for the cards).
 	pub line: usize,
+	/// The actor on stage a narrated line opens by naming: the camera frames them.
+	pub about: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -619,6 +624,7 @@ impl<S: Speaker> Builder<'_, S> {
 				text: String::new(),
 				voiced_by: None,
 				line: 0,
+				about: None,
 			}],
 			transition: Transition::Cut,
 			setups: Vec::new(),
@@ -660,6 +666,7 @@ impl<S: Speaker> Builder<'_, S> {
 				text: moral.to_owned(),
 				voiced_by: None,
 				line: 0,
+				about: None,
 			}],
 			transition: self.story.meta.video.transition.unwrap_or_default(),
 			setups: Vec::new(),
@@ -840,7 +847,12 @@ impl<S: Speaker> Builder<'_, S> {
 
 		let end = (t - self.pacing.gap + self.pacing.tail).max(start + lead + self.pacing.tail);
 
-		self.timeline.shots.push(Shot {
+		// The performance pass: what the page's plain directions mean on screen.
+		if self.story.meta.video.acting == Acting::Full {
+			perform::perform(&mut keys, lines.first().map_or(end, |line| line.start));
+		}
+
+		let mut shot = Shot {
 			kind: ShotKind::Page(rehearsal.page),
 			start,
 			end,
@@ -851,7 +863,18 @@ impl<S: Speaker> Builder<'_, S> {
 				.unwrap_or(self.story.meta.video.transition.unwrap_or_default()),
 			setups: Vec::new(),
 			portrait_setups: Vec::new(),
-		});
+		};
+
+		// A reaction at the very end of a page gets its shot: the page's tail makes the room.
+		// A page with its own `@camera` gets the room too, so a pinned plan runs as long.
+		if self.story.meta.video.direction == Direction::Auto
+			&& let Some(end) = director::room_for_reaction(&shot)
+		{
+			shot.end = end;
+		}
+
+		let end = shot.end;
+		self.timeline.shots.push(shot);
 
 		Ok(end)
 	}
@@ -896,6 +919,7 @@ impl<S: Speaker> Builder<'_, S> {
 						text: format!("\u{201c}{part}\u{201d}"),
 						voiced_by: Some(actor.id.clone()),
 						line: script_line,
+						about: None,
 					};
 					t += duration + self.pacing.beat;
 					line
@@ -911,6 +935,7 @@ impl<S: Speaker> Builder<'_, S> {
 						speech,
 						duration,
 						speakers: Vec::new(),
+						about: self.subject(&part, scene),
 						text: part,
 						voiced_by: None,
 						line: script_line,
@@ -927,6 +952,11 @@ impl<S: Speaker> Builder<'_, S> {
 
 		let narrator = self.narrator.clone();
 		let (speech, duration) = self.say(text, &narrator, Delivery::default())?;
+		let about = if talking.is_empty() {
+			self.subject(text, scene)
+		} else {
+			None
+		};
 		lines.push(Line {
 			start: t,
 			speech,
@@ -935,9 +965,38 @@ impl<S: Speaker> Builder<'_, S> {
 			text: text.to_owned(),
 			voiced_by: None,
 			line: script_line,
+			about,
 		});
 
 		Ok(t + duration + self.pacing.gap)
+	}
+
+	/// The figure on stage a narrated line is about: the one whose name opens it ("Mo stood
+	/// tall."). Dialogue is never about anyone; its speaker is framed instead.
+	fn subject(&self, text: &str, scene: &Scene) -> Option<String> {
+		if has_quotes(text) {
+			return None;
+		}
+
+		let plain = plain_text(text);
+		let opens = |name: &str| {
+			!name.is_empty()
+				&& plain
+					.strip_prefix(name)
+					.is_some_and(|rest| !rest.starts_with(|c: char| c.is_alphanumeric()))
+		};
+
+		scene
+			.actors
+			.iter()
+			.filter(|actor| actor.kind.is_figure() && !actor.hidden)
+			.find(|actor| {
+				self.cast.member(&actor.id).is_some_and(|member| {
+					opens(&member.name)
+						|| opens(member.name.split_whitespace().next().unwrap_or_default())
+				})
+			})
+			.map(|actor| actor.id.clone())
 	}
 }
 

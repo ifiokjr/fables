@@ -11,6 +11,7 @@ pub mod ffmpeg;
 pub mod frames;
 pub mod lipsync;
 pub mod motion;
+pub mod perform;
 pub mod timeline;
 pub mod voice;
 

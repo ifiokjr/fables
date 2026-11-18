@@ -58,6 +58,9 @@ pub struct Puppet {
 	/// How out of breath the puppet is (0..1): high just after running, so breathing stays
 	/// fast for a while.
 	pub exerted: f32,
+	/// Seconds the figure has held its mood, so a strong one can relax (see
+	/// [`acting`](crate::video::acting)). Zero in a still, which keeps the full mood.
+	pub held: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -224,6 +227,7 @@ fn aim(puppet: &mut Puppet, actor: &Actor, focus: &[(String, Pt)]) {
 	let Some(see) = &actor.eyes.see else {
 		return;
 	};
+
 	let (at, scale, heading) = (puppet.at, puppet.scale, puppet.heading);
 	let Kind::Figure(look) = &puppet.kind else {
 		return;
@@ -370,6 +374,7 @@ fn puppet(actor: &Actor, x: f32, ground: f32, time: f32, still: bool) -> Puppet 
 		lift: 0.0,
 		smear: 0.0,
 		exerted: 0.0,
+		held: 0.0,
 	}
 }
 
@@ -448,6 +453,7 @@ pub fn blend(a: &Puppet, b: &Puppet, t: f32) -> Puppet {
 		lift: lerp(a.lift, b.lift, t),
 		smear: b.smear,
 		exerted: lerp(a.exerted, b.exerted, t),
+		held: b.held,
 	}
 }
 
@@ -785,6 +791,7 @@ mod tests {
 			lift: 0.0,
 			smear: 0.0,
 			exerted: 0.0,
+			held: 0.0,
 		}
 	}
 
@@ -820,6 +827,7 @@ mod tests {
 			lift: 0.0,
 			smear: 0.0,
 			exerted: 0.0,
+			held: 0.0,
 		}
 	}
 
@@ -843,6 +851,7 @@ mod tests {
 			lift: 0.0,
 			smear: 0.0,
 			exerted: 0.0,
+			held: 0.0,
 		}
 	}
 
