@@ -956,7 +956,7 @@ mod tests {
 		let listed = server.flow_list(Parameters(WorldParams {
 			world: "mumbleton".into(),
 		}));
-		assert_eq!(listed.is_error, None);
+		assert_eq!(listed.is_error, Some(false));
 
 		match &listed.content[0] {
 			ContentBlock::Text(text) => {
@@ -974,11 +974,15 @@ mod tests {
 			flow: Some("three-tries".into()),
 			author: None,
 		}));
-		assert_eq!(started.is_error, None);
+		assert_eq!(started.is_error, Some(false));
 
 		match &started.content[0] {
 			ContentBlock::Text(text) => {
-				assert!(text.text.contains("flow = \"three-tries\""), "{}", text.text);
+				assert!(
+					text.text.contains("flow = \"three-tries\""),
+					"{}",
+					text.text
+				);
 				assert!(text.text.contains("@mo"), "{}", text.text);
 				assert!(
 					text.text.contains("[The star says what they want.]"),
