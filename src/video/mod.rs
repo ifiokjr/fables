@@ -25,10 +25,13 @@ use anyhow::Result;
 use anyhow::bail;
 use rayon::prelude::*;
 
+use crate::art::pt;
 use crate::cast::Cast;
+use crate::press::storyboard;
 use crate::stage::rehearse;
 use crate::story::Story;
 use crate::story::plain_text;
+use crate::video::director::View;
 use crate::video::frames::Format;
 use crate::video::frames::Renderer;
 use crate::video::timeline::Timeline;
@@ -321,6 +324,334 @@ fn stamp(seconds: f32) -> String {
 		millis / 1000 % 60,
 		millis % 1000
 	)
+}
+
+/// An animatic: the storyboard's shots held for their real durations over the video's
+/// soundtrack, so timing can be judged before a full render. One plate is drawn per shot and
+/// ffmpeg holds it, cropping a push or pan across the plate rather than rendering every frame.
+pub fn animatic(
+	story: &Story,
+	cast: &Cast,
+	timeline: &Timeline,
+	format: Format,
+	dir: &Path,
+) -> Result<PathBuf> {
+	let portrait = format == Format::Portrait;
+	let (width, height) = if portrait { (540, 960) } else { (960, 540) };
+	let fps = 24;
+	let rows = storyboard::plan(story, timeline, cast, portrait);
+
+	anyhow::ensure!(!rows.is_empty(), "the animatic has no shots to hold");
+
+	let views = storyboard::views(story, timeline, &rows, portrait);
+	let bounds = storyboard::frame_bounds(&rows, fps);
+	let scratch = Scratch::new()?;
+	let soundtrack = scratch.path.join("soundtrack.wav");
+	audio::write(timeline, &soundtrack)?;
+
+	// The fonts are embedded in the binary, so ffmpeg draws the same faces anywhere.
+	let body_font = scratch.path.join("body.ttf");
+	std::fs::write(&body_font, crate::raster::BODY_FONT)?;
+	let display_font = scratch.path.join("display.ttf");
+	std::fs::write(&display_font, crate::raster::DISPLAY_FONT)?;
+
+	let mut filters = Vec::new();
+	let mut inputs = Vec::new();
+	let mut parts = Vec::new();
+
+	for (index, ((row, (start, end)), (first, last))) in
+		rows.iter().zip(&views).zip(&bounds).enumerate()
+	{
+		let (union, plate_aspect) = union_view(*start, *end, format.aspect());
+		let plate_h = (f64::from(height) * 1.6).round() as u32;
+		let plate_w = (f64::from(plate_h) * f64::from(plate_aspect)).round() as u32;
+		let renderer =
+			Renderer::new(timeline, story, format, plate_w, plate_h).with_aspect(plate_aspect);
+		let plate = renderer.render_view(row.start + row.hold * 0.5, 0, union)?;
+		let plate_path = scratch.path.join(format!("plate-{index}.png"));
+		std::fs::write(&plate_path, crate::raster::png(&plate)?)?;
+		inputs.push(plate_path);
+
+		let frame = Plate {
+			union,
+			aspect: format.aspect(),
+			plate_aspect,
+			width: plate_w,
+		};
+		let crop = crop(row, *start, *end, &frame, *first, *last, fps);
+		let frames = last - first;
+		let label = label(row, portrait);
+		let label_path = scratch.path.join(format!("label-{index}.txt"));
+		std::fs::write(&label_path, label)?;
+		let font_size = if portrait { 17 } else { 20 };
+		let label_y = if portrait { height - 56 } else { height - 38 };
+
+		filters.push(format!(
+			"[{index}:v]zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={fps},\
+			 format=yuv420p,setsar=1,drawtext=fontfile='{}':textfile='{}':fontcolor=white:\
+			 fontsize={font_size}:box=1:boxcolor=0x2a2238@0.75:boxborderw=6:x=16:\
+			 y={label_y}[v{index}]",
+			path_text(&body_font),
+			path_text(&label_path),
+			z = crop.z,
+			x = crop.x,
+			y = crop.y,
+		));
+		parts.push(format!("[v{index}]"));
+	}
+
+	let audio_index = rows.len();
+	let timecode_y = if portrait { 26 } else { 20 };
+	let count = rows.len();
+	let graph = format!(
+		"{};{}concat=n={count}:v=1:a=0[cut];[cut]drawtext=fontfile='{}':text='%{{pts\\:hms}}':\
+		 fontcolor=white:fontsize={}:box=1:boxcolor=0x2a2238@0.7:boxborderw=6:x=w-tw-16:\
+		 y={timecode_y}[out]",
+		filters.join(";"),
+		parts.join(""),
+		path_text(&display_font),
+		if portrait { 18 } else { 22 },
+	);
+
+	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
+	let path = dir.join(format!("{}-animatic.mp4", story.slug));
+	let mut command = Command::new("ffmpeg");
+	command.args(["-y", "-loglevel", "error"]);
+
+	for input in &inputs {
+		command.arg("-i").arg(input);
+	}
+
+	command.arg("-i").arg(&soundtrack);
+	command.args([
+		"-filter_complex",
+		&graph,
+		"-map",
+		"[out]",
+		"-map",
+		&format!("{audio_index}:a"),
+		"-c:v",
+		"libx264",
+		"-preset",
+		"veryfast",
+		"-crf",
+		"20",
+		"-pix_fmt",
+		"yuv420p",
+		"-c:a",
+		"aac",
+		"-b:a",
+		"192k",
+		"-ar",
+		"48000",
+		"-shortest",
+		"-movflags",
+		"+faststart",
+	]);
+	let status = command
+		.arg(&path)
+		// Never on our stdout: under `fables mcp` that is the protocol's channel.
+		.stdout(Stdio::null())
+		.status()
+		.context("could not run ffmpeg; install it to make videos")?;
+
+	anyhow::ensure!(
+		status.success(),
+		"ffmpeg failed while writing {}",
+		path.display()
+	);
+
+	Ok(path)
+}
+
+/// One shot's crop of its plate: the zoom and the top-left corner, as ffmpeg expressions in
+/// the output frame number.
+struct Crop {
+	z: String,
+	x: String,
+	y: String,
+}
+
+/// How far into its move a shot is, eased like the video's camera, at output frame `on`.
+fn progress(first: usize, last: usize) -> String {
+	let span = last.saturating_sub(first).max(1);
+	let p = format!("min(max((on-{first})/{span},0),1)");
+
+	format!("({p})*({p})*(3-2*({p}))")
+}
+
+/// The plate a shot is cropped from: the view it covers and the shape it was drawn at.
+struct Plate {
+	union: View,
+	aspect: f32,
+	plate_aspect: f32,
+	width: u32,
+}
+
+/// The zoom and corner that frame `start` and, later, `end` out of the plate.
+fn crop(
+	row: &storyboard::Row,
+	start: View,
+	end: Option<View>,
+	plate: &Plate,
+	first: usize,
+	last: usize,
+	fps: u32,
+) -> Crop {
+	let scale = plate.width as f32 / plate.union.width(plate.plate_aspect);
+	let rect = |view: View| {
+		(
+			(view.centre.x
+				- view.width(plate.aspect) / 2.0
+				- (plate.union.centre.x - plate.union.width(plate.plate_aspect) / 2.0))
+				* scale,
+			(view.centre.y - view.height / 2.0 - (plate.union.centre.y - plate.union.height / 2.0))
+				* scale,
+			view.width(plate.aspect) * scale,
+			view.height * scale,
+		)
+	};
+	let (sx, sy, sw, _) = rect(start);
+	let Some(end) = end else {
+		return Crop {
+			z: decimal(plate.width as f32 / sw),
+			x: decimal(sx),
+			y: decimal(sy),
+		};
+	};
+	let (ex, ey, ew, _) = rect(end);
+	let move_first = row
+		.move_start
+		.map_or(first, |time| frame(time, row.start, first, last, fps));
+	let move_last = row
+		.move_end
+		.map_or(last, |time| frame(time, row.start, first, last, fps));
+
+	if move_last <= move_first {
+		return Crop {
+			z: decimal(plate.width as f32 / sw),
+			x: decimal(sx),
+			y: decimal(sy),
+		};
+	}
+
+	let p = progress(move_first, move_last);
+	let width = plate.width as f32;
+
+	Crop {
+		z: format!(
+			"({width})/(({}) + (({}) - ({}))*{p})",
+			decimal(sw),
+			decimal(ew),
+			decimal(sw)
+		),
+		x: format!(
+			"({}) + (({}) - ({}))*{p}",
+			decimal(sx),
+			decimal(ex),
+			decimal(sx)
+		),
+		y: format!(
+			"({}) + (({}) - ({}))*{p}",
+			decimal(sy),
+			decimal(ey),
+			decimal(sy)
+		),
+	}
+}
+
+/// An absolute time as an output frame, kept inside the shot.
+fn frame(time: f32, start: f32, first: usize, last: usize, fps: u32) -> usize {
+	let fps = f32::from(u16::try_from(fps).unwrap_or(u16::MAX));
+	let frame = ((time - start) * fps).round().max(0.0) as usize;
+
+	frame.clamp(0, last.saturating_sub(first).max(1))
+}
+
+/// The bounding view that holds both the opening and closing views, and the plate's aspect.
+fn union_view(start: View, end: Option<View>, aspect: f32) -> (View, f32) {
+	let Some(end) = end else {
+		return (start, aspect);
+	};
+	let rect = |view: View| {
+		(
+			view.centre.x - view.width(aspect) / 2.0,
+			view.centre.y - view.height / 2.0,
+			view.centre.x + view.width(aspect) / 2.0,
+			view.centre.y + view.height / 2.0,
+		)
+	};
+	let (sl, st, sr, sb) = rect(start);
+	let (el, et, er, eb) = rect(end);
+	let (left, right) = (sl.min(el), sr.max(er));
+	let (top, bottom) = (st.min(et), sb.max(eb));
+	let height = bottom - top;
+
+	(
+		View {
+			centre: pt(f32::midpoint(left, right), f32::midpoint(top, bottom)),
+			height,
+		},
+		(right - left) / height.max(1.0),
+	)
+}
+
+/// A number for an ffmpeg expression, without exponents.
+fn decimal(value: f32) -> String {
+	format!("{value:.4}")
+}
+
+/// A path as a filter option value.
+fn path_text(path: &Path) -> String {
+	path.display().to_string().replace('\\', "/")
+}
+
+/// The panel's caption, cut to fit the frame.
+fn label(row: &storyboard::Row, portrait: bool) -> String {
+	let mut label = row.label();
+
+	if label.chars().count() > if portrait { 44 } else { 78 } {
+		label = label
+			.chars()
+			.take(if portrait { 43 } else { 77 })
+			.collect::<String>();
+		label.push('…');
+	}
+
+	format!(
+		"#{}{} · {label}",
+		row.number,
+		if row.line == 0 {
+			String::new()
+		} else {
+			format!(" · line {}", row.line)
+		}
+	)
+}
+
+/// A directory under the system temp folder, removed when the animatic is done.
+struct Scratch {
+	path: PathBuf,
+}
+
+impl Scratch {
+	fn new() -> Result<Scratch> {
+		let stamp = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.map_or(0, |elapsed| elapsed.as_nanos());
+		let path =
+			std::env::temp_dir().join(format!("fables-animatic-{}-{stamp}", std::process::id()));
+		std::fs::create_dir_all(&path)
+			.with_context(|| format!("could not create {}", path.display()))?;
+
+		Ok(Scratch { path })
+	}
+}
+
+impl Drop for Scratch {
+	fn drop(&mut self) {
+		let _ = std::fs::remove_dir_all(&self.path);
+	}
 }
 
 #[cfg(test)]

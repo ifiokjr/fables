@@ -156,19 +156,27 @@ pub fn video(
 	)
 }
 
-/// The camera plan drawn as a comic strip: one labelled panel per camera setup, in the video's
-/// framing. Never records a voice — a line without a cached take is measured from its word
-/// count, so the board renders offline in a second or two.
-pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<Vec<PathBuf>> {
-	let timeline = estimated_timeline(story, cast, out)?;
+/// A storyboard's pictures and the shot list that reads them.
+#[derive(Clone, Debug)]
+pub struct Storyboard {
+	pub images: Vec<PathBuf>,
+	pub list: PathBuf,
+	/// The shot list as Markdown, as printed to the terminal.
+	pub text: String,
+}
 
-	press::storyboard::write(
-		story,
-		&timeline,
-		cast,
-		portrait,
-		&book_dir(out, story).join("storyboard"),
-	)
+/// The camera plan drawn as a comic strip with its shot list beside it, in the video's framing.
+/// Never records a voice — a line without a cached take is measured from its word count, so
+/// the board and list render offline in a second or two.
+pub fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<Storyboard> {
+	let timeline = estimated_timeline(story, cast, out)?;
+	let dir = book_dir(out, story).join("storyboard");
+	let rows = press::storyboard::plan(story, &timeline, cast, portrait);
+	let text = press::storyboard::shot_list(story, &timeline, &rows, portrait);
+	let images = press::storyboard::write(story, &timeline, cast, portrait, &dir)?;
+	let list = press::storyboard::write_list(&text, &dir, portrait)?;
+
+	Ok(Storyboard { images, list, text })
 }
 
 /// The timeline with estimated durations: a cached take when there is one, else the line's
@@ -211,7 +219,7 @@ fn offline_take(line: &crate::video::voice::Utterance<'_>, cache: &Path) -> Spee
 	};
 
 	Speech {
-		text: String::new(),
+		text: line.text.to_owned(),
 		samples: vec![0.0; (seconds * SAMPLE_RATE as f32) as usize],
 		envelope: Vec::new(),
 		track: Track::default(),

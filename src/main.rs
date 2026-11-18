@@ -152,12 +152,29 @@ enum Command {
 		#[arg(long)]
 		preview: bool,
 	},
-	/// Draw the video's camera plan as a comic strip: one labelled panel per camera setup.
+	/// Draw the video's camera plan as a comic strip and write its shot list.
 	Storyboard {
 		story: PathBuf,
 		#[arg(long, default_value = "out")]
 		out: PathBuf,
 		/// Which shape's camera plan to draw.
+		#[arg(long, value_enum, default_value = "landscape")]
+		format: Shape,
+		/// Write the director's shots into the script as editable `@camera` directions.
+		/// Name pages to pin only them: `--pin page=3,5`.
+		#[arg(long, num_args = 0..=1, default_missing_value = "all")]
+		pin: Option<String>,
+		/// Remove the directions a previous `--pin` wrote.
+		#[arg(long)]
+		unpin: bool,
+	},
+	/// Hold the storyboard's shots for their real durations over the soundtrack: an animatic
+	/// that judges timing in seconds rather than rendering every frame.
+	Animatic {
+		story: PathBuf,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+		/// Which shape to cut.
 		#[arg(long, value_enum, default_value = "landscape")]
 		format: Shape,
 	},
@@ -397,14 +414,48 @@ fn run(cli: Cli) -> Result<()> {
 				video(story, cast, &out, &format.formats(), preview)
 			})
 		}
-		Command::Storyboard { story, out, format } => {
+		Command::Storyboard {
+			story,
+			out,
+			format,
+			pin,
+			unpin,
+		} => {
 			anyhow::ensure!(
 				format != Shape::Both,
 				"storyboard draws one shape; use --format landscape or portrait"
 			);
+			anyhow::ensure!(
+				!(pin.is_some() && unpin),
+				"--pin writes camera directions and --unpin removes them; use one"
+			);
+
+			each(&story, |path| {
+				if let Some(spec) = &pin {
+					pin_story(path, flag, spec, &out)?;
+				}
+
+				if unpin {
+					unpin_story(path)?;
+				}
+
+				for choice in &choices {
+					let (story, cast) = load(path, choice.as_deref(), flag)?;
+					println!("  style: {}", story.style().name.name());
+					storyboard(&story, &cast, &out, format == Shape::Portrait)?;
+				}
+
+				Ok(())
+			})
+		}
+		Command::Animatic { story, out, format } => {
+			anyhow::ensure!(
+				format != Shape::Both,
+				"animatic cuts one shape; use --format landscape or portrait"
+			);
 
 			each_style(&story, &choices, flag, |story, cast| {
-				storyboard(story, cast, &out, format == Shape::Portrait)
+				animatic(story, cast, &out, format == Shape::Portrait)
 			})
 		}
 		Command::All { story, out } => {
@@ -1011,13 +1062,105 @@ fn video(story: &Story, cast: &Cast, out: &Path, formats: &[Format], preview: bo
 	Ok(())
 }
 
-fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
-	let started = Instant::now();
+/// Writes the director's shots into the script at `path` as `@camera` directions.
+fn pin_story(path: &Path, world: Option<&Path>, spec: &str, out: &Path) -> Result<()> {
+	let (story, cast) = load(path, None, world)?;
+	let pages = pages_spec(spec, story.pages.len())?;
+	let timeline = publish::estimated_timeline(&story, &cast, out)?;
+	let source = std::fs::read_to_string(path)
+		.with_context(|| format!("could not read {}", path.display()))?;
+	let pinned = press::storyboard::pin(&source, &story, &timeline, pages.as_deref())?;
+	std::fs::write(path, &pinned.script)
+		.with_context(|| format!("could not write {}", path.display()))?;
 
-	for path in publish::storyboard(story, cast, out, portrait)? {
-		done(&path, started);
+	for note in &pinned.notes {
+		println!("  {note}");
 	}
 
+	let list = pinned
+		.pages
+		.iter()
+		.map(usize::to_string)
+		.collect::<Vec<_>>()
+		.join(", ");
+	println!(
+		"✓ pinned {} camera directions into {} (pages {list})",
+		pinned.count,
+		path.display()
+	);
+
+	Ok(())
+}
+
+/// Removes the camera directions a previous `--pin` wrote.
+fn unpin_story(path: &Path) -> Result<()> {
+	let source = std::fs::read_to_string(path)
+		.with_context(|| format!("could not read {}", path.display()))?;
+	let (restored, removed) = press::storyboard::unpin(&source);
+	std::fs::write(path, &restored)
+		.with_context(|| format!("could not write {}", path.display()))?;
+	println!(
+		"✓ removed {removed} pinned camera directions from {}",
+		path.display()
+	);
+
+	Ok(())
+}
+
+/// The pages named by `--pin`: `all`, or `page=3,5`.
+fn pages_spec(spec: &str, count: usize) -> Result<Option<Vec<usize>>> {
+	let spec = spec.trim();
+
+	if spec.is_empty() || spec == "all" {
+		return Ok(None);
+	}
+
+	let list = spec.strip_prefix("page=").unwrap_or(spec);
+	let mut pages = Vec::new();
+
+	for part in list.split(',') {
+		let part = part.trim();
+		let page: usize = part.parse().map_err(|_| {
+			anyhow::anyhow!("`{part}` is not a page number; name pages like `--pin page=3,5`")
+		})?;
+		anyhow::ensure!(
+			(1..=count).contains(&page),
+			"page {page} is not in the book, which has {count} pages"
+		);
+		pages.push(page);
+	}
+
+	anyhow::ensure!(!pages.is_empty(), "name pages like `--pin page=3,5`");
+	Ok(Some(pages))
+}
+
+fn animatic(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
+	let started = Instant::now();
+	let cache = out.join(&story.slug).join("cache").join("voice");
+	let timeline = fables::video::plan(story, cast, &cache)?;
+	let format = if portrait {
+		Format::Portrait
+	} else {
+		Format::Landscape
+	};
+	let dir = publish::book_dir(out, story).join("animatic");
+	let path = fables::video::animatic(story, cast, &timeline, format, &dir)?;
+	done(&path, started);
+
+	Ok(())
+}
+
+fn storyboard(story: &Story, cast: &Cast, out: &Path, portrait: bool) -> Result<()> {
+	let started = Instant::now();
+	let board = publish::storyboard(story, cast, out, portrait)?;
+
+	println!("{}", board.text);
+
+	for path in &board.images {
+		done(path, started);
+	}
+
+	done(&board.list, started);
 	Ok(())
 }
 

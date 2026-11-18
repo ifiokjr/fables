@@ -43,6 +43,12 @@ const TAIL: f32 = 0.75;
 pub struct Key {
 	pub time: f32,
 	pub scene: Scene,
+	/// The script line of the direction that made this state, or the heading's line for the
+	/// state a page opens on. Zero for the title and end cards.
+	pub line: usize,
+	/// Seconds after the page opens at which this camera direction lands; `None` lands where
+	/// it is written.
+	pub after: Option<f32>,
 }
 
 /// A spoken line: a whole narrated paragraph, or one quote or tag from it.
@@ -59,6 +65,8 @@ pub struct Line {
 	pub text: String,
 	/// The character voicing the line, or `None` for the narrator.
 	pub voiced_by: Option<String>,
+	/// The script line the paragraph starts on (zero for the cards).
+	pub line: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,6 +148,27 @@ pub enum Framing {
 	Shot { size: ShotSize, on: Vec<String> },
 }
 
+/// Where a camera setup came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+	/// Written as an `@camera` direction in the script.
+	Script,
+	/// Chosen by the automatic director.
+	Director,
+	/// The title or end card, which no script page starts.
+	Card,
+}
+
+impl Origin {
+	pub fn name(self) -> &'static str {
+		match self {
+			Origin::Script => "script",
+			Origin::Director => "director",
+			Origin::Card => "card",
+		}
+	}
+}
+
 /// One camera setup: a framing the camera holds or moves to, starting at `time`.
 #[derive(Clone, Debug)]
 pub struct Setup {
@@ -154,6 +183,10 @@ pub struct Setup {
 	pub over: f32,
 	/// A decaying shake that starts with the setup (0 = none).
 	pub shake: f32,
+	/// The script line of the direction or line that starts the setup; zero for a card.
+	pub line: usize,
+	/// Whether the script wrote this setup or the director chose it.
+	pub origin: Origin,
 }
 
 /// A sound effect at a moment in the video.
@@ -310,7 +343,12 @@ impl<S: Speaker> Builder<'_, S> {
 			kind: ShotKind::Title,
 			start,
 			end,
-			keys: vec![Key { time: start, scene }],
+			keys: vec![Key {
+				time: start,
+				scene,
+				line: 0,
+				after: None,
+			}],
 			lines: vec![Line {
 				start: line_start,
 				speech,
@@ -318,6 +356,7 @@ impl<S: Speaker> Builder<'_, S> {
 				speakers,
 				text: String::new(),
 				voiced_by: None,
+				line: 0,
 			}],
 			transition: Transition::Cut,
 			setups: Vec::new(),
@@ -345,7 +384,12 @@ impl<S: Speaker> Builder<'_, S> {
 			kind: ShotKind::End,
 			start,
 			end,
-			keys: vec![Key { time: start, scene }],
+			keys: vec![Key {
+				time: start,
+				scene,
+				line: 0,
+				after: None,
+			}],
 			lines: vec![Line {
 				start: line_start,
 				speech,
@@ -353,6 +397,7 @@ impl<S: Speaker> Builder<'_, S> {
 				speakers: Vec::new(),
 				text: moral.to_owned(),
 				voiced_by: None,
+				line: 0,
 			}],
 			transition: self.story.meta.video.transition.unwrap_or_default(),
 			setups: Vec::new(),
@@ -367,6 +412,8 @@ impl<S: Speaker> Builder<'_, S> {
 		let mut keys = vec![Key {
 			time: start,
 			scene: rehearsal.opening.clone(),
+			line: page.line,
+			after: None,
 		}];
 		let mut lines = Vec::new();
 		let mut t = start + LEAD_IN;
@@ -374,21 +421,66 @@ impl<S: Speaker> Builder<'_, S> {
 
 		for (beat, scene) in page.beats.iter().zip(&rehearsal.after) {
 			match beat {
-				Beat::Direct(_) if opening => {
-					// Directions before the first line set the scene the page opens on.
+				Beat::Direct(directive)
+					if opening
+						&& !(directive.actor == "camera"
+							&& after(directive).is_some_and(|after| after > 0.0)) =>
+				{
+					// Directions before the first line set the scene the page opens on. A camera
+					// direction with `after=` lands later by its own clock, even here.
 					keys[0].scene = scene.clone();
+					keys[0].scene.camera.after = None;
+
+					if directive.actor == "camera" {
+						keys[0].after = scene.camera.after;
+					}
 				}
-				Beat::Direct(_) => {
-					if let Some(previous) = keys.last() {
-						auto_cues(&previous.scene, scene, t, &mut self.timeline.cues);
+				Beat::Direct(directive) => {
+					let after = if directive.actor == "camera" {
+						scene.camera.after
+					} else {
+						None
+					};
+					let at = after.map_or(t, |after| (start + after).max(t));
+
+					// A camera direction moves no one, so it never makes a sound of its own.
+					if directive.actor != "camera"
+						&& let Some(previous) = keys.last()
+					{
+						auto_cues(&previous.scene, scene, at, &mut self.timeline.cues);
 					}
 
+					// A camera change that lands later takes the state the page has reached by
+					// then, so it never wipes an action it lands after.
+					let mut state = if after.is_some() {
+						keys.iter()
+							.rev()
+							.find(|key| key.time <= at + 1e-3)
+							.map_or_else(|| scene.clone(), |key| key.scene.clone())
+					} else {
+						scene.clone()
+					};
+
+					if after.is_some() {
+						state.apply_camera(directive)?;
+					}
+
+					state.camera.after = None;
+
 					match keys.last_mut() {
-						Some(last) if (last.time - t).abs() < 1e-3 => last.scene = scene.clone(),
+						Some(last) if (last.time - at).abs() < 1e-3 => {
+							last.scene = state;
+
+							if directive.actor == "camera" {
+								last.after = after;
+							}
+						}
 						_ => {
 							keys.push(Key {
-								time: t,
-								scene: scene.clone(),
+								time: at,
+								scene: state,
+								line: directive.line,
+								after,
 							});
 						}
 					}
@@ -397,9 +489,9 @@ impl<S: Speaker> Builder<'_, S> {
 					medium: Medium::BookOnly,
 					..
 				} => {}
-				Beat::Say { text, .. } => {
+				Beat::Say { text, line, .. } => {
 					opening = false;
-					t = self.paragraph(text, scene, t, &mut lines)?;
+					t = self.paragraph(text, *line, scene, t, &mut lines)?;
 				}
 				Beat::Pause { seconds, .. } => {
 					opening = false;
@@ -435,6 +527,7 @@ impl<S: Speaker> Builder<'_, S> {
 	fn paragraph(
 		&mut self,
 		text: &str,
+		script_line: usize,
 		scene: &Scene,
 		mut t: f32,
 		lines: &mut Vec<Line>,
@@ -469,6 +562,7 @@ impl<S: Speaker> Builder<'_, S> {
 						speakers: vec![actor.id.clone()],
 						text: format!("\u{201c}{part}\u{201d}"),
 						voiced_by: Some(actor.id.clone()),
+						line: script_line,
 					};
 					t += duration + BEAT;
 					line
@@ -486,6 +580,7 @@ impl<S: Speaker> Builder<'_, S> {
 						speakers: Vec::new(),
 						text: part,
 						voiced_by: None,
+						line: script_line,
 					};
 					t += duration + BEAT;
 					line
@@ -506,10 +601,31 @@ impl<S: Speaker> Builder<'_, S> {
 			speakers: talking.iter().map(|actor| actor.id.clone()).collect(),
 			text: text.to_owned(),
 			voiced_by: None,
+			line: script_line,
 		});
 
 		Ok(t + duration + GAP)
 	}
+}
+
+/// When a camera direction lands, in seconds after the page opens, when it says `after=`.
+fn after(directive: &crate::story::Directive) -> Option<f32> {
+	directive
+		.tokens
+		.iter()
+		.find(|token| token.key == "after")
+		.and_then(|token| token.value.as_deref())
+		.and_then(|value| value.parse::<f32>().ok())
+}
+
+/// When a camera direction lands, in seconds after the page opens, when it says `after=`.
+fn after(directive: &crate::story::Directive) -> Option<f32> {
+	directive
+		.tokens
+		.iter()
+		.find(|token| token.key == "after")
+		.and_then(|token| token.value.as_deref())
+		.and_then(|value| value.parse::<f32>().ok())
 }
 
 fn has_quotes(text: &str) -> bool {
@@ -706,6 +822,26 @@ mod tests {
 		}
 
 		assert!((tl.duration - tl.shots.last().unwrap().end).abs() < 1e-4);
+	}
+
+	#[test]
+	fn a_camera_direction_can_land_inside_a_hold() {
+		let tl = timeline(
+			"# park\n@kid x=0.3 talk\nHello there today my friend.\n@camera shot=close on=kid \
+			 after=4\nWhy hello to you too.\n",
+		);
+		let shot = &tl.shots[1];
+		let late = shot
+			.keys
+			.iter()
+			.find(|key| key.scene.camera.shot == Some(ShotSize::Close))
+			.expect("the late close-up is a key");
+
+		assert!(
+			(late.time - (shot.start + 4.0)).abs() < 1e-3,
+			"the direction lands 4s after the page opens, not at {:.2}s",
+			late.time
+		);
 	}
 
 	#[test]

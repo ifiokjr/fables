@@ -282,6 +282,9 @@ pub struct Camera {
 	pub over: f32,
 	/// A decaying camera shake when this direction lands (0 = none).
 	pub shake: f32,
+	/// Seconds after the page opens at which this camera direction lands. `None` lands where
+	/// the direction is written. A pinned slow push uses it to start inside a long hold.
+	pub after: Option<f32>,
 }
 
 impl Default for Camera {
@@ -294,6 +297,7 @@ impl Default for Camera {
 			travel: None,
 			over: 0.0,
 			shake: 0.0,
+			after: None,
 		}
 	}
 }
@@ -302,7 +306,11 @@ impl Camera {
 	/// Whether this camera state names any of the shot vocabulary (`shot=`, `on=`, a move,
 	/// `cut`, `ease` or `shake=`), as opposed to the legacy `zoom=` and `look=`.
 	pub fn is_directed(&self) -> bool {
-		self.shot.is_some() || self.travel.is_some() || self.shake > 0.0 || !self.on.is_empty()
+		self.shot.is_some()
+			|| self.travel.is_some()
+			|| self.shake > 0.0
+			|| self.after.is_some()
+			|| !self.on.is_empty()
 	}
 }
 
@@ -355,6 +363,11 @@ impl Scene {
 		let line = directive.line;
 
 		if directive.actor == "scene" || directive.actor == "camera" {
+			// `after=` is where this one direction lands, not a state the next inherits.
+			if directive.actor == "camera" {
+				self.camera.after = None;
+			}
+
 			for token in &directive.tokens {
 				self.apply_scene_token(token, line)?;
 			}
@@ -391,6 +404,17 @@ impl Scene {
 		}
 
 		memory.insert(actor.id.clone(), actor.traits());
+
+		Ok(())
+	}
+
+	/// Applies a camera direction's tokens to this state, for a camera change that lands later
+	/// than the line it is written before. The state is where the page has reached by then, so
+	/// an action the camera lands after stays on stage.
+	pub fn apply_camera(&mut self, directive: &Directive) -> Result<()> {
+		for token in &directive.tokens {
+			self.apply_scene_token(token, directive.line)?;
+		}
 
 		Ok(())
 	}
@@ -459,11 +483,12 @@ impl Scene {
 			("ease", None) => self.camera.travel = Some(Travel::Glide),
 			("over", Some(v)) => self.camera.over = number(token, v, line)?.max(0.0),
 			("shake", Some(v)) => self.camera.shake = number(token, v, line)?.clamp(0.0, 1.0),
+			("after", Some(v)) => self.camera.after = Some(number(token, v, line)?.max(0.0)),
 			_ => {
 				bail!(
 					"line {line}: `{token}` is not a scene option; use night, day, light=, wilt=, \
 					 stink=, mint=, tint=, speed=, impact=, zoom=, look=x,y, shot=, on=, move=, \
-					 over=, shake=, cut or ease"
+					 over=, shake=, after=, cut or ease"
 				)
 			}
 		}
@@ -950,8 +975,10 @@ mod tests {
 
 	#[test]
 	fn camera_vocabulary_parses_into_the_scene_camera() {
-		let scene =
-			run("# park\n@camera shot=close on=stinky,mum move=push over=2.5 shake=0.5\n").unwrap();
+		let scene = run(
+			"# park\n@camera shot=close on=stinky,mum move=push over=2.5 shake=0.5 after=1.5\n",
+		)
+		.unwrap();
 		let camera = &scene.camera;
 
 		assert_eq!(camera.shot, Some(ShotSize::Close));
@@ -959,6 +986,7 @@ mod tests {
 		assert_eq!(camera.travel, Some(Travel::Push));
 		assert!((camera.over - 2.5).abs() < f32::EPSILON);
 		assert!((camera.shake - 0.5).abs() < f32::EPSILON);
+		assert!((camera.after.unwrap_or_default() - 1.5).abs() < f32::EPSILON);
 	}
 
 	#[test]

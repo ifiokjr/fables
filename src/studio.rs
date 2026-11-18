@@ -367,6 +367,30 @@ pub enum Output {
 	Print,
 }
 
+/// What an animatic wrote: the MP4 and the shot list it holds.
+#[derive(Clone, Debug, Serialize)]
+pub struct AnimaticReport {
+	pub file: String,
+	pub seconds: f32,
+	pub shots: usize,
+	pub shot_list: String,
+}
+
+/// What pinning a book's shots into its script wrote.
+#[derive(Clone, Debug, Serialize)]
+pub struct PinReport {
+	/// The script after pinning (or unpinning).
+	pub script: String,
+	/// The 1-based pages pinned, in script order.
+	pub pages: Vec<usize>,
+	/// How many `@camera` directions were written.
+	pub pinned: usize,
+	/// How many pinned directions were removed (`unpin`).
+	pub unpinned: usize,
+	/// Pages left alone, and where the portrait plan differs.
+	pub notes: Vec<String>,
+}
+
 /// A video shape.
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -1093,25 +1117,23 @@ impl Studio {
 		Ok(self.relative(&files))
 	}
 
-	/// The storyboard as images: the video's camera plan drawn as a comic strip, one labelled
-	/// panel per setup, in the shape's framing. Timings are estimated offline, so no voice is
-	/// recorded and no video is encoded.
-	pub fn storyboard_images(
+	/// The storyboard as images and its shot list: the video's camera plan drawn as a comic
+	/// strip, one labelled panel per shot, in the shape's framing. Timings are estimated
+	/// offline, so no voice is recorded and no video is encoded.
+	pub fn storyboard(
 		&self,
 		folder: &str,
 		story: &str,
 		shape: VideoShape,
-	) -> Result<Vec<Image>> {
+	) -> Result<(String, Vec<Image>)> {
 		let (_, script, cast) = self.book(folder, story)?;
-		let timeline = publish::estimated_timeline(&script, &cast, &self.root.join("out"))?;
-		let boards = crate::press::storyboard::boards(
-			&script,
-			&timeline,
-			&cast,
-			shape == VideoShape::Portrait,
-		)?;
-
-		boards
+		let out = self.root.join("out");
+		let timeline = publish::estimated_timeline(&script, &cast, &out)?;
+		let portrait = shape == VideoShape::Portrait;
+		let rows = crate::press::storyboard::plan(&script, &timeline, &cast, portrait);
+		let text = crate::press::storyboard::shot_list(&script, &timeline, &rows, portrait);
+		let boards = crate::press::storyboard::boards(&script, &timeline, &cast, portrait)?;
+		let images = boards
 			.into_iter()
 			.enumerate()
 			.map(|(page, board)| {
@@ -1120,7 +1142,97 @@ impl Studio {
 					png: raster::png(&board)?,
 				})
 			})
-			.collect()
+			.collect::<Result<Vec<_>>>()?;
+
+		Ok((text, images))
+	}
+
+	/// The storyboard's images alone.
+	pub fn storyboard_images(
+		&self,
+		folder: &str,
+		story: &str,
+		shape: VideoShape,
+	) -> Result<Vec<Image>> {
+		self.storyboard(folder, story, shape)
+			.map(|(_, images)| images)
+	}
+
+	/// Pins the director's shots into a book's script as editable `@camera` directions, one
+	/// before the line or direction that starts each shot, or removes the ones pinned before.
+	/// Returns the new script.
+	pub fn pin_story(
+		&self,
+		folder: &str,
+		story: &str,
+		pages: Option<&[usize]>,
+		unpin: bool,
+	) -> Result<PinReport> {
+		let (world, script, cast) = self.book(folder, story)?;
+		let path = world.stories().join(story).join("story.md");
+		let source = std::fs::read_to_string(&path)
+			.with_context(|| format!("could not read {}", path.display()))?;
+
+		if unpin {
+			let (restored, removed) = crate::press::storyboard::unpin(&source);
+			std::fs::write(&path, &restored)
+				.with_context(|| format!("could not write {}", path.display()))?;
+
+			return Ok(PinReport {
+				script: restored,
+				pages: Vec::new(),
+				pinned: 0,
+				unpinned: removed,
+				notes: Vec::new(),
+			});
+		}
+
+		let timeline = publish::estimated_timeline(&script, &cast, &self.root.join("out"))?;
+		let pinned = crate::press::storyboard::pin(&source, &script, &timeline, pages)?;
+		std::fs::write(&path, &pinned.script)
+			.with_context(|| format!("could not write {}", path.display()))?;
+
+		Ok(PinReport {
+			script: pinned.script,
+			pages: pinned.pages,
+			pinned: pinned.count,
+			unpinned: 0,
+			notes: pinned.notes,
+		})
+	}
+
+	/// Cuts an animatic: each storyboard shot held for its real duration over the soundtrack,
+	/// at half size. Narrates any missing line once, then reuses the voice cache.
+	pub fn render_animatic(
+		&self,
+		folder: &str,
+		story: &str,
+		shape: VideoShape,
+	) -> Result<AnimaticReport> {
+		let (_, script, cast) = self.book(folder, story)?;
+		let format = match shape {
+			VideoShape::Landscape => Format::Landscape,
+			VideoShape::Portrait => Format::Portrait,
+		};
+		let cache = self.root.join(&script.slug).join("cache").join("voice");
+		let timeline = crate::video::plan(&script, &cast, &cache)?;
+		let out = self.root.join("out");
+		let dir = publish::book_dir(&out, &script).join("animatic");
+		let path = crate::video::animatic(&script, &cast, &timeline, format, &dir)?;
+		let portrait = shape == VideoShape::Portrait;
+		let rows = crate::press::storyboard::plan(&script, &timeline, &cast, portrait);
+		let shot_list = crate::press::storyboard::shot_list(&script, &timeline, &rows, portrait);
+
+		Ok(AnimaticReport {
+			file: path
+				.strip_prefix(&self.root)
+				.unwrap_or(&path)
+				.display()
+				.to_string(),
+			seconds: timeline.duration,
+			shots: rows.len(),
+			shot_list,
+		})
 	}
 
 	/// Frames from a story's video at the sampled moments, tiled into one labelled image and
