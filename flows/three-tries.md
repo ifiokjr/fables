@@ -129,8 +129,9 @@ note = "Return to the opening staging with the star changed, and end on the refr
 // 25–35 words: something is noticed, and the star looks at it.
 [Something is noticed.]
 
+// A `see=` holds over the page turn until it is changed; `see=front` looks out at the reader.
 # garden dawn shot=medium on={{star}}
-@{{star}} x=0.45 think talk
+@{{star}} x=0.45 think talk see=front
 // 25–35 words: the idea, in the star's own words, before the plan.
 [The idea the failures taught.]
 

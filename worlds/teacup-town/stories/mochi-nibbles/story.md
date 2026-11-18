@@ -31,7 +31,7 @@ This is Mochi Mae, the smallest baker in town. She tastes the batter, the icing,
 
 # kitchen night shot=medium
 @crumb x=0.72 point cross talk
-@mochi x=0.3 arms-crossed defiant
+@mochi x=0.3 arms-crossed defiant see=crumb
 "The wedding cake is for the mayor!" said Crumb.
 @mochi talk
 "**NOPE**," said Mochi, and she crossed her arms. Twice.
@@ -42,7 +42,7 @@ At dawn every cake in the window had a bite out of it, and Mochi was the last to
 
 # shop indoor shot=full
 @mochi x=0.3 happy see=crumb
-@crumb x=0.72 worried hold holds=cake see=mine
+@crumb x=0.72 worried holds=cake see=mine
 The wedding cake came out with a nibble in the icing, right where the mayor would look. The mayor looked.
 
 # park golden shot=full
@@ -52,13 +52,13 @@ The wedding cake came out with a nibble in the icing, right where the mayor woul
 The birthday cake in the park had a bite, and the birthday bird got the blame. It was a very small party.
 
 # town day shot=full
-@mochi x=0.3 happy
-@crumb x=0.72 cross hold holds=cake
+@mochi x=0.3 happy see=crumb
+@crumb x=0.72 cross holds=cake see=mine
 By lunch every cake in the shop had a bite, and the window was empty. Crumb put up a sign.
 
 # town day shot=medium on=mochi
-@mochi x=0.4 shocked crouch
-@crumb x=0.72 shocked
+@mochi x=0.4 shocked crouch see=front
+@crumb x=0.72 shocked see=mochi
 @cake x=0.42 size=2.1 z=9
 They called her **Mochi Nibbles**, and the whole town said it at once. Mochi hid behind a cake stand.
 
@@ -77,24 +77,24 @@ Alone that night, Mochi decided to bake one cake and not taste it. Just once. Sh
 **WHOOSH!** The cake rose taller than the shop, and it was whole, every crumb of it. It smelled like a whole cake.
 
 # shop day shot=wide
-@mochi x=0.3 grin talk hold holds=cake
-@crumb x=0.7 happy
+@mochi x=0.3 grin talk holds=cake see=front
+@crumb x=0.7 happy see=mochi
 @bird.a x=0.86 happy
 The wedding cake was whole. The birthday cake was whole. The window was full again, and the bird came back.
 @camera shot=close on=mochi
 
 # town golden shot=wide
-@mochi x=0.4 cheer proud
-@crumb x=0.7 happy hold holds=cake
+@mochi x=0.4 cheer proud see=front
+@crumb x=0.7 happy holds=cake see=mine
 They called her **Mochi Whole-Cake**, and the whole town said it twice. Mochi tried not to taste it.
 
 # kitchen night shot=medium
-@crumb x=0.72 point happy talk
-@mochi x=0.3 hips grin talk holds=spoon
+@crumb x=0.72 point happy talk see=mochi
+@mochi x=0.3 hips grin talk holds=spoon see=crumb
 "One little taste?" said Crumb.
 @mochi talk
 "**ALREADY DONE!**" said Mochi, and she licked the spoon.
 
 # plain tint=sunflower shot=medium
-@mochi x=0.5 wave grin
+@mochi x=0.5 wave grin see=front
 **The End**

@@ -45,7 +45,7 @@ He tucked it in, and the worry went out of his shoulders. The street was quiet, 
 "Sorry" was under the bench, where he had dropped it. "Goodnight, bench," said Mo, and the bench held still.
 
 # shop moonlit transition=dissolve shot=medium on=mo
-@mo x=0.45 sleepy talk holds=jar
+@mo x=0.45 sleepy talk holds=jar see=right
 "Thank you" was in the baker's window, cooling on a tray. "Goodnight, baker," said Mo, and the light went off.
 
 # forest moonlit transition=dissolve shot=medium on=mo
@@ -59,11 +59,11 @@ He tucked it in, and the worry went out of his shoulders. The street was quiet, 
 The last word was on the hilltop with the wind. Mo held the jar tight and said nothing at all.
 
 # playroom moonlit transition=dissolve shot=medium on=mo
-@mo x=0.45 sleepy talk holds=jar
+@mo x=0.45 sleepy talk holds=jar see=down
 "Goodnight, toys," said Mo, and the toys kept still. "Goodnight, train. Goodnight, bear."
 
 # bathroom moonlit transition=dissolve shot=medium on=mo
-@mo x=0.45 sleepy talk holds=jar
+@mo x=0.45 sleepy talk holds=jar see=down
 "Goodnight, bath," said Mo, and the last of the day went down the plughole with a soft, soapy sound.
 
 # bedroom candle shot=medium on=mo
@@ -71,6 +71,6 @@ The last word was on the hilltop with the wind. Mo held the jar tight and said n
 At home he put the jar by his bed and climbed in under the duvet, with one word still in his hand and the jar glowing on the shelf.
 
 # bedroom candle shot=close on=mo text=bottom transition=fade
-@mo x=0.45 dreamy talk holds=nothing
+@mo x=0.45 dreamy talk holds=nothing see=front
 @music none
 One word was left. "Goodnight," said Mo, very softly, and blew out the light.

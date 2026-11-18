@@ -98,8 +98,9 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 
 // Beat 3: Acts on the mistake ×3, escalating. Three pages, 25–35 words.
 // Keep the truth in the background of every page.
+// A `see=` holds over the page turn until it is changed; `see=front` looks out at the reader.
 # kitchen indoor shot=full
-@{{star}} x=0.3 proud
+@{{star}} x=0.3 proud see=front
 @{{friend}} x=0.8 happy
 // 25–35 words: the first helpful act, and the truth still going on behind it.
 [First act.]
@@ -130,8 +131,8 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 [Puzzled.]
 
 # garden day text=bottom shot=close on={{star}}
-@{{star}} x=0.3 worried
-@{{friend}} x=0.7 worried
+@{{star}} x=0.3 worried see={{friend}}
+@{{friend}} x=0.7 worried see={{star}}
 // 25–35 words: the star sees the puzzle and misreads it too; the text card sits low, ready
 // for the page turn.
 [The mistake deepens.]

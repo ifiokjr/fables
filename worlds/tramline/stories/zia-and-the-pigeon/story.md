@@ -62,7 +62,7 @@ The tram came without a sound and stopped beside them. The pigeon hopped aboard.
 @pause 0.5
 
 # square day transition=iris shot=close on=zia
-@zia x=0.4 grin hold holds=bell see=mine
+@zia x=0.4 grin hold holds=bell see=bird.a
 @bird.a x=0.78 happy
 @sfx ding
 The tram dinged its own bell, and left.

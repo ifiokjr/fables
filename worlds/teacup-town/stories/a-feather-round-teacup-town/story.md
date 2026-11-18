@@ -29,7 +29,7 @@ Mochi Mae's cakes were the best in Teacup Town. Beside her stall, a shaggy dog s
 The dog sneezed in its sleep, a great soft sneeze, and blew the feather right off Mochi's baker hat.
 
 # garden day transition=push shot=full on=mochi,flower.1
-@mochi x=0.3 shocked
+@mochi x=0.3 shocked see=front
 @flower.1 x=0.75 happy
 The feather tickled Mochi's nose as she carried the flour out, and her sneeze puffed a white cloud over the garden.
 
@@ -40,7 +40,7 @@ The flour cloud drifted down the street to the park, and landed softly on a smal
 
 # hilltop golden transition=push shot=wide on=mochi
 @mochi x=0.35 worried see=bird.a
-@bird.a x=0.55 happy see=flower.1
+@bird.a x=0.55 happy
 @flower.1 x=0.75 sleepy
 The bird flew up to the hilltop and shook the flour all over a sleepy flower, head to toe.
 
@@ -62,7 +62,7 @@ The petal sailed back up the street, looped once around the lamp post, and lande
 
 # street day shot=medium on=mochi,dog.a
 @mochi x=0.35 happy see=dog.a
-@dog.a x=0.7 happy see=mochi
+@dog.a x=0.7 happy
 The same street, the same stall, and one thing changed: the dog was awake, and looking at Mochi.
 
 # street day shot=close on=dog.a transition=iris

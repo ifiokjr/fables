@@ -147,18 +147,19 @@ note = "The opening framing again, with the souvenir on show."
 // Beat 7: The way home, quick. Two pages, 15–25 words.
 // All homeward travel moves leftward, and the pages are shorter than the way out.
 # hilltop night shot=wide transition=push
-@{{star}} x=0.6 face=left walk
+@{{star}} x=0.6 face=left walk see=left
 // 15–25 words: the first step home, leftward.
 [The way home.]
 
 # park night shot=wide transition=push
-@{{star}} x=0.4 face=left walk
+@{{star}} x=0.4 face=left walk see=left
 // 15–25 words: the second step home, quicker.
 [Quicker now.]
 
 // Beat 8: Home, changed. Two pages, 20–30 words.
+// A `see=` holds over the page turn until it is changed; `see=front` looks out at the reader.
 # town moonlit shot=wide on={{star}}
-@{{star}} x=0.4 enter=left proud
+@{{star}} x=0.4 enter=left proud see=front
 // 20–30 words: home in a later light.
 [Home again, in a later light.]
 

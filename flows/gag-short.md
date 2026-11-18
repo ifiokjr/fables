@@ -122,7 +122,7 @@ note = "Three to eight words, and the iris: end on the image, not the explanatio
 // Beat 6: The twist, a payoff with no anticipation. One page, 0–10 words.
 // Cut into the surprise; easing in gives the audience time to see it coming.
 # street day transition=cut shot=wide
-@{{star}} x=0.4 happy
+@{{star}} x=0.4 happy see=bird.a
 @bird.a x=0.75 happy
 // 0–10 words: the twist, and nothing setting it up.
 [The twist.]

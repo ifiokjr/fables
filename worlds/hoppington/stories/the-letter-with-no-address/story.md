@@ -27,11 +27,11 @@ In Hoppington, where everybody bounces to the bandstand, Clem Clatter ran the po
 One morning a letter arrived with no name, no street, and only a small drawing of a door in red ink.
 
 # street day shot=full on=clem
-@clem x=0.3 face=right walk hop holds=letter
+@clem x=0.3 face=right walk hop holds=letter see=right
 Clem put the letter in his pocket, pulled on his hat, and hopped out into the street to find the door.
 
 # hilltop dawn shot=wide transition=dissolve
-@clem x=0.35 enter=right happy
+@clem x=0.35 enter=right happy see=right
 The first door was on the mill at the top of the hill, blue as a cornflower.
 
 # hilltop dawn shot=close on=clem
@@ -39,7 +39,7 @@ The first door was on the mill at the top of the hill, blue as a cornflower.
 It had a round handle and a brass plate. The drawing showed a square door with a long handle. Clem hopped on.
 
 # forest golden shot=wide transition=dissolve
-@clem x=0.35 enter=right happy
+@clem x=0.35 enter=right happy see=right
 The second door was in the hill, under the oldest tree, with moss over its hinges and a beetle on the step.
 
 # forest golden shot=full on=clem
@@ -47,7 +47,7 @@ The second door was in the hill, under the oldest tree, with moss over its hinge
 It was round. The drawing was square. Clem checked the letter twice, then hopped on.
 
 # beach storm shot=wide on=clem
-@clem x=0.5 shocked
+@clem x=0.5 shocked see=up
 The third door was in the lighthouse, where the wind blew hardest and the stairs went round and round.
 
 # beach storm shot=full on=clem
@@ -59,11 +59,11 @@ It was tiny, no taller than a bucket, with a handle no bigger than a spoon. The 
 Clem climbed to the lamp and looked back the way he had come. Far away, at the end of Hoppington, was a door he knew.
 
 # hilltop night shot=wide transition=push
-@clem x=0.6 face=left walk hop holds=letter
+@clem x=0.6 face=left walk hop holds=letter see=left
 He hopped home fast, leftward, past the mill and the hill, while the wind tried to take the letter out of his pocket.
 
 # street night shot=wide transition=push
-@clem x=0.4 face=left walk
+@clem x=0.4 face=left walk see=left
 Past the bandstand, past the square, past the baker and the cat, all the way to his own front door.
 
 # shop moonlit shot=wide on=clem
@@ -78,4 +78,6 @@ Inside, the letter said, "Come for tea. Love, your grandmother." She had forgott
 @letter x=0.86 y=0.66
 @clem x=0.68 grin hop holds=nothing see=letter
 Clem propped the letter on the counter where he could see it, took his hat, and hopped off to tea.
-@camera shot=medium on=clem
+@camera shot=close on=clem
+@pause 0.8
+@camera shot=medium on=clem ease

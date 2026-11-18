@@ -30,25 +30,25 @@ Nan sat in the garden with a basket in her lap, a mouthful of pins, and a ball o
 
 # garden day shot=close on=mo
 @mo x=0.3 worried see=away
-@nan x=0.75 talk
+@nan x=0.75 talk holds=basket see=mine
 Half a sentence blew past Mo: "...a new kid tomorrow." He heard only the new kid, and his heart went small.
 
 # kitchen indoor shot=full
-@mo x=0.3 proud
-@nan x=0.8 happy holds=basket
+@mo x=0.3 proud see=down
+@nan x=0.8 happy holds=basket see=mine
 Mo swept the kitchen twice, in case a new kid needed a clean floor, and put the broom back exactly straight.
 
 # bedroom day shot=medium on=mo
-@mo x=0.35 proud
-@nan x=0.8 happy holds=basket
+@mo x=0.35 proud see=down
+@nan x=0.8 happy holds=basket see=mine
 He sorted every sock into pairs, so the new kid would know where things went, and folded the pairs twice.
 
 # garden day shot=full
-@mo x=0.3 cheer talk
-@nan x=0.8 happy holds=basket
+@mo x=0.3 cheer talk see=front
+@nan x=0.8 happy holds=basket see=mine
 He sang the new kid a welcome song, very loudly, in case it was shy, and the windows rattled.
 
-# garden day shot=full on=nan
+# garden day shot=full on=mo,nan
 @basket x=0.9 size=1.3
 @nan x=0.7 notice see=mo shocked
 @mo x=0.3 proud see=nan
@@ -69,17 +69,19 @@ Mo stared back. Maybe the new kid did not like songs. Maybe it wanted the socks 
 The new kid arrived. It had four paws, one wet nose, and Mo's best sock in its mouth.
 
 # garden dusk shot=wide
-@mo x=0.3 laugh sit
-@nan x=0.85 laugh
+@mo x=0.3 laugh sit see=dog.a
+@nan x=0.85 laugh see=dog.a
 @dog.a x=0.6 wag
 Mo laughed so hard he had to sit down on the grass. The new kid sat down too, and dropped the sock. The sock was very wet.
 
 # garden moonlit shot=wide
-@mo x=0.3 grin hold holds=basket
+@mo x=0.3 grin hold holds=basket see=mine
 @nan x=0.7 grin see=mo
 @dog.a x=0.85 sleepy
 They put the basket by the stove and the sock back in the drawer. Everybody helped, including the new kid.
-@camera shot=full on=mo
+@camera shot=close on=mo
+@pause 0.8
+@camera shot=full on=mo ease
 
 # garden moonlit shot=close on=dog.a transition=iris
 @dog.a x=0.8 shocked
