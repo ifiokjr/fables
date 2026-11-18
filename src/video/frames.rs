@@ -501,7 +501,10 @@ impl<'a> Renderer<'a> {
 
 				if let (Some(giver), Some(taker)) = (at(&giver), at(&taker)) {
 					let (giver, taker) = pair_mut(&mut puppets, giver, taker);
-					acting::give(giver, taker, &prop, since);
+
+					if let Some((grip, size)) = acting::give(giver, taker, &prop, since) {
+						puppets.push(acting::tossed(&prop, grip, size));
+					}
 				}
 			}
 

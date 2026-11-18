@@ -1114,17 +1114,31 @@ pub(crate) const GIVE: f32 = 1.1;
 /// When, in seconds since the key, the hands meet in a give and the thing passes.
 pub(crate) const GIVE_MEET: f32 = 0.5;
 
+/// How long a thing given across a gap the hands cannot close is in the air: tossed from the
+/// giver's hand to the taker's, centred on [`GIVE_MEET`].
+pub(crate) const TOSS: f32 = 0.4;
+
+/// How far apart, in stage units, two reaching hands may be and still meet.
+const MEET_GAP: f32 = 80.0;
+
 /// A give: what `giver` held passes to `taker`. Both reach the hand it is held in towards
 /// the space between them, the hands meet, it passes there, and each settles into the pose
 /// the script gave it. Before the meeting the giver still holds it; after, the taker does.
-pub fn give(giver: &mut Puppet, taker: &mut Puppet, prop: &Arc<Prop>, since: f32) {
+/// When the two stand too far apart for their hands to meet, the giver tosses it underarm
+/// and the taker catches it: for [`TOSS`] seconds neither holds it, and this returns where
+/// its grip flies (stage units) and how big it is drawn there, for the frame to draw.
+pub fn give(
+	giver: &mut Puppet,
+	taker: &mut Puppet,
+	prop: &Arc<Prop>,
+	since: f32,
+) -> Option<(Pt, f32)> {
 	if !(0.0..GIVE).contains(&since) {
-		return;
+		return None;
 	}
 
 	let reach = smoothstep(since / GIVE_MEET)
 		* (1.0 - smoothstep((since - GIVE_MEET - 0.1) / (GIVE - GIVE_MEET - 0.1)));
-	let passed = since >= GIVE_MEET;
 	// Where something is held out to show it, in stage units: the hands meet halfway between
 	// the two, at the smaller one's chest.
 	let held_out = |puppet: &Puppet| {
@@ -1137,23 +1151,42 @@ pub fn give(giver: &mut Puppet, taker: &mut Puppet, prop: &Arc<Prop>, since: f32
 		f32::midpoint(giver.at.x, taker.at.x),
 		held_out(giver).y.max(held_out(taker).y),
 	);
-
-	for (puppet, holds) in [(giver, !passed), (taker, passed)] {
+	// The hand goes towards the meeting, as far out as an arm reaching out goes.
+	let meet = |puppet: &Puppet| {
 		let Kind::Figure(look) = &puppet.kind else {
+			return None;
+		};
+		let out = look.frame().hands(Pose::ReachOut, 0.0).1.x.abs();
+		let toward = (between - puppet.at) * (1.0 / puppet.scale.max(0.01));
+
+		Some(pt(toward.x.clamp(-out, out), toward.y))
+	};
+	let (giving, taking) = (meet(giver), meet(taker));
+	let hand = |puppet: &Puppet, at: Option<Pt>| at.map(|at| puppet.at + at * puppet.scale);
+	let flight = match (hand(giver, giving), hand(taker, taking)) {
+		(Some(from), Some(to)) if (to - from).len() > MEET_GAP => Some((from, to)),
+		_ => None,
+	};
+	let (let_go, caught) = if flight.is_some() {
+		(GIVE_MEET - TOSS / 2.0, GIVE_MEET + TOSS / 2.0)
+	} else {
+		(GIVE_MEET, GIVE_MEET)
+	};
+
+	for (puppet, at, holds) in [
+		(&mut *giver, giving, since < let_go),
+		(&mut *taker, taking, since >= caught),
+	] {
+		let Some(at) = at else {
 			continue;
 		};
-		let frame = look.frame();
-		// The hand goes towards the meeting, as far out as an arm reaching out goes.
-		let out = frame.hands(Pose::ReachOut, 0.0).1.x.abs();
-		let toward = (between - puppet.at) * (1.0 / puppet.scale.max(0.01));
-		let meet = pt(toward.x.clamp(-out, out), toward.y);
 		let Body::Figure(state) = &mut puppet.body else {
 			continue;
 		};
 
 		// What a figure holds is in its page-right hand, so that is the hand that gives and
 		// the one that takes.
-		state.hands.1 = state.hands.1.lerp(meet, reach);
+		state.hands.1 = state.hands.1.lerp(at, reach);
 		state.prop = holds.then(|| Arc::clone(prop));
 
 		if reach > 0.01 {
@@ -1165,6 +1198,43 @@ pub fn give(giver: &mut Puppet, taker: &mut Puppet, prop: &Arc<Prop>, since: f32
 				HandShape::Open
 			};
 		}
+	}
+
+	let (from, to) = flight?;
+	let u = (since - let_go) / (caught - let_go);
+
+	(0.0..1.0).contains(&u).then(|| {
+		let size = prop.held_size() * lerp(giver.scale, taker.scale, u);
+		(toss_arc(from, to, u), size)
+	})
+}
+
+/// Where a tossed thing is `u` (0 to 1) of the way from the hand at `from` to the hand at
+/// `to`: along the line between them, lifted in an arc a quarter as high as it is long.
+pub fn toss_arc(from: Pt, to: Pt, u: f32) -> Pt {
+	from.lerp(to, u) - pt(0.0, (to - from).len() * 0.25 * (u * PI).sin())
+}
+
+/// A thing in the air between two hands, drawn as a prop on its own with its grip at `grip`.
+pub fn tossed(prop: &Arc<Prop>, grip: Pt, size: f32) -> Puppet {
+	let (lo, hi) = prop.bounds();
+	let base = grip - (prop.grip - pt(f32::midpoint(lo.x, hi.x), hi.y)) * size;
+
+	Puppet {
+		id: format!("{}-in-the-air", prop.name),
+		kind: Kind::Prop(Arc::clone(prop)),
+		at: base,
+		scale: size,
+		z: 0,
+		opacity: 1.0,
+		body: Body::Prop,
+		stink: 0.0,
+		mint: 0.0,
+		heading: 1.0,
+		breath: 0.0,
+		lift: 0.0,
+		smear: 0.0,
+		exerted: 0.0,
 	}
 }
 
@@ -1544,7 +1614,7 @@ mod tests {
 		state.mood = mood;
 		state.hands = frame.hands(pose, facing);
 		state.hand_shapes = pose.hand_shapes();
-		state.legs = frame.limbs().stance(crate::art::rig::Stance::Stand, facing);
+		state.legs = frame.limbs().stance(Stance::Stand, facing);
 		state.facing = facing;
 		state.gaze = gaze;
 
@@ -2382,5 +2452,66 @@ mod tests {
 			"the head arrives after the hold: {}",
 			reacted.facing
 		);
+	}
+
+	#[test]
+	fn a_give_across_a_gap_is_tossed_from_hand_to_hand() {
+		let parcel = crate::art::props::Library::built_in()
+			.get("parcel")
+			.unwrap();
+		let holding = |x: f32| {
+			let mut puppet = kid(x, Pose::Idle, Mood::Happy, 0.0, 0.0);
+			if let Body::Figure(state) = &mut puppet.body {
+				state.prop = Some(Arc::clone(&parcel));
+			}
+			puppet
+		};
+		let holds =
+			|puppet: &Puppet| matches!(&puppet.body, Body::Figure(state) if state.prop.is_some());
+
+		// Side by side, the hands meet and it passes there: nothing flies.
+		let (mut giver, mut taker) = (
+			holding(1000.0),
+			kid(1300.0, Pose::Idle, Mood::Happy, 0.0, 0.0),
+		);
+		assert!(give(&mut giver, &mut taker, &parcel, GIVE_MEET).is_none());
+		assert!(
+			!holds(&giver) && holds(&taker),
+			"it has passed at the meeting"
+		);
+
+		// A third of the stage apart, it is in the air between the reaching hands.
+		let far = |since: f32| {
+			let (mut giver, mut taker) = (
+				holding(800.0),
+				kid(1600.0, Pose::Idle, Mood::Happy, 0.0, 0.0),
+			);
+			let flying = give(&mut giver, &mut taker, &parcel, since);
+			(flying, holds(&giver), holds(&taker), giver, taker)
+		};
+		let (before, giver_holds, ..) = far(GIVE_MEET - TOSS);
+		assert!(
+			before.is_none() && giver_holds,
+			"the giver holds it until the toss"
+		);
+
+		let (flying, giver_holds, taker_holds, giver, taker) = far(GIVE_MEET);
+		let (grip, size) = flying.expect("in the air at the meeting");
+		assert!(!giver_holds && !taker_holds, "nobody holds it in the air");
+		assert!(size > 0.0);
+		assert!(
+			grip.x > giver.at.x && grip.x < taker.at.x,
+			"between the two: {grip:?}"
+		);
+		assert!(grip.y < giver.at.y, "off the ground, in its arc: {grip:?}");
+
+		let (after, _, taker_holds, ..) = far(GIVE_MEET + TOSS);
+		assert!(after.is_none() && taker_holds, "the taker has caught it");
+
+		// The arc starts and ends in the hands and rises between.
+		let (from, to) = (pt(0.0, 1000.0), pt(800.0, 1000.0));
+		assert!((toss_arc(from, to, 0.0) - from).len() < 0.01);
+		assert!((toss_arc(from, to, 1.0) - to).len() < 0.01);
+		assert!(toss_arc(from, to, 0.5).y < 900.0);
 	}
 }
