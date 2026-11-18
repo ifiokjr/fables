@@ -135,6 +135,8 @@ pub struct Renderer<'a> {
 	pub format: Format,
 	pub width: u32,
 	pub height: u32,
+	/// A pixel shape for a plate drawn outside the video format; `None` uses the format's.
+	aspect: Option<f32>,
 	/// Blurred backdrop images, one per setting, depth layer and weather, built once and
 	/// reused for every frame of a depth-of-field shot.
 	blur_cache: std::sync::Mutex<std::collections::HashMap<u64, String>>,
@@ -159,9 +161,23 @@ impl<'a> Renderer<'a> {
 			format,
 			width,
 			height,
+			aspect: None,
 			blur_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
 			view_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
 		}
+	}
+
+	/// This renderer at another pixel shape, for a plate that covers a different part of the
+	/// stage than the video format does.
+	#[must_use]
+	pub fn with_aspect(mut self, aspect: f32) -> Self {
+		self.aspect = Some(aspect);
+		self
+	}
+
+	/// The aspect of the pixels this renderer draws.
+	fn aspect(&self) -> f32 {
+		self.aspect.unwrap_or_else(|| self.format.aspect())
 	}
 
 	/// The view the frame at `time` is drawn with, without rendering it: where the camera
@@ -192,8 +208,32 @@ impl<'a> Renderer<'a> {
 		Ok(pixmap)
 	}
 
+	/// The frame at `time` through an explicit view, as a clean plate: the scene, its light and
+	/// the title card, but no captions and no page turn. Storyboard panels and animatic plates
+	/// are drawn this way.
+	pub fn render_view(&self, time: f32, frame: u64, view: View) -> Result<Pixmap> {
+		let mut pixmap = raster::render(&self.svg_view(time, frame, view)?)?;
+		raster::finish(&mut pixmap, &self.story.style(), 0.03, (frame / 2) as u32);
+
+		Ok(pixmap)
+	}
+
 	/// The frame as an SVG document.
 	pub fn svg(&self, time: f32, frame: u64) -> Result<String> {
+		let shot = self.timeline.shot_at(time);
+		let view = self.camera(shot, time);
+
+		self.svg_with_view(time, frame, view, true)
+	}
+
+	/// The frame as an SVG document through an explicit view, without the video's furniture.
+	pub fn svg_view(&self, time: f32, frame: u64, view: View) -> Result<String> {
+		self.svg_with_view(time, frame, view, false)
+	}
+
+	/// A frame with this renderer's furniture: captions, page turns and parallax when `video`,
+	/// and a clean plate when not.
+	fn svg_with_view(&self, time: f32, frame: u64, view: View, video: bool) -> Result<String> {
 		let shot = self.timeline.shot_at(time);
 		let local = time - shot.start;
 		let portrait = self.format.aspect() < 1.0;
@@ -201,9 +241,8 @@ impl<'a> Renderer<'a> {
 		let motion = self.story.drawing.motion;
 		let posed = motion.drawing_time(time, shot.start, shot.moving(time, TWEEN));
 		let (scene, puppets) = self.stage_at(shot, posed);
-		let view = self.camera(shot, time);
 		let (w, h) = (self.width as f32, self.height as f32);
-		let view_w = view.width(self.format.aspect());
+		let view_w = view.width(self.aspect());
 		let scale = h / view.height;
 		let mut svg = Svg::styled(self.story.style());
 		svg.boil = frame / 4;
@@ -211,8 +250,10 @@ impl<'a> Renderer<'a> {
 		weather.time = time;
 
 		// A page that enters with a push slides everything into place.
-		let sliding =
-			shot.transition == Transition::Push && shot.kind != ShotKind::Title && local < WIPE;
+		let sliding = video
+			&& shot.transition == Transition::Push
+			&& shot.kind != ShotKind::Title
+			&& local < WIPE;
 
 		if sliding {
 			svg.begin(&format!(
@@ -223,13 +264,20 @@ impl<'a> Renderer<'a> {
 
 		// Parallax: the sky and hills travel half as far as the camera does, from where the shot
 		// opened, so pans and push-ins reveal depth.
-		let opening = self.target(shot, shot.start);
-		let far = opening.blend(view, 0.5);
+		let far = if video {
+			self.target(shot, shot.start).blend(view, 0.5)
+		} else {
+			view
+		};
 		let far_scale = h / far.height;
-		let far_w = far.width(self.format.aspect());
+		let far_w = far.width(self.aspect());
 
 		// Depth of field: a close shot's setting softens behind its subject.
-		let blur = self.depth_of_field(setups, time);
+		let blur = if video {
+			self.depth_of_field(setups, time)
+		} else {
+			None
+		};
 
 		svg.fill(&Path::rect(0.0, 0.0, w, h), palette::PAPER);
 
@@ -291,10 +339,13 @@ impl<'a> Renderer<'a> {
 
 		match shot.kind {
 			ShotKind::Title => self.title_overlay(&mut svg, local),
-			ShotKind::Page(_) | ShotKind::End => self.captions(&mut svg, shot, time),
+			ShotKind::Page(_) | ShotKind::End if video => self.captions(&mut svg, shot, time),
+			ShotKind::Page(_) | ShotKind::End => {}
 		}
 
-		self.turn(&mut svg, shot, local)?;
+		if video {
+			self.turn(&mut svg, shot, local)?;
+		}
 
 		Ok(svg.finish((0.0, 0.0, w, h), self.width, self.height))
 	}
@@ -1324,6 +1375,7 @@ mod tests {
 				speakers: voiced_by.map(|id| vec![id.to_owned()]).unwrap_or_default(),
 				text: text.to_owned(),
 				voiced_by: voiced_by.map(str::to_owned),
+				line: 0,
 			}
 		};
 		let lines = vec![

@@ -65,41 +65,43 @@ fn guide_section(topic: &str) -> Option<&'static str> {
 }
 
 /// What the server tells a model before it calls anything.
-const INSTRUCTIONS: &str = "\
+const INSTRUCTIONS: &str =
+	"\
 fables is a studio for illustrated books and cartoons. A world (a series) has a cast of characters \
-                            drawn as cut-out puppets from vector parts, in a drawing style.
+	 drawn as cut-out puppets from vector parts, in a drawing style.
 
 To design a character:
 1. `world_list`, or `world_create` for a new series.
 2. `style_describe` to learn the parts a figure is drawn with and the space each is drawn in.
 3. `character_create` with who they are and their colours. Their parts start as the style's \
-                            template for their build: a grown-up's are cut for a grown-up.
+	 template for their build: a grown-up's are cut for a grown-up.
 4. `character_sheet` to see them. `character_parts` reads parts back as SVG path data (name kit \
-                            parts to see the shared ones).
+	 parts to see the shared ones).
 5. `character_set_parts` to redraw parts, then look at the sheet again. Repeat until they read as \
-                            themselves: a clear silhouette, a face that shows every mood.
+	 themselves: a clear silhouette, a face that shows every mood.
 
 Changes that would break a figure are refused with the part check's findings. A person signs off \
-                            every character's model sheet before the character is used in a book.
+	 every character's model sheet before the character is used in a book.
 
 To make a book:
 1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
-                            mixing, sound and workflow.
+	 mixing, sound and workflow.
 2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
 3. `flow_list` shows the story flows a book can take, with each one's page and word budgets; \
-                            `flow_describe` prints one flow's beats. `story_start` returns the \
-                            whole laid-out story.md for a flow, with the star and friend staged; \
-                            fill in the [bracketed] lines and `story_write` it.
+	 `flow_describe` prints one flow's beats. `story_start` returns the whole laid-out story.md \
+	 for a flow, with the star and friend staged; fill in the [bracketed] lines and `story_write` \
+	 it.
 4. `story_write` saves a script (a whole story.md: TOML front matter between `+++` lines, then \
-                            pages that start `# setting`, with narration and `@actor` stage \
-                            directions). It is checked against the cast and refused, with the \
-                            line to fix, if it doesn't work. `story_read` reads one back, for \
-                            example a world's existing books, to learn the format.
+	 pages that start `# setting`, with narration and `@actor` stage directions). It is checked \
+	 against the cast and refused, with the line to fix, if it doesn't work. `story_read` reads \
+	 one back, for example a world's existing books, to learn the format.
 5. `story_review` critiques it the way a director would: findings with line numbers and \
-                            suggestions, never a refusal. `storyboard_render` and `video_frames` \
-                            let you see the shots without encoding a video.
+	 suggestions, never a refusal. `storyboard_render` returns the board and its text shot list; \
+	 `storyboard_pin` writes that plan into the script as editable `@camera` lines; \
+	 `animatic_render` holds each shot for its real duration over the soundtrack; `video_frames` \
+	 shows moments in time.
 6. `page_render` shows one page; `book_render` makes proofs (with a contact sheet of every page), \
-                            the ePub and KDP print files; `video_render` narrates and animates it.";
+	 the ePub and KDP print files; `video_render` narrates and animates it.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct WorldParams {
@@ -250,6 +252,34 @@ pub struct StoryboardParams {
 	/// `landscape` (16:9, the default) or `portrait` (9:16).
 	#[serde(default)]
 	pub shape: Option<VideoShape>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StoryboardPinParams {
+	pub world: String,
+	pub story: String,
+	/// Pages to pin, counting from one; leave empty for every page.
+	#[serde(default)]
+	pub pages: Vec<usize>,
+	/// Remove the directions a previous pin wrote instead of pinning.
+	#[serde(default)]
+	pub unpin: bool,
+	/// Whose plan to pin: `landscape` (the default) or `portrait`.
+	#[serde(default)]
+	pub shape: Option<VideoShape>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AnimaticParams {
+	pub world: String,
+	pub story: String,
+	/// `landscape` (16:9, the default) or `portrait` (9:16).
+	#[serde(default)]
+	pub shape: Option<VideoShape>,
+	/// Leave every line silent, timed by its estimate, so nothing is recorded and no voice is
+	/// needed: a quick timing check.
+	#[serde(default)]
+	pub silent: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -746,9 +776,11 @@ impl StudioServer {
 	}
 
 	#[tool(
-		description = "The storyboard as images: the video's camera plan as a comic strip, one \
-		               labelled panel per setup. Never records a voice or encodes a video, so it \
-		               runs offline in a second or two."
+		description = "The storyboard: the video's camera plan as a comic strip, one labelled \
+		               panel per shot, and the same plan as a text shot list (page, script line, \
+		               timing, shot size, subjects, move, entry, who chose it, words spoken). \
+		               Never records a voice or encodes a video, so it runs offline in a second \
+		               or two."
 	)]
 	fn storyboard_render(
 		&self,
@@ -756,9 +788,62 @@ impl StudioServer {
 	) -> CallToolResult {
 		let shape = params.shape.unwrap_or(VideoShape::Landscape);
 
-		images(
+		match self.studio.storyboard(&params.world, &params.story, shape) {
+			Ok((text, images)) => {
+				let mut content = vec![ContentBlock::text(text)];
+
+				for image in images {
+					content.push(ContentBlock::text(image.label));
+					content.push(ContentBlock::image(
+						base64::engine::general_purpose::STANDARD.encode(&image.png),
+						"image/png",
+					));
+				}
+
+				CallToolResult::success(content)
+			}
+			Err(error) => failed(&error),
+		}
+	}
+
+	#[tool(
+		description = "Pin the director's shot list into a book's script as editable `@camera` \
+		               directions, one before the line or direction that starts each shot, or \
+		               remove the ones pinned before (`unpin`). A page that already directs its \
+		               own camera is left as written. `shape` picks whose plan is pinned \
+		               (landscape by default); pages where the other shape plans other shots are \
+		               named in one note. Returns the new script."
+	)]
+	fn storyboard_pin(
+		&self,
+		Parameters(params): Parameters<StoryboardPinParams>,
+	) -> CallToolResult {
+		let pages = (!params.pages.is_empty()).then_some(params.pages.as_slice());
+
+		json(self.studio.pin_story(
+			&params.world,
+			&params.story,
+			pages,
+			params.unpin,
+			params.shape.unwrap_or(VideoShape::Landscape),
+		))
+	}
+
+	#[tool(
+		description = "Cut an animatic: every storyboard shot held for its real duration over the \
+		               video's soundtrack, at half size. It draws each panel once and lets ffmpeg \
+		               hold it, so a ninety-second film takes seconds, not minutes. Returns the \
+		               MP4 and the shot list. Narrates any missing line once, then reuses the \
+		               voice cache. A line whose voice cannot speak here (no `say`, no API key, \
+		               no command) is left silent and timed by its estimate, and the shot list \
+		               says so; `silent: true` does that for every line, recording nothing."
+	)]
+	fn animatic_render(&self, Parameters(params): Parameters<AnimaticParams>) -> CallToolResult {
+		let shape = params.shape.unwrap_or(VideoShape::Landscape);
+
+		json(
 			self.studio
-				.storyboard_images(&params.world, &params.story, shape),
+				.render_animatic(&params.world, &params.story, shape, params.silent),
 		)
 	}
 
@@ -890,6 +975,8 @@ mod tests {
 			"page_render",
 			"video_render",
 			"storyboard_render",
+			"storyboard_pin",
+			"animatic_render",
 			"video_frames",
 			"light_list",
 			"shot_list",

@@ -20,8 +20,9 @@ Directing a fables book is three passes over one script:
    `@camera` and `light=` only where the story asks for more.
 
 Then look before you render video: `story_review` for the script, `storyboard_render` for
-the shots, `video_frames` for moments in time. Video is the slow, expensive output; do not
-use it to discover problems the review already names.
+the shots and their text shot list, `storyboard_pin` to make the plan editable, `animatic_render`
+for the timing, and `video_frames` for moments in time. Video is the slow, expensive output; do
+not use it to discover problems the review already names.
 
 The topics: `story`, `staging`, `camera`, `light`, `acting`, `mixing`, `sound`, `workflow`.
 
@@ -156,7 +157,7 @@ What each shot size says:
 - `extreme-close` — the face alone: the turn, the gasp, the thing only the reader notices.
 
 **Cut or hold.** Cut when something new must be seen at once; hold when a feeling grows. A
-hold that earns nothing is dead air — the storyboard's panel captions give every setup's
+hold that earns nothing is dead air — the storyboard's shot list gives every shot's
 length; `fables review` flags pages that flash past under two seconds.
 
 **Shot and reverse shot.** In a two-way exchange, alternate who is framed; the automatic
@@ -189,7 +190,9 @@ establishes, alternates shot and reverse shot, widens for entrances and walks, g
 to a strong mood on somebody silent, and never cuts faster than one setup each 1.2 s. Trust
 it for whole scenes; write `@camera` only where it cannot know better — a specific reveal, a
 held look, a shake on an impact. A page with any `@camera` direction is shot exactly as
-written, both modes.
+written, both modes. The shot list shows the whole plan; `storyboard_pin` (or
+`fables storyboard --pin`) writes it into the script as `@camera` lines marked `// pinned` to
+edit, and `unpin` removes them again. A pinned script reproduces the plan.
 
 ## Light
 
@@ -315,11 +318,18 @@ The loop, from nothing to published:
 5. **Review.** `story_review` (or `fables review`): does it *work*? Fixes first, then
    consider the considers. Re-run until the fixes are gone and you have argued with every
    remaining finding.
-6. **See it.** `storyboard_render` for the camera plan, panel by panel; `video_frames` for
-   moments in time without encoding a video; `page_render` for single pages; `book_render`
-   for proofs and the contact sheet. Look at everything.
-7. **Fix, then page renders.** Change the script, not the renders: every finding names a
-   line, every panel names a setup.
-8. **Video last.** `video_render` a preview first; the full render is minutes, the preview
-   is seconds. The voice cache means re-renders cost nothing new. Then `fables all` for the
-   book.
+6. **Storyboard.** `storyboard_render` (or `fables storyboard`) draws one panel per shot and
+   returns the shot list as text: page, script line, start and duration, shot size, subjects,
+   move, entry, who chose it and the words spoken. Read it even when you cannot see the board.
+7. **Pin and edit.** `storyboard_pin` (or `fables storyboard --pin`, optionally
+   `--pin page=3,5`) writes the plan into the script as `@camera` directions marked
+   `// pinned`. Edit, delete or reorder them like any direction; pages that already direct
+   their own camera are left as written. `storyboard_pin` with `unpin` removes them again.
+8. **Animatic.** `animatic_render` (or `fables animatic`) holds each panel for its real
+   duration over the soundtrack, labelled and timecoded. Judge pacing here, then fix the
+   script — not the render.
+9. **Fix, then page renders.** Change the script, not the renders: every finding names a
+   line, every shot names a setup.
+10. **Video last.** `video_render` a preview first; the full render is minutes, the preview
+    is seconds. The voice cache means re-renders cost nothing new. Then `fables all` for the
+    book.

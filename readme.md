@@ -248,7 +248,8 @@ claude mcp add fables -- fables mcp --root /path/to/your/studio
 | `story_write`, `story_read`, `story_check` | Write a book's script into a world, checked against the cast (a script that doesn't rehearse is refused, with the line to fix), or read and check one. |
 | `flow_list`, `flow_describe`, `story_start` | The story flows a world's books can start from and one flow's beats; and the whole `story.md` scaffold for a flow, with the star and friend staged, ready to fill in and `story_write`. |
 | `story_review` | A director's critique of a book: findings with a severity, the script line and a suggestion. Advice, never a refusal. |
-| `storyboard_render`, `video_frames` | The storyboard as an image, one labelled panel per camera setup; and sampled frames of the video as one tiled image, rendered offline with estimated timings. |
+| `storyboard_render`, `storyboard_pin` | The storyboard as images and as a text shot list (page, script line, timing, shot size, subjects, move, entry, source and words); and the same plan pinned into the script as editable `@camera` directions marked `// pinned`, or removed again. |
+| `animatic_render`, `video_frames` | An animatic that holds each shot for its real duration over the soundtrack, with each shot's caption and a progress bar, and the shot list; `silent: true` records no voice; and sampled frames of the video as one tiled image, offline. |
 | `light_list`, `shot_list` | The light presets and the camera vocabulary (shot sizes, moves, arrivals, transitions), with a sentence on each. |
 | `page_render`, `book_render` | One page as an image, or the proofs (with a contact sheet image), ePub and KDP print files under `<root>/out/`. |
 | `video_render` | The narrated, lip-synced MP4, 9:16 or 16:9, or a quick preview. |
@@ -277,7 +278,8 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables ebook <story>` | `out/<book>/<skin>/ebook/<book>.epub` (EPUB 3 fixed layout, passes epubcheck) and `cover.jpg` (2560 px store cover). |
 | `fables print <story>` | `out/<book>/<skin>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
 | `fables video <story> [--format landscape\|portrait\|both] [--preview]` | `out/<book>/<skin>/video/`: MP4s, `soundtrack.wav`, `.srt` captions, a YouTube thumbnail and a 9:16 cover image. `--preview` renders at half size and 15 fps. |
-| `fables storyboard <story> [--format landscape\|portrait]` | `out/<book>/<skin>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels): the video drawn as a comic strip, one labelled panel per camera setup. A hold a script-written cut leaves under 1.2 s is labelled `· short`. Never records a voice, so it runs offline in a second or two. |
+| `fables storyboard <story> [--format landscape\|portrait] [--pin [page=3,5]] [--unpin]` | `out/<book>/<skin>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels), plus `storyboard.md`: the shot list, one row per shot with its page, script line, start and duration, shot size, subjects, move, how it is entered, who chose it, the music cue that comes in, any dead stop (`@hold`, `hold=`) and the words spoken. The board prints the list too. `--pin` writes the director's plan for the `--format` shape (landscape unless you say) into the script as `@camera` directions marked `// pinned` for you to edit, delete or reorder, and names any pages where the other shape plans other shots; `--unpin` takes them out again. Never records a voice, so it runs offline in a second or two. |
+| `fables animatic <story> [--format landscape\|portrait] [--silent]` | `out/<book>/<skin>/animatic/<book>-animatic.mp4`: each storyboard panel held for its real duration over the soundtrack, captioned with its number, page, line, start, length and first words, under a progress bar that marks each cut, so timing reads in seconds; a push or pan moves by cropping one wide plate. Half size at 24 fps, with `soundtrack.wav` beside it, mixed exactly as the video's. A line whose voice cannot speak here (no `say`, no API key, no command) is silent and timed by its estimate while music, effects and ambience play, and the output says how many; `--silent` does that for every line and records nothing. `fables video` never falls back: it stops with the voice's error. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
 | `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`: the whole cast, every setting, the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
@@ -301,7 +303,11 @@ Install with `cargo install --path .`, or use `cargo run --release --` in place 
   unstable options. `rustup` installs it, with `rustfmt` and `clippy`, the first time a command
   runs in the checkout. The Nix shell in [`devenv.nix`](devenv.nix) uses the same rustup
   toolchain, so it builds with the same compiler.
-- **ffmpeg** with libx264, for video.
+- **ffmpeg** with the `libx264` encoder, for video. Homebrew's, Debian's and Ubuntu's builds have
+  it; Fedora's `ffmpeg-free` does not, and fables stops with a message naming the missing encoder
+  before it draws a frame. Beyond that it uses only ffmpeg's own `aac` encoder and filters built
+  into every ffmpeg (`zoompan`, `overlay`, `concat`, `color`, `format`, `setsar`, `loudnorm`), so a
+  build without freetype (`drawtext`) is fine.
 - **A narrator.** macOS `say` by default, or any TTS command (see [Voices](#voices)).
 
 > On macOS, if linking fails with "You have not agreed to the Xcode license agreements", run `sudo xcodebuild -license` once. You can also use the Nix shell from [`devenv.nix`](devenv.nix): `devenv shell`.
@@ -345,7 +351,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | `> A paragraph` | **Video only.** A summary line for the narrator. |
 | `*word*` | Bold. |
 | `**WORD**` | Shouted: big, red, in the display face. |
-| `// note` | A comment, ignored. |
+| `// note` | A comment, ignored. It may also end a stage direction, as a pinned line does: `@camera shot=wide move=push after=7.19 // pinned`. |
 
 ### Page headings
 
@@ -387,7 +393,7 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | Scene | `light=golden` or a bare preset (`dusk`), `wilt=1`, `stink=1`, `mint=1`, `tint=sunflower`, `music=calm`, `ambience=birds` (or `none`), `speed=1`, `impact=1` |
 | Directions (no actor) | `@pause 1` `@hold 1.5` `@music calm` `@sfx pop` |
 | Effects | `pop` `plop` `bonk` `boing` `whoosh` `sparkle` `tweet` `blorp` `page` `sting` `tada` `twinkle` `thud` `splash` `gasp-whoosh` `ding` `drum-roll` `heartbeat` |
-| Camera | `shot=wide`/`full`/`medium`/`close`/`extreme-close` framed on `on=<actor>,<actor>` (empty: everyone, or the speaker for a close), `move=push`/`pull`/`pan-left`/`pan-right`/`tilt-up`/`tilt-down`/`track` taking `over=<seconds>` (default the rest of the shot), `shake=0`–`1`, and `cut` or `ease` to choose how the camera arrives (a change of shot cuts unless the direction says `ease`). The older `zoom=` and `look=` still work and win when given. |
+| Camera | `shot=wide`/`full`/`medium`/`close`/`extreme-close` framed on `on=<actor>,<actor>` (empty: everyone, or the speaker for a close), `move=push`/`pull`/`pan-left`/`pan-right`/`tilt-up`/`tilt-down`/`track` taking `over=<seconds>` (default the rest of the shot), `shake=0`–`1`, `after=<seconds>` to land the direction that long after the page opens (a pinned slow push starts inside a long hold), and `cut` or `ease` to choose how the camera arrives (a change of shot cuts unless the direction says `ease`). The older `zoom=` and `look=` still work and win when given. |
 
 ### Who points the camera
 
@@ -412,6 +418,8 @@ pose = "x=0.5 grin wave teeth=grotty stink=1 talk"
 | `ambience = true` | Procedural sound beds from each setting and light. On already for a book with an `age`. |
 
 A page with any `@camera` direction is shot exactly as written, in both modes' vocabulary. Setups on directed pages follow the same 1.2 s floor: one that would flash by is merged into its neighbour, but a cut the script wrote is honoured — the storyboard marks the hold it leaves under 1.2 s with `· short`. Every shot frames its subject's whole head, hair and all — measured from the puppet's own drawing, so a tall hairdo, a raised hand or a held prop is never guessed at — with headroom above and room beside it (room enough to survive the slow push a long hold rides in on); only an extreme close-up may crop hair above the brow line, and lead room never pushes a head out of frame. Close and extreme-close shots soften the setting behind their subject (depth of field); `[video] depth-of-field = false` turns that off.
+
+**The storyboard is where a cartoon is fixed.** `fables storyboard` draws one panel per shot, with a move drawn as its end framing and an arrow rather than split into two near-identical panels, and prints the shot list. `--pin` writes the automatic director's shots into the script as `@camera` directions marked `// pinned`, so you can edit, delete or reorder them; rendering the pinned script reproduces the plan, and `--unpin` removes exactly those lines. `fables animatic` then holds each panel for its real duration over the soundtrack: judge the timing there, in seconds, and render the full video only once it is right.
 
 Teeth, stink and mint **carry over from page to page** until changed, so grotty teeth stay grotty. Actors without an `x` are spaced out automatically.
 

@@ -66,6 +66,10 @@ fn the_guide_runs_from_an_empty_folder() {
 	// The preview video records a voice with macOS `say` and encodes with ffmpeg. Both are
 	// required for `fables video`; elsewhere the guide's other commands are still all run.
 	let can_video = cfg!(target_os = "macos")
+		&& Command::new("say")
+			.args(["-v", "?"])
+			.output()
+			.is_ok_and(|output| output.status.success())
 		&& Command::new("ffmpeg")
 			.arg("-version")
 			.output()
