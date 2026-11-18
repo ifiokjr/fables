@@ -439,7 +439,7 @@ fn a_light_change_cross_fades_to_the_light_s_cue() {
 		"cue-change",
 		"+++\ntitle = \"Cues\"\nauthor = \"A\"\nstar = \"pip\"\nage = \
 		 \"3-5\"\n\n[video]\nambience = false\n+++\n\n# park light=day\nA short line.\n\n# park \
-		 light=moonlit\nAnother short line.\n",
+		 light=moonlit\n@pause 2.4\nAnother short line.\n",
 	);
 	let path = world.path("cue-change.wav");
 	let timeline = soundtrack(&story, &cast, &path);
@@ -455,10 +455,19 @@ fn a_light_change_cross_fades_to_the_light_s_cue() {
 	assert_eq!(timeline.music_at(change - 0.05), Music::Play);
 	assert_eq!(timeline.music_at(change + 0.05), Music::Sleepy);
 
-	// Both windows are silent of narration: the old cue before the page turn, the new one after
-	// the one-second cross-fade, inside the page's lead-in.
+	// Both windows are silent of narration: the old cue before the page turn, and the new one
+	// after the one-second cross-fade. The music box leaves long rests between its notes, so
+	// the page pauses before its line and the window covers two notes.
 	let before = window(&track, change - 1.1, change - 0.2);
-	let after = window(&track, change + 1.1, change + 1.7);
+	let after = window(&track, change + 1.1, change + 3.9);
+	let line = timeline
+		.shots
+		.iter()
+		.filter(|shot| shot.kind.page().is_some())
+		.nth(1)
+		.map(|shot| shot.lines[0].start)
+		.expect("the moonlit line");
+	assert!(line > change + 3.9, "the window is music only: {line}");
 	let (before_rms, after_rms) = (rms(before), rms(after));
 	let (before_centroid, after_centroid) = (centroid(before), centroid(after));
 
