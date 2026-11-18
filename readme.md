@@ -697,7 +697,7 @@ settings/         the built-in settings, as part files
 props/            the built-in props, as part files
 styles/           drawing styles: style.toml, kit and template per look
 flows/            the built-in story flows, one laid-out recipe per shape
-docs/             the five-minute guide, voices and turning the books into a show
+docs/             the five-minute guide, directing, animation, voices, the research and the evals
 assets/fonts/     Andika and Lilita One (SIL Open Font License)
 ```
 
