@@ -230,12 +230,13 @@ impl Authored {
 		Self::from_parts(file, Parts::load_puppet(file, &style.kit)?, style)
 	}
 
-	/// A character drawn straight from their style's template over its kit, before they have a
-	/// part file of their own. Their cast colours still paint it, exactly as if the template had
-	/// been written to a file and left untouched.
-	pub fn from_template(style: &Arc<StylePack>) -> Result<Authored> {
-		let file = PathBuf::from(format!("styles/{}/template.svg", style.name));
-		let mut puppet = Self::from_parts(&file, style.template_figure(Build::Kid), style)?;
+	/// A character drawn straight from their style's template for their body over its kit,
+	/// before they have a part file of their own: a grown-up gets the grown-up template, cut for
+	/// the taller body. Their cast colours still paint it, exactly as if the template had been
+	/// written to a file and left untouched.
+	pub fn from_template(style: &Arc<StylePack>, build: Build) -> Result<Authored> {
+		let file = style.template_file(build);
+		let mut puppet = Self::from_parts(&file, style.template_figure(build), style)?;
 		puppet.template = true;
 		Ok(puppet)
 	}
@@ -2998,10 +2999,7 @@ pub fn joins(puppet: &Authored, build: Build) -> Vec<Finding> {
 		}
 	}
 
-	let body_name = match build {
-		Build::Kid => "kid",
-		Build::Grownup => "grown-up",
-	};
+	let body_name = super::pack::body_name(build);
 
 	gaps.into_iter()
 		.filter(|gap| gap.width > tolerance)

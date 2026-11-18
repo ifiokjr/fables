@@ -269,7 +269,9 @@ enum SettingAction {
 #[derive(Subcommand)]
 enum PuppetAction {
 	/// Check part files against the parts a figure is drawn with: missing parts, views without
-	/// their pair, parts that swap instead of blending, and names no figure uses.
+	/// their pair, parts that swap instead of blending, names no figure uses, and parts that
+	/// come apart when the figure is posed on its own body (a head clear of the torso, an arm or
+	/// leg starting outside it).
 	Check {
 		/// The cast id to check; leave it out to check every member with a part file.
 		id: Option<String>,
@@ -346,13 +348,14 @@ enum VoiceAction {
 
 #[derive(Subcommand)]
 enum StyleAction {
-	/// List the drawing styles.
+	/// List the drawing styles, with the bodies (kid, grown-up) and page skin of each.
 	List,
-	/// Check a style: its template over its kit must draw a whole figure, and its bodies must
-	/// stand up.
+	/// Check a style: each body's template over its kit must draw a whole figure whose parts
+	/// join up when posed, and its bodies must stand up.
 	Check { name: String },
-	/// Describe a style: its finish, bodies, every part a figure is drawn with, its coordinate
-	/// space and the drawing rules. Read this before drawing a part.
+	/// Describe a style: its finish, bodies and the template each is drawn from, every part a
+	/// figure is drawn with, its coordinate space and the drawing rules. Read this before
+	/// drawing a part.
 	///
 	/// Example: `fables style describe chibi`
 	Describe { name: String },
@@ -543,7 +546,13 @@ fn run(cli: Cli) -> Result<()> {
 				StyleAction::List => {
 					for name in StylePack::names() {
 						let pack = StylePack::named(name)?;
-						println!("{name} (skin: {}): {}", pack.skin, pack.description);
+						let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
+						println!(
+							"{name} (skin: {}; bodies: {}): {}",
+							pack.skin,
+							bodies.join(", "),
+							pack.description
+						);
 					}
 
 					Ok(())
@@ -915,10 +924,17 @@ fn style_describe(name: &str) -> Result<()> {
 
 	for body in &report.bodies {
 		println!(
-			"  {:<9} neck y={}, shoulder y={}, pelvis y={}",
-			body.name, body.neck_y, body.shoulder_y, body.pelvis_y
+			"  {:<9} neck y={}, shoulder y={}, pelvis y={}; drawn from {} ({} parts)",
+			body.name,
+			body.neck_y,
+			body.shoulder_y,
+			body.pelvis_y,
+			body.template,
+			body.template_parts
 		);
 	}
+
+	println!("  (`kind = \"grown-up\"` in the cast file puts a person on the grown-up body)");
 
 	println!("parts (name, views, need, home, space):");
 
@@ -1190,8 +1206,8 @@ fn puppet_check(world: &World, id: Option<&str>) -> Result<()> {
 		let count = puppet.parts.iter().count();
 		let source = if puppet.template {
 			format!(
-				"the {} template (no part file of their own)",
-				puppet.style.name
+				"{} (no part file of their own)",
+				puppet.style.template_origin(look.build)
 			)
 		} else {
 			puppet.file.display().to_string()
@@ -1356,9 +1372,14 @@ fn style_check(name: &str) -> Result<()> {
 	let findings = pack.check();
 	let bodies: Vec<&str> = pack.bodies().map(|(body, _)| body).collect();
 	println!(
-		"{name}: {} kit parts, {} template parts, bodies: {}",
+		"{name}: {} kit parts, {} kid and {} grown-up template parts, bodies: {}",
 		pack.kit.iter().count(),
-		pack.template.iter().count(),
+		pack.template_for(fables::art::figure::Build::Kid)
+			.iter()
+			.count(),
+		pack.template_for(fables::art::figure::Build::Grownup)
+			.iter()
+			.count(),
 		bodies.join(", ")
 	);
 

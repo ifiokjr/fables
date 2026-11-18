@@ -15,9 +15,9 @@
 //!
 //! An authored puppet ([`puppet`](super::puppet)) draws its part file over its style's kit and
 //! reads every number from its style, so a new look is a new folder rather than new code. A
-//! character with no part file is drawn from the template, so a new world needs no drawing at
-//! all to render. The built-in packs are compiled into fables, so a world anywhere on disk can
-//! name one in its `world.toml`.
+//! character with no part file is drawn from the template for their body, so a new world needs
+//! no drawing at all to render. The built-in packs are compiled into fables, so a world anywhere
+//! on disk can name one in its `world.toml`.
 //!
 //! These are not the page skins in [`style`](super::style) (riso, tv, bold…), which print the
 //! page; a style pack names the skin that suits it in `style.toml`.
@@ -303,8 +303,8 @@ struct Entry {
 	bodies: BTreeMap<String, Proportions>,
 }
 
-/// The body a build is drawn on.
-fn body_name(build: Build) -> &'static str {
+/// The name of the body a build is drawn on, as `style.toml` and the cast file spell it.
+pub fn body_name(build: Build) -> &'static str {
 	match build {
 		Build::Kid => "kid",
 		Build::Grownup => "grown-up",
@@ -418,6 +418,25 @@ impl StylePack {
 	/// The template character on a build's body, over the kit: a whole figure, ready to redraw.
 	pub fn template_figure(&self, build: Build) -> Parts {
 		self.template_for(build).over(self.kit.clone())
+	}
+
+	/// Where a build's template is drawn in the style's folder: `template.svg` for a kid,
+	/// `template-grown-up.svg` for a grown-up.
+	pub fn template_file(&self, build: Build) -> PathBuf {
+		let file = match build {
+			Build::Kid => "template.svg",
+			Build::Grownup => "template-grown-up.svg",
+		};
+		PathBuf::from(format!("styles/{}/{file}", self.name))
+	}
+
+	/// How a part file's title names the template it was started from: `the anime template`,
+	/// or `the anime grown-up template`.
+	pub fn template_origin(&self, build: Build) -> String {
+		match build {
+			Build::Kid => format!("the {} template", self.name),
+			Build::Grownup => format!("the {} grown-up template", self.name),
+		}
 	}
 
 	/// Checks the pack: the template over the kit must draw a whole figure on every body, every

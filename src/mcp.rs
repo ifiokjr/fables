@@ -72,7 +72,7 @@ To design a character:
 1. `world_list`, or `world_create` for a new series.
 2. `style_describe` to learn the parts a figure is drawn with and the space each is drawn in.
 3. `character_create` with who they are and their colours. Their parts start as the style's \
-                            template.
+                            template for their build: a grown-up's are cut for a grown-up.
 4. `character_sheet` to see them. `character_parts` reads parts back as SVG path data (name kit \
                             parts to see the shared ones).
 5. `character_set_parts` to redraw parts, then look at the sheet again. Repeat until they read as \
@@ -445,7 +445,7 @@ impl StudioServer {
 	#[tool(
 		description = "Add a character to a world's cast: their id, name, build (kid or \
 		               grown-up), who they are, their habit and colours. Their drawing starts as \
-		               the style's template; redraw it with character_set_parts."
+		               the style's template for their build; redraw it with character_set_parts."
 	)]
 	fn character_create(
 		&self,
@@ -473,8 +473,9 @@ impl StudioServer {
 
 	#[tool(
 		description = "Write or replace a character's parts as SVG path data, or remove their own \
-		               parts. The whole figure is checked; changes that leave errors are not \
-		               written. Returns whether it was written and the findings."
+		               parts. The whole figure is checked, and posed on their body to make sure \
+		               its parts still join; changes that leave errors are not written. Returns \
+		               whether it was written and the findings."
 	)]
 	fn character_set_parts(
 		&self,
