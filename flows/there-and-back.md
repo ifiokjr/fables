@@ -96,7 +96,7 @@ note = "The opening framing again, with the souvenir on show."
 
 // Beat 2: Setting out. One page, 15–25 words.
 // Outward travel moves rightward. The exit leaves an empty road in the still.
-# town day shot=full on={{star}}
+# town day shot=full
 @{{star}} x=0.3 face=right walk
 @{{star}} x=0.85 exit=right
 // 15–25 words: the leaving.
@@ -138,28 +138,28 @@ note = "The opening framing again, with the souvenir on show."
 [The worst of it.]
 
 // Beat 6: The turn. One page, 15–25 words.
-// When your version has it: @{{star}} notice or see= here; today the close and the
-// thinking pose carry the turn.
+// The star looks back the way they came, leftward, before the thought lands.
 # forest storm shot=close on={{star}}
-@{{star}} x=0.45 sad think
+@{{star}} x=0.45 notice see=left sad think
 // 15–25 words: the one face the journey turns on.
 [What the star realises.]
 
 // Beat 7: The way home, quick. Two pages, 15–25 words.
 // All homeward travel moves leftward, and the pages are shorter than the way out.
 # hilltop night shot=wide transition=push
-@{{star}} x=0.6 face=left walk
+@{{star}} x=0.6 face=left walk see=left
 // 15–25 words: the first step home, leftward.
 [The way home.]
 
 # park night shot=wide transition=push
-@{{star}} x=0.4 face=left walk
+@{{star}} x=0.4 face=left walk see=left
 // 15–25 words: the second step home, quicker.
 [Quicker now.]
 
 // Beat 8: Home, changed. Two pages, 20–30 words.
+// A `see=` holds over the page turn until it is changed; `see=front` looks out at the reader.
 # town moonlit shot=wide on={{star}}
-@{{star}} x=0.4 enter=left proud
+@{{star}} x=0.4 enter=left proud see=front
 // 20–30 words: home in a later light.
 [Home again, in a later light.]
 
@@ -169,8 +169,8 @@ note = "The opening framing again, with the souvenir on show."
 [What is different.]
 
 // Beat 9: Button. One page, 10–20 words.
-// When your version has it: hold the souvenir in a hand; today the parcel prop stands in.
+// The souvenir is in a hand: change `parcel` to the prop your story brings home.
 # town moonlit shot=wide on={{star}}
-@{{star}} x=0.4 proud holds=parcel
+@{{star}} x=0.4 proud hold holds=parcel see=mine
 // 10–20 words: the opening framing, with the souvenir on show.
 [The opening framing, and the souvenir.]

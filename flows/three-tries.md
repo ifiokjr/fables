@@ -122,15 +122,16 @@ note = "Return to the opening staging with the star changed, and end on the refr
 [Nothing works. The star is alone.]
 
 // Beat 5: Help or insight. Two pages, 25–35 words a page.
-// When your version has it: @{{star}} see= or notice here; today the close and the
-// thinking pose carry the look.
+// `notice` plays the look before the thought; aim `see=` at the thing that is noticed.
 # garden dawn shot=close on={{star}}
-@{{star}} x=0.45 worried think
+@flower.1 x=0.8 happy
+@{{star}} x=0.45 notice see=flower.1 worried think
 // 25–35 words: something is noticed, and the star looks at it.
 [Something is noticed.]
 
+// A `see=` holds over the page turn until it is changed; `see=front` looks out at the reader.
 # garden dawn shot=medium on={{star}}
-@{{star}} x=0.45 think talk
+@{{star}} x=0.45 think talk see=front
 // 25–35 words: the idea, in the star's own words, before the plan.
 [The idea the failures taught.]
 

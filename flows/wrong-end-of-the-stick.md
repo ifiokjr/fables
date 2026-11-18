@@ -89,18 +89,18 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 [The truth, up close.]
 
 // Beat 2: The star overhears and misreads. One page, 20–30 words.
-// When your version has it: @{{star}} see= away from the truth, or notice here; today the
-// star's face and the friend's line do it.
+// The star looks away from the truth while the half-sentence goes by.
 # garden day shot=close on={{star}}
-@{{star}} x=0.3 worried
+@{{star}} x=0.3 worried see=away
 @{{friend}} x=0.75 talk
 // 20–30 words: the half-heard sentence, and the star's wrong reading of it.
 "[The half-heard sentence.]"
 
 // Beat 3: Acts on the mistake ×3, escalating. Three pages, 25–35 words.
 // Keep the truth in the background of every page.
+// A `see=` holds over the page turn until it is changed; `see=front` looks out at the reader.
 # kitchen indoor shot=full
-@{{star}} x=0.3 proud
+@{{star}} x=0.3 proud see=front
 @{{friend}} x=0.8 happy
 // 25–35 words: the first helpful act, and the truth still going on behind it.
 [First act.]
@@ -118,17 +118,21 @@ note = "A new close, a new misreading, iris out: the joke belongs to the whole c
 [Third act.]
 
 // Beat 4: Others are puzzled, and the mistake deepens. Two pages, 25–35 words.
-// When your version has it: a double-take here; today the two closes and the pause do it.
+// A double-take: a glance, a look away, then `notice` plays the second look before the take.
 # garden day shot=close on={{friend}}
-@{{friend}} x=0.7 shocked
 @{{star}} x=0.3 proud
+@{{friend}} x=0.7 see={{star}}
+@pause 0.5
+@{{friend}} see=front
+@pause 0.4
+@{{friend}} notice see={{star}} shocked
 @pause 0.8
 // 25–35 words: the other character's face, and no words to explain it.
 [Puzzled.]
 
 # garden day text=bottom shot=close on={{star}}
-@{{star}} x=0.3 worried
-@{{friend}} x=0.7 worried
+@{{star}} x=0.3 worried see={{friend}}
+@{{friend}} x=0.7 worried see={{star}}
 // 25–35 words: the star sees the puzzle and misreads it too; the text card sits low, ready
 // for the page turn.
 [The mistake deepens.]
