@@ -142,13 +142,22 @@ fn an_agent_designs_a_character_without_touching_files() {
 			}
 		}),
 	);
-	assert_eq!(nell["puppet"], "puppets/nell.svg");
+	assert_eq!(nell["puppet"], Value::Null);
+	assert_eq!(nell["drawn"], "template");
 
 	let ear = session.json(
 		"character_parts",
 		&json!({ "world": "nibbleton", "id": "nell", "names": ["ear"] }),
 	);
 	assert_eq!(ear[0]["from"], "kit");
+	let head = session.json(
+		"character_parts",
+		&json!({ "world": "nibbleton", "id": "nell", "names": ["head.front"] }),
+	);
+	assert_eq!(
+		head[0]["from"], "template",
+		"a template-drawn character reads the style's own parts"
+	);
 
 	let update = session.json(
 		"character_set_parts",
@@ -159,6 +168,14 @@ fn an_agent_designs_a_character_without_touching_files() {
 		}),
 	);
 	assert_eq!(update["written"], true, "{update}");
+	let described = session.json("world_describe", &json!({ "world": "nibbleton" }));
+	let member = &described["cast"][0];
+	assert_eq!(member["id"], "nell");
+	assert_eq!(
+		member["puppet"], "puppets/nell.svg",
+		"redrawing a part gave her a file of her own"
+	);
+	assert_eq!(member["drawn"], "puppet");
 
 	let sheet = session.call(
 		"character_sheet",

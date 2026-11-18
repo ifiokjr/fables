@@ -45,7 +45,7 @@ fn a_script_names_its_world_and_the_build_says_which_folder_it_read() {
 		stdout.contains(&world.display().to_string()),
 		"the resolved world folder is printed: {stdout}"
 	);
-	assert!(stdout.contains("style: "), "{stdout}");
+	assert!(stdout.contains("skin: "), "{stdout}");
 
 	// An absolute path is refused, and the error states the contract.
 	std::fs::write(
