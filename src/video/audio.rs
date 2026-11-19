@@ -139,7 +139,7 @@ impl<'de> Deserialize<'de> for MusicDefault {
 }
 
 /// Built-in sound effects, usable from scripts with `@sfx name`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Sound {
 	Pop,
 	Plop,
@@ -541,6 +541,54 @@ fn at_loudness(mut samples: Vec<f32>) -> Vec<f32> {
 	samples
 }
 
+/// A recorded effect made to sit like a built-in one: silence trimmed from the front so it
+/// lands on its cue, and from the end, then brought to the same loudness, its peak kept clear
+/// of clipping.
+fn recorded_effect(recorded: &[f32]) -> Vec<f32> {
+	let threshold = 0.01;
+	let start = recorded
+		.iter()
+		.position(|s| s.abs() > threshold)
+		.unwrap_or(0);
+	let end = recorded
+		.iter()
+		.rposition(|s| s.abs() > threshold)
+		.map_or(start, |i| i + 1);
+	let mut samples = at_loudness(recorded[start..end].to_vec());
+	let peak = samples.iter().fold(0.0_f32, |peak, s| peak.max(s.abs()));
+
+	if peak > 0.9 {
+		for sample in &mut samples {
+			*sample *= 0.9 / peak;
+		}
+	}
+
+	samples
+}
+
+/// A recorded ambience loop repeated for `seconds`, starting at a different place in the
+/// loop for each segment so two scenes with the same bed do not begin identically, and
+/// normalised to unit RMS like a procedural bed.
+fn recorded_bed(recorded: &[f32], seconds: f32, segment: u64) -> Vec<f32> {
+	let n = len(seconds);
+
+	if recorded.is_empty() {
+		return vec![0.0; n];
+	}
+
+	let offset = (segment.wrapping_mul(0x9E37_79B9) as usize) % recorded.len();
+	let mut out: Vec<f32> = (0..n)
+		.map(|i| recorded[(offset + i) % recorded.len()])
+		.collect();
+	let rms = rms(&out).max(1e-6);
+
+	for sample in &mut out {
+		*sample /= rms;
+	}
+
+	out
+}
+
 /// Adds `source` into `target` starting `at` seconds in, growing `target` if needed.
 fn mix_into(target: &mut Vec<f32>, source: &[f32], at: f32) {
 	let offset = (at.max(0.0) * SR) as usize;
@@ -937,7 +985,10 @@ fn ambience_track(timeline: &Timeline, voice: &[f32], total: usize) -> Vec<f32> 
 		let mut segment = vec![0.0_f32; end - start];
 
 		for bed in &cue.beds {
-			let signal = bed_signal(*bed, seconds, index as u64);
+			let signal = match timeline.foley.bed(*bed) {
+				Some(recorded) => recorded_bed(recorded, seconds, index as u64),
+				None => bed_signal(*bed, seconds, index as u64),
+			};
 			let gain = level * bed.level();
 
 			for (i, sample) in signal.iter().take(segment.len()).enumerate() {
@@ -1228,7 +1279,10 @@ pub fn render(timeline: &Timeline) -> Soundtrack {
 	let mut effects = vec![0.0_f32; total];
 
 	for cue in &timeline.cues {
-		let rendered = cue.sound.render();
+		let rendered = match timeline.foley.effect(cue.sound, cue.described.as_ref()) {
+			Some(recorded) => recorded_effect(recorded),
+			None => cue.sound.render(),
+		};
 		mix_into(&mut effects, &rendered, cue.time);
 	}
 
@@ -1349,6 +1403,7 @@ mod tests {
 			dropouts: Vec::new(),
 			holds: Vec::new(),
 			ambience: Vec::new(),
+			foley: crate::video::foley::Foley::default(),
 		}
 	}
 

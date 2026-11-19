@@ -36,6 +36,7 @@ use crate::story::Age;
 use crate::story::Drawing;
 use crate::story::GuestStyle;
 use crate::story::Story;
+use crate::video::foley::SoundSource;
 use crate::video::voice::Voice;
 
 /// The file that marks a folder as a world.
@@ -114,6 +115,8 @@ pub struct World {
 	pub about: Option<String>,
 	/// Who reads the books aloud, unless a script names its own `[voice]`.
 	pub narrator: Option<Voice>,
+	/// Who makes the sound effects and ambience, unless a script names its own `[sound]`.
+	pub sound: Option<SoundSource>,
 	/// The light the world's books start in, unless a book names its own (`world.toml`:
 	/// `light = "golden"`).
 	pub light: Option<Light>,
@@ -165,6 +168,8 @@ struct Entry {
 	#[serde(default)]
 	narrator: Option<Voice>,
 	#[serde(default)]
+	sound: Option<SoundSource>,
+	#[serde(default)]
 	book: Matter,
 }
 
@@ -190,6 +195,12 @@ impl World {
 			voice
 				.validate()
 				.with_context(|| format!("the narrator in {}", path.display()))?;
+		}
+
+		if let Some(sound) = &entry.sound {
+			sound
+				.validate()
+				.with_context(|| format!("the `[sound]` table in {}", path.display()))?;
 		}
 
 		StylePack::named(&entry.style)
@@ -218,6 +229,7 @@ impl World {
 			light,
 			age: entry.age,
 			narrator: entry.narrator,
+			sound: entry.sound,
 			matter: entry.book,
 		})
 	}
@@ -461,6 +473,10 @@ impl World {
 
 		if story.meta.voice.is_none() {
 			story.meta.voice.clone_from(&self.narrator);
+		}
+
+		if story.meta.sound.is_none() {
+			story.meta.sound.clone_from(&self.sound);
 		}
 
 		Ok(())
