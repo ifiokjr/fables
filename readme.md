@@ -61,6 +61,7 @@ The house style, setting and series rules live in the series bible, [`worlds/ker
 3. **[Animation](docs/animation.md)**: how the rig, the acting layer and the camera move.
 4. **[Designing characters with an agent](#designing-characters-with-an-agent-mcp)**: the MCP server that draws, checks and shows model sheets.
 5. **[Voices and the show](docs/tv-show.md)**: real voices, character consistency and turning the books into a series.
+6. **[ElevenLabs](docs/elevenlabs.md)**: realistic character voices, sound effects and ambience, from a key to a finished cartoon.
 
 ## Worlds
 
@@ -352,7 +353,7 @@ Worlds, books, settings and characters are named by slugs, never paths, so the s
 | `fables print <story>` | `out/<book>/<skin>/print/`: the interior and cover PDFs, plus `kdp-setup.txt` with the numbers to type into KDP. |
 | `fables video <story> [--format landscape\|portrait\|both] [--preview]` | `out/<book>/<skin>/video/`: MP4s, `soundtrack.wav`, `.srt` captions, a YouTube thumbnail and a 9:16 cover image. `--preview` renders at half size and 15 fps. Each MP4 is encoded under a working name (`<name>.partial-<n>.mp4`) and moved into place when it is whole, so a render that is stopped, or two renders of one book at once, never leave a broken file under the final name. |
 | `fables storyboard <story> [--format landscape\|portrait] [--pin [page=3,5]] [--unpin]` | `out/<book>/<skin>/storyboard/storyboard.png` (paged as `storyboard-2.png`, … past 24 panels), plus `storyboard.md`: the shot list, one row per shot with its page, script line, start and duration, shot size, subjects, move, how it is entered, who chose it, the music cue that comes in, any dead stop (`@hold`, `hold=`) and the words spoken. The board prints the list too. `--pin` writes the director's plan for the `--format` shape (landscape unless you say) into the script as `@camera` directions marked `// pinned` for you to edit, delete or reorder, and names any pages where the other shape plans other shots; `--unpin` takes them out again. Never records a voice, so it runs offline in a second or two. |
-| `fables animatic <story> [--format landscape\|portrait] [--silent]` | `out/<book>/<skin>/animatic/<book>-animatic.mp4`: each storyboard panel held for its real duration over the soundtrack, captioned with its number, page, line, start, length and first words, under a progress bar that marks each cut, so timing reads in seconds; a push or pan moves by cropping one wide plate. Half size at 24 fps, with `soundtrack.wav` beside it, mixed exactly as the video's. A line whose voice cannot speak here (no `say`, no API key, no command) is silent and timed by its estimate while music, effects and ambience play, and the output says how many; `--silent` does that for every line and records nothing. `fables video` never falls back: it stops with the voice's error. |
+| `fables animatic <story> [--format landscape\|portrait] [--silent]` | `out/<book>/<skin>/animatic/<book>-animatic.mp4`: each storyboard panel held for its real duration over the soundtrack, captioned with its number, page, line, start, length and first words, under a progress bar that marks each cut, so timing reads in seconds; a push or pan moves by cropping one wide plate. Half size at 24 fps, with `soundtrack.wav` beside it, mixed exactly as the video's. A line whose voice cannot speak here (no `say`, no API key, no command) is silent and timed by its estimate while music, effects and ambience play, and the output says how many; `--silent` does that for every line and records nothing. `fables video` stands a voice that cannot record here in with its `fallback` macOS voice instead, and says so. |
 | `fables book <story>` | Proofs, ePub and print. |
 | `fables all <story>` | Everything. |
 | `fables sheets [--moods <id>] [--zones]` | Model sheets in `out/sheets/<skin>/`, in the page skin the world's books print in unless `--style` names another: the whole cast, every setting, the world's props (`<world>-props.png`: each prop alone and in the first figure's hand), the world's colour script (`<world>-lights.png`: one setting with one cast member under every light), and one character in every mood. `--zones` outlines, on every setting, where a typical text card sits at the top and with `text=bottom`, how high a kid's and a grown-up's heads reach, and the spots actors stand on without an `x=` (see [Settings](#settings)). |
@@ -642,7 +643,7 @@ The script's mood (`cross`, `defiant`, `sad`…) becomes the line's delivery, an
 | --- | --- | --- | --- |
 | `say` (default) | macOS | speaking rate | estimated from the audio |
 | `command` | any TTS program; `{text}`, `{out}`, `{mood}`, `{voice}` placeholders, text on stdin if `{text}` is absent | `{mood}` | estimated from the audio |
-| `elevenlabs` | `id`, optional `model` (default `eleven_v4`), `ELEVENLABS_API_KEY` | `[defiant]`-style audio tags | exact, per letter |
+| `elevenlabs` | `id`, optional `model` (default `eleven_v4`), `stability`, `similarity`, `fallback`; `ELEVENLABS_API_KEY` | `[defiant]`-style audio tags (a pace on older models) | exact, per letter |
 | `openai` | `name` (a built-in voice), optional `style`, `OPENAI_API_KEY` | `style` plus the mood as an acting instruction | estimated from the audio |
 | `cartesia` | `id` (a Sonic voice), optional `model` (default `sonic-3.6`), `CARTESIA_API_KEY` | the mood as one of Sonic's emotions, and a speed | estimated from the audio |
 | `hume` | `id` (an Octave voice), optional `style`, `HUME_API_KEY` | `style` plus the mood as short acting directions | estimated from the audio |
@@ -655,11 +656,14 @@ rate = 158
 [stinky.voice]              # in the world's cast.toml: Stinky, in every book
 provider = "elevenlabs"
 id = "<voice id>"
+fallback = "Junior"         # the macOS voice that reads where ElevenLabs cannot
 ```
 
-`fables voice providers` shows which providers can speak right now, `fables voice list` the macOS voices, and `fables voice audition <id> "<line>" --mood cross` speaks a line in a character's voice (or `narrator`) into `out/voices/`. Over MCP, `voice_providers`, `voice_list`, `voice_cast` and `voice_audition` do the same, and auditions come back as audio.
+`fables voice providers` shows which providers can speak right now, `fables voice list` the macOS voices (`--provider elevenlabs [--search …]` your ElevenLabs library), and `fables voice audition <id> "<line>" --mood cross` speaks a line in a character's voice (or `narrator`) into `out/voices/`. `fables voice design <id> "<casting note>"` has ElevenLabs design voices to listen to, and `fables voice keep <id> <number>` casts one. Over MCP, `voice_providers`, `voice_list`, `voice_library`, `voice_design`, `voice_keep`, `voice_cast` and `voice_audition` do the same, and auditions and designs come back as audio.
 
-Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Paid API calls fail once and are never retried in a loop. Give the run the provider's key in its environment, for one batch: `ELEVENLABS_API_KEY=<key> fables all worlds/kerfuffle`.
+Takes are cached in `out/<book>/cache/voice`, keyed by voice, mood and text, so only edited lines are re-recorded. Before recording, a build says how many characters it will spend and, for ElevenLabs, how much of the plan is left; new lines for online voices are recorded three at a time. A refused call is reported once and never retried (a busy reply, which cost nothing, is waited out). A voice that cannot record here, such as one whose key is not set, is read by its `fallback` macOS voice, or is silent where there is none, and the build says so. Give the run the provider's key in its environment: `ELEVENLABS_API_KEY=<key> fables all worlds/kerfuffle`.
+
+A world's `[sound]` table with `provider = "elevenlabs"` has ElevenLabs record every sound effect and ambience bed too, cached by description, and a script can describe a one-off: `@sfx bonk "a wooden spoon tapping a pot"`. The whole walkthrough, from a key to a finished cartoon, is [`docs/elevenlabs.md`](docs/elevenlabs.md).
 
 Sourcing voices, provider prices and policies, local models, human actors and keeping characters consistent are all in [`docs/tv-show.md`](docs/tv-show.md).
 
@@ -732,6 +736,6 @@ are under the SIL Open Font License, with their licence files beside them.
 ## Known limits
 
 - **Shapes.** The page is square (8.5" × 8.5") and spreads are single pages. A landscape trim or two-page spreads would need new view boxes in `book.rs` and `press/print.rs`.
-- **Voices.** The ElevenLabs and OpenAI providers follow their current API docs and are unit-tested on request and response shapes, but haven't yet been run against the live services. Recorded human takes and speech-to-speech conversion aren't built yet (see `docs/tv-show.md`).
+- **Voices.** The ElevenLabs integration is tested end to end against a local stand-in for the service (`tests/elevenlabs.rs`); the OpenAI, Cartesia and Hume providers only on request and response shapes. Recorded human takes and speech-to-speech conversion aren't built yet (see `docs/tv-show.md`).
 - **Read-along ePub.** Not built yet. The narration timings exist, so EPUB media overlays (read-along highlighting in Apple Books) are a natural next step.
 - **New habits need new effects.** Effects live in `src/art/fx.rs`, so a book about a new habit (smouldering trousers, say) means a few dozen lines of drawing code.

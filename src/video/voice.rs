@@ -9,13 +9,15 @@
 //! | --- | --- | --- | --- |
 //! | `say` (macOS) | yes | speaking rate | from the audio |
 //! | `command` (Piper, mlx-audio, anything) | yes | `{mood}` in the command | from the audio |
-//! | `elevenlabs` | no | `[defiant]`-style audio tags | exact, per letter |
+//! | `elevenlabs` | no | `[defiant]`-style audio tags (a pace on older models) | exact, per letter |
 //! | `openai` | no | free-text acting instructions | from the audio |
 //! | `cartesia` (Sonic) | no | an emotion and a speed | from the audio |
 //! | `hume` (Octave) | no | free-text acting directions | from the audio |
 //!
 //! Everything is normalised to 48 kHz mono, and every take is cached by provider, voice, text
-//! and delivery, so editing one line re-records one line.
+//! and delivery, so editing one line re-records one line. A voice that cannot record on this
+//! machine (no API key, no program) is stood in for by an offline one: see
+//! [`stand_in`](crate::video::recording::stand_in).
 
 use std::io::Write as _;
 use std::path::Path;
@@ -26,7 +28,6 @@ use std::process::Stdio;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use base64::Engine as _;
 use serde::Deserialize;
 
 use crate::art::figure::Mood;
@@ -67,24 +68,53 @@ pub struct Voice {
 	/// "A cheeky six-year-old boy, loud and bouncy, with a British accent".
 	#[serde(default)]
 	pub style: Option<String>,
+	/// `elevenlabs`: 0 to 1. Lower is more expressive and varied, higher is steadier.
+	#[serde(default)]
+	pub stability: Option<f32>,
+	/// `elevenlabs`: 0 to 1, how closely a take keeps to the voice's own sound.
+	#[serde(default)]
+	pub similarity: Option<f32>,
+	/// `elevenlabs`: 0 to 1, exaggerates the voice's own style (not on `eleven_v4`).
+	#[serde(default)]
+	pub exaggeration: Option<f32>,
+	/// `elevenlabs`: 0.7 to 1.2, how fast the voice speaks (not on `eleven_v4`).
+	#[serde(default)]
+	pub speed: Option<f32>,
+	/// The macOS voice that stands in when this one cannot record here, e.g. no API key is
+	/// set. Left out, it is `Daniel`. Takes already recorded are always used first.
+	#[serde(default)]
+	pub fallback: Option<String>,
 }
 
 /// The rate a voice reads at when nobody sets one: the pace every book had before age bands.
 const RATE: u32 = 165;
 
+#[expect(
+	clippy::missing_fields_in_debug,
+	reason = "the debug string is the take cache's key, and `fallback` does not change a take"
+)]
 impl std::fmt::Debug for Voice {
 	/// Prints the effective rate, so a take's cache key is the same as it was when the rate was
-	/// a plain number and no band was in play.
+	/// a plain number and no band was in play. The `ElevenLabs` settings are printed only when
+	/// set, so a voice without them keeps every take it already has; the fallback is never
+	/// printed, since it does not change how this voice sounds.
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("Voice")
-			.field("provider", &self.provider)
+		let mut out = f.debug_struct("Voice");
+		out.field("provider", &self.provider)
 			.field("name", &self.name)
 			.field("rate", &self.rate())
 			.field("command", &self.command)
 			.field("id", &self.id)
 			.field("model", &self.model)
-			.field("style", &self.style)
-			.finish()
+			.field("style", &self.style);
+
+		for (name, value) in self.settings() {
+			if let Some(value) = value {
+				out.field(name, &value);
+			}
+		}
+
+		out.finish()
 	}
 }
 
@@ -106,11 +136,26 @@ impl Default for Voice {
 			id: None,
 			model: None,
 			style: None,
+			stability: None,
+			similarity: None,
+			exaggeration: None,
+			speed: None,
+			fallback: None,
 		}
 	}
 }
 
 impl Voice {
+	/// The `ElevenLabs` settings by name, in the order they are printed.
+	fn settings(&self) -> [(&'static str, Option<f32>); 4] {
+		[
+			("stability", self.stability),
+			("similarity", self.similarity),
+			("exaggeration", self.exaggeration),
+			("speed", self.speed),
+		]
+	}
+
 	/// Words a minute this voice is asked to read at.
 	pub fn rate(&self) -> u32 {
 		self.rate.unwrap_or(RATE)
@@ -118,6 +163,41 @@ impl Voice {
 
 	/// Checks the configuration up front, so a typo fails before any audio is made.
 	pub fn validate(&self) -> Result<()> {
+		for (name, value) in self.settings() {
+			let Some(value) = value else { continue };
+
+			if self.provider != "elevenlabs" {
+				bail!(
+					"`{name}` is an ElevenLabs setting; the `{}` voice cannot use it",
+					self.provider
+				);
+			}
+
+			let range = if name == "speed" {
+				0.7..=1.2
+			} else {
+				0.0..=1.0
+			};
+
+			if !range.contains(&value) {
+				bail!(
+					"`{name} = {value}` is out of range; use {} to {}",
+					range.start(),
+					range.end()
+				);
+			}
+		}
+
+		if self
+			.fallback
+			.as_deref()
+			.is_some_and(|name| name.trim().is_empty())
+		{
+			bail!(
+				"`fallback` names no voice; give a macOS voice such as \"Daniel\", or leave it out"
+			);
+		}
+
 		match self.provider.as_str() {
 			"say" | "openai" => Ok(()),
 			"command" if self.command.as_ref().is_some_and(|c| !c.is_empty()) => Ok(()),
@@ -176,7 +256,7 @@ impl Delivery {
 		})
 	}
 
-	fn rate_scale(self) -> f32 {
+	pub(crate) fn rate_scale(self) -> f32 {
 		if self.shout {
 			return 1.08;
 		}
@@ -326,7 +406,8 @@ pub fn unavailable(voice: &Voice) -> Option<String> {
 
 			return (!found).then(|| format!("the voice command `{program}` is not installed"));
 		}
-		"elevenlabs" => "ELEVENLABS_API_KEY",
+		"elevenlabs" if crate::video::elevenlabs::has_key() => return None,
+		"elevenlabs" => crate::video::elevenlabs::KEY,
 		"openai" => "OPENAI_API_KEY",
 		"cartesia" => "CARTESIA_API_KEY",
 		"hume" => "HUME_API_KEY",
@@ -483,7 +564,7 @@ fn run_command(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
 	})
 }
 
-fn api_key(variable: &str) -> Result<String> {
+pub(crate) fn api_key(variable: &str) -> Result<String> {
 	std::env::var(variable).with_context(|| {
 		format!(
 			"{variable} is not set; set it in the environment for this run, e.g. `{variable}=… \
@@ -526,69 +607,9 @@ pub fn elevenlabs_text(utterance: &Utterance<'_>) -> String {
 	}
 }
 
-#[derive(Deserialize)]
-struct ElevenLabsReply {
-	audio_base64: String,
-	#[serde(default)]
-	alignment: Option<ElevenLabsAlignment>,
-	#[serde(default)]
-	normalized_alignment: Option<ElevenLabsAlignment>,
-}
-
-#[derive(Deserialize)]
-struct ElevenLabsAlignment {
-	characters: Vec<String>,
-	character_start_times_seconds: Vec<f32>,
-	character_end_times_seconds: Vec<f32>,
-}
-
-impl ElevenLabsAlignment {
-	fn timed(&self) -> Vec<Timed> {
-		self.characters
-			.iter()
-			.zip(&self.character_start_times_seconds)
-			.zip(&self.character_end_times_seconds)
-			.filter_map(|((ch, start), end)| {
-				Some(Timed {
-					ch: ch.chars().next()?,
-					start: *start,
-					end: *end,
-				})
-			})
-			.collect()
-	}
-}
-
 fn elevenlabs(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
-	let key = api_key("ELEVENLABS_API_KEY")?;
-	let voice_id = utterance.voice.id.as_deref().unwrap_or_default();
-	let model = utterance.voice.model.as_deref().unwrap_or("eleven_v4");
-	let url = format!(
-		"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps?output_format=mp3_44100_128"
-	);
-	let body = serde_json::json!({ "text": elevenlabs_text(utterance), "model_id": model });
-	let mut response = agent()
-		.post(&url)
-		.header("xi-api-key", &key)
-		.send_json(&body)
-		.context("could not reach ElevenLabs")?;
-	check_status("ElevenLabs", &mut response)?;
-
-	let reply: ElevenLabsReply = response
-		.body_mut()
-		.read_json()
-		.context("ElevenLabs sent an unexpected reply")?;
 	let audio = stem.with_extension("mp3");
-	let bytes = base64::engine::general_purpose::STANDARD
-		.decode(reply.audio_base64)
-		.context("ElevenLabs audio was not valid base64")?;
-	std::fs::write(&audio, bytes)
-		.with_context(|| format!("could not write {}", audio.display()))?;
-
-	let alignment = reply
-		.normalized_alignment
-		.or(reply.alignment)
-		.map(|a| a.timed());
+	let alignment = crate::video::elevenlabs::speak(utterance, &audio)?;
 
 	Ok(Take { audio, alignment })
 }
@@ -727,7 +748,7 @@ fn write_audio(
 	})
 }
 
-fn normalise(input: &Path, output: &Path) -> Result<()> {
+pub(crate) fn normalise(input: &Path, output: &Path) -> Result<()> {
 	let status = Command::new("ffmpeg")
 		.args(["-y", "-loglevel", "error", "-i"])
 		.arg(input)
@@ -1027,30 +1048,6 @@ mod tests {
 	}
 
 	#[test]
-	fn elevenlabs_alignment_becomes_timed_letters() {
-		let reply: ElevenLabsReply = serde_json::from_str(
-			r#"{"audio_base64":"","alignment":{"characters":["H","i"],"character_start_times_seconds":[0.0,0.1],"character_end_times_seconds":[0.1,0.25]}}"#,
-		)
-		.unwrap();
-		let timed = reply.alignment.unwrap().timed();
-		assert_eq!(
-			timed,
-			vec![
-				Timed {
-					ch: 'H',
-					start: 0.0,
-					end: 0.1
-				},
-				Timed {
-					ch: 'i',
-					start: 0.1,
-					end: 0.25
-				}
-			]
-		);
-	}
-
-	#[test]
 	fn a_take_is_cached_under_the_key_it_was_first_written_with() {
 		let voice = Voice::default();
 		let delivery = Delivery {
@@ -1079,6 +1076,20 @@ mod tests {
 		let explicit: Voice = toml::from_str("name = \"Daniel\"\nrate = 158\n").unwrap();
 		assert_eq!(explicit.rate(), 158);
 		assert!(format!("{explicit:?}").contains("rate: 158"));
+
+		// The ElevenLabs settings join the key only when set, and the fallback never does.
+		let eleven: Voice =
+			toml::from_str("provider = \"elevenlabs\"\nid = \"abc\"\nfallback = \"Moira\"\n")
+				.unwrap();
+		assert!(
+			format!("{eleven:?}").ends_with("style: None }"),
+			"{eleven:?}"
+		);
+		let steadier = Voice {
+			stability: Some(0.7),
+			..eleven
+		};
+		assert!(format!("{steadier:?}").ends_with("style: None, stability: 0.7 }"));
 
 		let unset: Voice = toml::from_str("name = \"Moira\"\n").unwrap();
 		assert_eq!(unset.rate, None);

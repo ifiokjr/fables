@@ -275,7 +275,7 @@ pub fn animatic(
 	let rehearsals = stage::rehearse(story, cast)?;
 	let mut silent = 0;
 	let mut reasons = std::collections::BTreeSet::new();
-	let timeline = crate::video::timeline::build(story, cast, &rehearsals, |line| {
+	let mut timeline = crate::video::timeline::build(story, cast, &rehearsals, |line| {
 		let reason = match narration {
 			Narration::Silent => Some("silent was asked for".to_owned()),
 			Narration::Voiced if voice::is_cached(line, &cache) => None,
@@ -291,6 +291,14 @@ pub fn animatic(
 			None => voice::speak(line, &cache),
 		}
 	})?;
+	let mut sound_notes = Vec::new();
+	timeline.foley = crate::video::foley::gather(
+		story,
+		&timeline,
+		&out.join(&story.slug).join("cache").join("sound"),
+		narration == Narration::Voiced,
+		&mut |note| sound_notes.push(note),
+	)?;
 	let path = crate::video::animatic(
 		story,
 		cast,
@@ -298,7 +306,7 @@ pub fn animatic(
 		format,
 		&book_dir(out, story).join("animatic"),
 	)?;
-	let note = (silent > 0).then(|| {
+	let voices = (silent > 0).then(|| {
 		format!(
 			"{silent} line{} had no voice and {} silent, timed by estimate ({})",
 			if silent == 1 { "" } else { "s" },
@@ -306,6 +314,8 @@ pub fn animatic(
 			reasons.into_iter().collect::<Vec<_>>().join("; ")
 		)
 	});
+	let notes: Vec<String> = voices.into_iter().chain(sound_notes).collect();
+	let note = (!notes.is_empty()).then(|| notes.join("; "));
 
 	Ok(Animatic {
 		path,
