@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use anyhow::Result;
+use rayon::prelude::*;
 use resvg::tiny_skia::Pixmap;
 use resvg::tiny_skia::PixmapPaint;
 use resvg::tiny_skia::Transform;
@@ -368,7 +369,8 @@ pub fn panels(
 	let renderer = Renderer::new(timeline, story, format, width, height);
 	let rows = plan(story, timeline, cast, portrait);
 
-	rows.into_iter()
+	// Performance: every panel is its own render, so they are drawn on every core.
+	rows.into_par_iter()
 		.map(|row| {
 			let view = renderer.view_at(row.frame_at);
 			let end = row
@@ -412,7 +414,7 @@ pub fn write(
 	};
 
 	boards(story, timeline, cast, portrait)?
-		.iter()
+		.par_iter()
 		.enumerate()
 		.map(|(page, board)| {
 			let name = if page == 0 {
@@ -510,7 +512,7 @@ pub fn boards(
 	let board_h = GAP + ROWS * cell_h;
 
 	panels
-		.chunks(ROWS as usize * COLUMNS as usize)
+		.par_chunks(ROWS as usize * COLUMNS as usize)
 		.map(|chunk| {
 			let mut board = Pixmap::new(board_w, board_h).context("storyboard page too large")?;
 			board.fill(resvg::tiny_skia::Color::from_rgba8(0x2a, 0x22, 0x38, 0xff));

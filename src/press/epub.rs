@@ -42,7 +42,7 @@ pub fn write(story: &Story, pages: &[BookPage], cover: &[u8], path: &Path) -> Re
 			let mut pixmap =
 				raster::render(&page_svg(page, Side::Screen, PAGE_PX, PAGE_PX, false))?;
 			raster::finish(&mut pixmap, &page.style, GRAIN, 0);
-			raster::jpeg(&pixmap, QUALITY)
+			raster::jpeg_compact(&pixmap, QUALITY)
 		})
 		.collect::<Result<_>>()?;
 

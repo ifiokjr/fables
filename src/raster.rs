@@ -74,31 +74,27 @@ pub fn grain(pixmap: &mut Pixmap, strength: f32, shift: u32) {
 		return;
 	}
 
-	let width = pixmap.width();
+	let width = pixmap.width() as usize;
 	let scale = (strength * 255.0) as u32;
+	let shifted = shift.wrapping_mul(0xCB1A_B31F);
 
-	for (index, pixel) in pixmap
-		.data_mut()
-		.as_chunks_mut::<4>()
-		.0
-		.iter_mut()
-		.enumerate()
-	{
-		let x = index as u32 % width;
-		let y = index as u32 / width;
-		let mut h = x.wrapping_mul(0x8DA6_B343)
-			^ y.wrapping_mul(0xD816_3841)
-			^ shift.wrapping_mul(0xCB1A_B31F);
-		h ^= h >> 13;
-		h = h.wrapping_mul(0x5bd1_e995);
-		h ^= h >> 15;
+	// Performance: row by row, so no pixel pays for a division to find its column; integer
+	// maths only, since this runs over millions of pixels per video frame.
+	for (y, row) in pixmap.data_mut().chunks_exact_mut(width * 4).enumerate() {
+		let row_hash = (y as u32).wrapping_mul(0xD816_3841) ^ shifted;
 
-		// Performance: integer maths only; this runs over millions of pixels per video frame.
-		let speck = (h & 0xFF) * scale / 255;
-		let keep = 255 - speck.min(255);
+		for (x, pixel) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+			let mut h = (x as u32).wrapping_mul(0x8DA6_B343) ^ row_hash;
+			h ^= h >> 13;
+			h = h.wrapping_mul(0x5bd1_e995);
+			h ^= h >> 15;
 
-		for channel in &mut pixel[..3] {
-			*channel = (u32::from(*channel) * keep / 255) as u8;
+			let speck = (h & 0xFF) * scale / 255;
+			let keep = 255 - speck.min(255);
+
+			for channel in &mut pixel[..3] {
+				*channel = (u32::from(*channel) * keep / 255) as u8;
+			}
 		}
 	}
 }
@@ -179,65 +175,94 @@ fn grade(pixmap: &mut Pixmap, saturation: f32, lift: f32, mottle: f32) {
 	let width = pixmap.width() as usize;
 	// Paper blooms are about a twentieth of the image wide, whatever the resolution.
 	let cell = (width / 20).max(8) as f32;
+	// Performance: the noise lattice is hashed once per cell rather than four times a pixel,
+	// and each column's place in its cell is worked out once. The sums are the bilinear value
+	// noise's own, in the same order, so every pixel comes out exactly as it did per pixel.
+	let columns: Vec<(f32, f32)> = (0..width)
+		.map(|x| {
+			let x = x as f32 / cell;
+			let x0 = x.floor();
+			(x0, smoothstep(x - x0))
+		})
+		.collect();
 
-	for (index, pixel) in pixmap
-		.data_mut()
-		.as_chunks_mut::<4>()
-		.0
-		.iter_mut()
-		.enumerate()
-	{
-		let x = (index % width) as f32 / cell;
-		let y = (index / width) as f32 / cell;
-		let bloom = 1.0 + (value_noise(x, y) - 0.5) * mottle * 0.14;
-		let [r, g, b] = [
-			f32::from(pixel[0]),
-			f32::from(pixel[1]),
-			f32::from(pixel[2]),
-		];
-		let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+	for (y, row) in pixmap.data_mut().chunks_exact_mut(width * 4).enumerate() {
+		let y = y as f32 / cell;
+		let y0 = y.floor();
+		let sy = smoothstep(y - y0);
+		let mut lattice = (f32::NAN, [0.0; 4]);
 
-		for (channel, value) in pixel[..3].iter_mut().zip([r, g, b]) {
-			let saturated = luma + (value - luma) * saturation;
-			let lifted = saturated + (255.0 - saturated) * lift;
-			*channel = (lifted * bloom).clamp(0.0, 255.0) as u8;
+		for (pixel, &(x0, sx)) in row.as_chunks_mut::<4>().0.iter_mut().zip(&columns) {
+			if lattice.0.to_bits() != x0.to_bits() {
+				lattice = (
+					x0,
+					[
+						lattice_value(x0, y0),
+						lattice_value(x0 + 1.0, y0),
+						lattice_value(x0, y0 + 1.0),
+						lattice_value(x0 + 1.0, y0 + 1.0),
+					],
+				);
+			}
+
+			let [c00, c10, c01, c11] = lattice.1;
+			let top = c00 + (c10 - c00) * sx;
+			let bottom = c01 + (c11 - c01) * sx;
+			let noise = top + (bottom - top) * sy;
+			let bloom = 1.0 + (noise - 0.5) * mottle * 0.14;
+			let [r, g, b] = [
+				f32::from(pixel[0]),
+				f32::from(pixel[1]),
+				f32::from(pixel[2]),
+			];
+			let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+			for (channel, value) in pixel[..3].iter_mut().zip([r, g, b]) {
+				let saturated = luma + (value - luma) * saturation;
+				let lifted = saturated + (255.0 - saturated) * lift;
+				*channel = (lifted * bloom).clamp(0.0, 255.0) as u8;
+			}
 		}
 	}
 }
 
-/// Smooth 2D value noise in 0..1 (bilinear between hashed lattice points).
-fn value_noise(x: f32, y: f32) -> f32 {
-	let (x0, y0) = (x.floor(), y.floor());
-	let (fx, fy) = (x - x0, y - y0);
-	let corner = |dx: f32, dy: f32| {
-		let lattice = ((x0 + dx) as i64 as u64).wrapping_mul(73_856_093)
-			^ ((y0 + dy) as i64 as u64).wrapping_mul(19_349_663);
-		f32::midpoint(crate::art::noise(0x5EED, lattice), 1.0)
-	};
-	let smooth = |t: f32| t * t * (3.0 - 2.0 * t);
-	let (sx, sy) = (smooth(fx), smooth(fy));
-	let top = corner(0.0, 0.0) + (corner(1.0, 0.0) - corner(0.0, 0.0)) * sx;
-	let bottom = corner(0.0, 1.0) + (corner(1.0, 1.0) - corner(0.0, 1.0)) * sx;
+/// The value noise's hashed lattice point at whole-numbered `(x, y)`, in 0..1.
+fn lattice_value(x: f32, y: f32) -> f32 {
+	let lattice =
+		(x as i64 as u64).wrapping_mul(73_856_093) ^ (y as i64 as u64).wrapping_mul(19_349_663);
 
-	top + (bottom - top) * sy
+	f32::midpoint(crate::art::noise(0x5EED, lattice), 1.0)
+}
+
+/// Hermite easing from 0 to 1.
+fn smoothstep(t: f32) -> f32 {
+	t * t * (3.0 - 2.0 * t)
 }
 
 /// Encodes a pixmap as JPEG (RGB, alpha dropped onto white).
 pub fn jpeg(pixmap: &Pixmap, quality: u8) -> Result<Vec<u8>> {
-	let mut rgb = Vec::with_capacity((pixmap.width() * pixmap.height() * 3) as usize);
+	encode_jpeg(pixmap, quality, false)
+}
 
-	for pixel in pixmap.data().as_chunks::<4>().0 {
-		rgb.extend_from_slice(&pixel[..3]);
-	}
+/// Encodes a pixmap as JPEG with Huffman tables fitted to the image: about 3% smaller, with
+/// every decoded pixel the same, for a second pass over the image. Worth it for the pictures
+/// sent to every reader, such as an ePub's pages, rather than files made once.
+pub fn jpeg_compact(pixmap: &Pixmap, quality: u8) -> Result<Vec<u8>> {
+	encode_jpeg(pixmap, quality, true)
+}
 
+fn encode_jpeg(pixmap: &Pixmap, quality: u8, fitted: bool) -> Result<Vec<u8>> {
 	let mut out = Vec::new();
-	let encoder = jpeg_encoder::Encoder::new(&mut out, quality);
+	let mut encoder = jpeg_encoder::Encoder::new(&mut out, quality);
+	encoder.set_optimized_huffman_tables(fitted);
+	// Performance: the encoder reads RGBA as it is and ignores the alpha, so the pixels are
+	// never copied into an RGB buffer first.
 	encoder
 		.encode(
-			&rgb,
+			pixmap.data(),
 			u16::try_from(pixmap.width()).context("image too wide for JPEG")?,
 			u16::try_from(pixmap.height()).context("image too tall for JPEG")?,
-			jpeg_encoder::ColorType::Rgb,
+			jpeg_encoder::ColorType::Rgba,
 		)
 		.context("JPEG encoding failed")?;
 
@@ -245,9 +270,59 @@ pub fn jpeg(pixmap: &Pixmap, quality: u8) -> Result<Vec<u8>> {
 }
 
 /// Encodes a pixmap as PNG.
+///
+/// An image with no transparency, which is nearly every page and frame, is written as RGB
+/// rather than RGBA, and every image is deflated properly rather than at the fastest setting:
+/// together that makes a grainy page over a third smaller, with every pixel exactly as it was.
 pub fn png(pixmap: &Pixmap) -> Result<Vec<u8>> {
-	pixmap.encode_png().context("PNG encoding failed")
+	encode_png(pixmap, png::DeflateCompression::Level(PNG_LEVEL))
 }
+
+/// Encodes a pixmap as PNG at the fastest setting, for a scratch file that is read back once
+/// and thrown away, where the bytes saved would cost more time than they save.
+pub fn png_scratch(pixmap: &Pixmap) -> Result<Vec<u8>> {
+	encode_png(pixmap, png::DeflateCompression::FdeflateUltraFast)
+}
+
+fn encode_png(pixmap: &Pixmap, compression: png::DeflateCompression) -> Result<Vec<u8>> {
+	let pixels = pixmap.pixels();
+	let opaque = pixels.iter().all(|pixel| pixel.alpha() == u8::MAX);
+	let (colour, data) = if opaque {
+		let mut rgb = Vec::with_capacity(pixels.len() * 3);
+
+		for pixel in pixmap.data().as_chunks::<4>().0 {
+			rgb.extend_from_slice(&pixel[..3]);
+		}
+
+		(png::ColorType::Rgb, rgb)
+	} else {
+		let mut rgba = Vec::with_capacity(pixels.len() * 4);
+
+		for pixel in pixels {
+			let colour = pixel.demultiply();
+			rgba.extend_from_slice(&[colour.red(), colour.green(), colour.blue(), colour.alpha()]);
+		}
+
+		(png::ColorType::Rgba, rgba)
+	};
+
+	let mut out = Vec::new();
+	let mut encoder = png::Encoder::new(&mut out, pixmap.width(), pixmap.height());
+	encoder.set_color(colour);
+	encoder.set_depth(png::BitDepth::Eight);
+	encoder.set_deflate_compression(compression);
+	encoder.set_filter(png::Filter::Adaptive);
+	encoder
+		.write_header()
+		.and_then(|mut writer| writer.write_image_data(&data))
+		.context("PNG encoding failed")?;
+
+	Ok(out)
+}
+
+/// The DEFLATE level PNGs are written at. On grainy pages, level 2 gets within 4% of level 6's
+/// size in half its time; level 1 barely beats storing the grain.
+const PNG_LEVEL: u8 = 2;
 
 #[cfg(test)]
 mod tests {
@@ -284,6 +359,148 @@ mod tests {
 		assert!((0.05..0.25).contains(&ink(105)), "light tone: {}", ink(105));
 		assert!(ink(210) > ink(105), "darker tones print more dots");
 		assert!((0..420).all(|x| at(x, 30).red() == at(x, 30).green()));
+	}
+
+	/// The finish as it was first written, a pixel at a time, to hold the faster loops to.
+	fn reference_finish(
+		pixmap: &mut Pixmap,
+		saturation: f32,
+		lift: f32,
+		mottle: f32,
+		strength: f32,
+		shift: u32,
+	) {
+		let width = pixmap.width() as usize;
+		let cell = (width / 20).max(8) as f32;
+		let value_noise = |x: f32, y: f32| {
+			let (x0, y0) = (x.floor(), y.floor());
+			let (sx, sy) = (smoothstep(x - x0), smoothstep(y - y0));
+			let top =
+				lattice_value(x0, y0) + (lattice_value(x0 + 1.0, y0) - lattice_value(x0, y0)) * sx;
+			let bottom = lattice_value(x0, y0 + 1.0)
+				+ (lattice_value(x0 + 1.0, y0 + 1.0) - lattice_value(x0, y0 + 1.0)) * sx;
+
+			top + (bottom - top) * sy
+		};
+		let scale = (strength * 255.0) as u32;
+
+		for (index, pixel) in pixmap
+			.data_mut()
+			.as_chunks_mut::<4>()
+			.0
+			.iter_mut()
+			.enumerate()
+		{
+			let (x, y) = (index % width, index / width);
+			let bloom = 1.0 + (value_noise(x as f32 / cell, y as f32 / cell) - 0.5) * mottle * 0.14;
+			let [r, g, b] = [
+				f32::from(pixel[0]),
+				f32::from(pixel[1]),
+				f32::from(pixel[2]),
+			];
+			let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+			for (channel, value) in pixel[..3].iter_mut().zip([r, g, b]) {
+				let saturated = luma + (value - luma) * saturation;
+				let lifted = saturated + (255.0 - saturated) * lift;
+				*channel = (lifted * bloom).clamp(0.0, 255.0) as u8;
+			}
+
+			let mut h = (x as u32).wrapping_mul(0x8DA6_B343)
+				^ (y as u32).wrapping_mul(0xD816_3841)
+				^ shift.wrapping_mul(0xCB1A_B31F);
+			h ^= h >> 13;
+			h = h.wrapping_mul(0x5bd1_e995);
+			h ^= h >> 15;
+			let keep = 255 - ((h & 0xFF) * scale / 255).min(255);
+
+			for channel in &mut pixel[..3] {
+				*channel = (u32::from(*channel) * keep / 255) as u8;
+			}
+		}
+	}
+
+	/// A picture with every kind of pixel the finish meets: gradients in each channel.
+	fn test_card(width: u32, height: u32) -> Pixmap {
+		let mut pixmap = Pixmap::new(width, height).unwrap();
+
+		for (index, pixel) in pixmap
+			.data_mut()
+			.as_chunks_mut::<4>()
+			.0
+			.iter_mut()
+			.enumerate()
+		{
+			let (x, y) = (index as u32 % width, index as u32 / width);
+			*pixel = [
+				(x * 7 % 256) as u8,
+				(y * 5 % 256) as u8,
+				((x + y) * 3 % 256) as u8,
+				255,
+			];
+		}
+
+		pixmap
+	}
+
+	#[test]
+	fn the_row_by_row_finish_matches_the_pixel_by_pixel_one() {
+		for (width, height) in [(203, 117), (960, 54)] {
+			for (saturation, lift, mottle, strength, shift) in [
+				(0.8, 0.05, 1.0, 0.07, 0),
+				(1.15, 0.0, 0.6, 0.03, 9),
+				(1.0, 0.0, 0.0, 0.2, 3),
+			] {
+				let mut fast = test_card(width, height);
+				let mut slow = fast.clone();
+				grade(&mut fast, saturation, lift, mottle);
+				grain(&mut fast, strength, shift);
+				reference_finish(&mut slow, saturation, lift, mottle, strength, shift);
+				assert!(
+					fast.data() == slow.data(),
+					"{width}x{height} {saturation} {lift} {mottle}"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn png_keeps_every_pixel_and_drops_alpha_only_when_opaque() {
+		let decode = |bytes: &[u8]| {
+			let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+				.read_info()
+				.unwrap();
+			let mut buffer = vec![0; reader.output_buffer_size().unwrap()];
+			let info = reader.next_frame(&mut buffer).unwrap();
+			buffer.truncate(info.buffer_size());
+			(info.color_type, buffer)
+		};
+		let opaque = test_card(37, 21);
+		let (colour, rgb) = decode(&png(&opaque).unwrap());
+		assert_eq!(colour, png::ColorType::Rgb);
+		let expected: Vec<u8> = opaque
+			.data()
+			.as_chunks::<4>()
+			.0
+			.iter()
+			.flat_map(|p| [p[0], p[1], p[2]])
+			.collect();
+		assert_eq!(rgb, expected);
+
+		let mut clear = Pixmap::new(4, 1).unwrap();
+		clear.pixels_mut()[1] =
+			resvg::tiny_skia::PremultipliedColorU8::from_rgba(100, 50, 0, 200).unwrap();
+		let (colour, rgba) = decode(&png(&clear).unwrap());
+		assert_eq!(colour, png::ColorType::Rgba);
+		let expected: Vec<u8> = clear
+			.pixels()
+			.iter()
+			.flat_map(|p| {
+				let c = p.demultiply();
+				[c.red(), c.green(), c.blue(), c.alpha()]
+			})
+			.collect();
+		assert_eq!(rgba, expected);
 	}
 
 	#[test]

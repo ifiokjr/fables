@@ -31,6 +31,7 @@ use crate::compose::Puppet;
 use crate::raster;
 use crate::text;
 use crate::video::Clip;
+use crate::video::Quality;
 use crate::video::acting;
 use crate::video::lipsync::Track;
 
@@ -334,6 +335,7 @@ pub fn motion_test(
 		frames: (LENGTH * fps as f32) as usize,
 		audio: None,
 		label: "rig test",
+		quality: Quality::Draft,
 	};
 
 	clip.encode(path, |index| {
@@ -692,6 +694,7 @@ pub fn acting_test(
 		frames: (ACTING_LENGTH * fps as f32) as usize,
 		audio: None,
 		label: "acting test",
+		quality: Quality::Draft,
 	};
 
 	clip.encode(path, |index| {
