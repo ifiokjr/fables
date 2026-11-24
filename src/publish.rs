@@ -175,14 +175,14 @@ pub fn ebook(story: &Story, cast: &Cast, out: &Path) -> Result<Ebook> {
 	let mut store = raster::render(&book::page_svg(&front, Side::Screen, 2560, 2560, true))?;
 	raster::finish(&mut store, &front.style, 0.05, 0);
 	let cover = dir.join("cover.jpg");
-	std::fs::write(&cover, raster::jpeg(&store, 88)?)
+	std::fs::write(&cover, raster::jpeg_compact(&store, 88)?)
 		.with_context(|| format!("could not write {}", cover.display()))?;
 
 	let size = press::epub::PAGE_PX;
 	let mut inner = raster::render(&book::page_svg(&front, Side::Screen, size, size, true))?;
 	raster::finish(&mut inner, &front.style, 0.035, 0);
 	let epub = dir.join(format!("{}.epub", story.slug));
-	press::epub::write(story, &pages, &raster::jpeg(&inner, 84)?, &epub)?;
+	press::epub::write(story, &pages, &raster::jpeg_compact(&inner, 84)?, &epub)?;
 
 	Ok(Ebook { epub, cover })
 }

@@ -23,6 +23,12 @@ cargo test
 provides `check:all` and `check:worlds` for the same commands, and CI runs them on Linux and
 macOS.
 
+## Speed
+
+A change that could make a build slower, larger or hungrier is measured before and after with
+`scripts/bench.py`, and the numbers go in the pull request. See
+[docs/performance.md](docs/performance.md) for what it measures and the current figures.
+
 ## What not to commit
 
 Rendered pages, videos, screenshots and other binaries never go into git: every committed byte

@@ -430,6 +430,7 @@ dependencies = [
  "hound",
  "jpeg-encoder",
  "pdf-writer",
+ "png 0.18.1",
  "rayon",
  "resvg",
  "rmcp",

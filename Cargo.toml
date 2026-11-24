@@ -16,6 +16,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 hound = "3.5.1"
 jpeg-encoder = "0.7.1"
 pdf-writer = "0.12"
+png = "0.18"
 rayon = "1.12.0"
 # svg2pdf 0.13 is built on resvg/usvg 0.45; pinning resvg to the same release keeps a
 # single SVG engine in the build so print and screen renders can never disagree.
