@@ -9,13 +9,15 @@
 //! | --- | --- | --- | --- |
 //! | `say` (macOS) | yes | speaking rate | from the audio |
 //! | `command` (Piper, mlx-audio, anything) | yes | `{mood}` in the command | from the audio |
-//! | `elevenlabs` | no | `[defiant]`-style audio tags | exact, per letter |
+//! | `elevenlabs` | no | `[defiant]`-style audio tags (a pace on older models) | exact, per letter |
 //! | `openai` | no | free-text acting instructions | from the audio |
 //! | `cartesia` (Sonic) | no | an emotion and a speed | from the audio |
 //! | `hume` (Octave) | no | free-text acting directions | from the audio |
 //!
 //! Everything is normalised to 48 kHz mono, and every take is cached by provider, voice, text
-//! and delivery, so editing one line re-records one line.
+//! and delivery, so editing one line re-records one line. A voice that cannot record on this
+//! machine (no API key, no program) is stood in for by an offline one: see
+//! [`stand_in`](crate::video::recording::stand_in).
 
 use std::io::Write as _;
 use std::path::Path;
@@ -26,7 +28,6 @@ use std::process::Stdio;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use base64::Engine as _;
 use serde::Deserialize;
 
 use crate::art::figure::Mood;
@@ -67,24 +68,53 @@ pub struct Voice {
 	/// "A cheeky six-year-old boy, loud and bouncy, with a British accent".
 	#[serde(default)]
 	pub style: Option<String>,
+	/// `elevenlabs`: 0 to 1. Lower is more expressive and varied, higher is steadier.
+	#[serde(default)]
+	pub stability: Option<f32>,
+	/// `elevenlabs`: 0 to 1, how closely a take keeps to the voice's own sound.
+	#[serde(default)]
+	pub similarity: Option<f32>,
+	/// `elevenlabs`: 0 to 1, exaggerates the voice's own style (not on `eleven_v4`).
+	#[serde(default)]
+	pub exaggeration: Option<f32>,
+	/// `elevenlabs`: 0.7 to 1.2, how fast the voice speaks (not on `eleven_v4`).
+	#[serde(default)]
+	pub speed: Option<f32>,
+	/// The macOS voice that stands in when this one cannot record here, e.g. no API key is
+	/// set. Left out, it is `Daniel`. Takes already recorded are always used first.
+	#[serde(default)]
+	pub fallback: Option<String>,
 }
 
 /// The rate a voice reads at when nobody sets one: the pace every book had before age bands.
 const RATE: u32 = 165;
 
+#[expect(
+	clippy::missing_fields_in_debug,
+	reason = "the debug string is the take cache's key, and `fallback` does not change a take"
+)]
 impl std::fmt::Debug for Voice {
 	/// Prints the effective rate, so a take's cache key is the same as it was when the rate was
-	/// a plain number and no band was in play.
+	/// a plain number and no band was in play. The `ElevenLabs` settings are printed only when
+	/// set, so a voice without them keeps every take it already has; the fallback is never
+	/// printed, since it does not change how this voice sounds.
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("Voice")
-			.field("provider", &self.provider)
+		let mut out = f.debug_struct("Voice");
+		out.field("provider", &self.provider)
 			.field("name", &self.name)
 			.field("rate", &self.rate())
 			.field("command", &self.command)
 			.field("id", &self.id)
 			.field("model", &self.model)
-			.field("style", &self.style)
-			.finish()
+			.field("style", &self.style);
+
+		for (name, value) in self.settings() {
+			if let Some(value) = value {
+				out.field(name, &value);
+			}
+		}
+
+		out.finish()
 	}
 }
 
@@ -106,11 +136,26 @@ impl Default for Voice {
 			id: None,
 			model: None,
 			style: None,
+			stability: None,
+			similarity: None,
+			exaggeration: None,
+			speed: None,
+			fallback: None,
 		}
 	}
 }
 
 impl Voice {
+	/// The `ElevenLabs` settings by name, in the order they are printed.
+	fn settings(&self) -> [(&'static str, Option<f32>); 4] {
+		[
+			("stability", self.stability),
+			("similarity", self.similarity),
+			("exaggeration", self.exaggeration),
+			("speed", self.speed),
+		]
+	}
+
 	/// Words a minute this voice is asked to read at.
 	pub fn rate(&self) -> u32 {
 		self.rate.unwrap_or(RATE)
@@ -118,15 +163,63 @@ impl Voice {
 
 	/// Checks the configuration up front, so a typo fails before any audio is made.
 	pub fn validate(&self) -> Result<()> {
+		for (name, value) in self.settings() {
+			let Some(value) = value else { continue };
+
+			if self.provider != "elevenlabs" {
+				bail!(
+					"`{name}` is an ElevenLabs setting; the `{}` voice cannot use it",
+					self.provider
+				);
+			}
+
+			let range = if name == "speed" {
+				0.7..=1.2
+			} else {
+				0.0..=1.0
+			};
+
+			if !range.contains(&value) {
+				bail!(
+					"`{name} = {value}` is out of range; use {} to {}",
+					range.start(),
+					range.end()
+				);
+			}
+		}
+
+		if self
+			.fallback
+			.as_deref()
+			.is_some_and(|name| name.trim().is_empty())
+		{
+			bail!(
+				"`fallback` names no voice; give a macOS voice such as \"Daniel\", or leave it out"
+			);
+		}
+
 		match self.provider.as_str() {
 			"say" | "openai" => Ok(()),
 			"command" if self.command.as_ref().is_some_and(|c| !c.is_empty()) => Ok(()),
 			"command" => {
 				bail!("voice provider `command` needs `command = [\"program\", \"{{out}}\", …]`")
 			}
-			"elevenlabs" | "cartesia" | "hume" if self.id.is_some() => Ok(()),
 			provider @ ("elevenlabs" | "cartesia" | "hume") => {
-				bail!("voice provider `{provider}` needs `id` (a voice id from its voice library)")
+				let id = self.id.as_deref().with_context(|| {
+					format!(
+						"voice provider `{provider}` needs `id` (a voice id from its voice \
+						 library)"
+					)
+				})?;
+
+				if !is_safe_id(id) {
+					bail!(
+						"`{id}` is not a voice id; use the provider's id, made of letters, \
+						 digits, `-` and `_`"
+					);
+				}
+
+				Ok(())
 			}
 			other => {
 				bail!(
@@ -140,6 +233,16 @@ impl Voice {
 
 /// Every voice provider, by its `provider` name.
 pub const PROVIDERS: [&str; 6] = ["say", "command", "elevenlabs", "openai", "cartesia", "hume"];
+
+/// Whether `id` is one safe path segment. A provider id is used in request paths, so anything
+/// that could move the path (`/`, `..`), start a query or fragment (`?`, `#`), or carry
+/// whitespace is refused before a request is built.
+pub(crate) fn is_safe_id(id: &str) -> bool {
+	!id.trim().is_empty()
+		&& id
+			.chars()
+			.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+}
 
 /// How a line should be delivered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -176,7 +279,7 @@ impl Delivery {
 		})
 	}
 
-	fn rate_scale(self) -> f32 {
+	pub(crate) fn rate_scale(self) -> f32 {
 		if self.shout {
 			return 1.08;
 		}
@@ -247,14 +350,9 @@ pub fn speak(utterance: &Utterance<'_>, cache: &Path) -> Result<Speech> {
 	let alignment_file = stem.with_extension("align.json");
 
 	if !wav.is_file() {
-		let take = record(utterance, &stem)?;
-		normalise(&take.audio, &wav)?;
-		let _ = std::fs::remove_file(&take.audio);
-
-		if let Some(alignment) = take.alignment {
-			std::fs::write(&alignment_file, serde_json::to_vec(&alignment)?)
-				.with_context(|| format!("could not write {}", alignment_file.display()))?;
-		}
+		let scratch = scratch(&stem);
+		let take = record(utterance, &scratch)?;
+		settle(take, &scratch, &wav, &alignment_file)?;
 	}
 
 	let (samples, trimmed) = read_wav(&wav)?;
@@ -295,6 +393,72 @@ pub fn is_cached(utterance: &Utterance<'_>, cache: &Path) -> bool {
 	cache.join(format!("{:016x}.wav", seed_of(&key))).is_file()
 }
 
+/// A unique scratch stem beside `stem` for a take being written, so two threads recording the
+/// same line never write the same temporary file: `<name>-<pid>-<n>`.
+pub(crate) fn scratch(stem: &Path) -> PathBuf {
+	static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+	let name = stem
+		.file_stem()
+		.map_or_else(|| "take".into(), |name| name.to_string_lossy().into_owned());
+	let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+	stem.with_file_name(format!("{name}-{}-{next}", std::process::id()))
+}
+
+/// Commits a take atomically: the audio is normalised and the timings written beside it under
+/// scratch names, the timings are renamed into place, and the WAV settles last. The WAV is the
+/// cache's commit marker, so a take another thread or a later run can see always has the
+/// alignment that belongs to it.
+fn settle(take: Take, scratch: &Path, wav: &Path, alignment_file: &Path) -> Result<()> {
+	let Take { audio, alignment } = take;
+	let partial = scratch.with_extension("wav");
+	let partial_alignment = scratch.with_extension("align.json");
+	let written = write_take(
+		&audio,
+		alignment,
+		&partial,
+		&partial_alignment,
+		alignment_file,
+		wav,
+	);
+
+	// The raw provider reply is scratch for every path, settled or not.
+	let _ = std::fs::remove_file(&audio);
+
+	if written.is_err() {
+		let _ = std::fs::remove_file(&partial);
+		let _ = std::fs::remove_file(&partial_alignment);
+	}
+
+	written
+}
+
+fn write_take(
+	audio: &Path,
+	alignment: Option<Vec<Timed>>,
+	partial: &Path,
+	partial_alignment: &Path,
+	alignment_file: &Path,
+	wav: &Path,
+) -> Result<()> {
+	normalise(audio, partial)?;
+
+	if let Some(alignment) = alignment {
+		std::fs::write(partial_alignment, serde_json::to_vec(&alignment)?)
+			.with_context(|| format!("could not write {}", partial_alignment.display()))?;
+	}
+
+	if partial_alignment.is_file() {
+		std::fs::rename(partial_alignment, alignment_file)
+			.with_context(|| format!("could not write {}", alignment_file.display()))?;
+	}
+
+	std::fs::rename(partial, wav).with_context(|| format!("could not write {}", wav.display()))?;
+
+	Ok(())
+}
+
 /// Why `voice` cannot record on this machine, if it cannot: its program is not installed, or
 /// its service's API key is not set. `None` means it can try; a recording can still fail for
 /// other reasons, and that failure is reported, never hidden.
@@ -326,7 +490,8 @@ pub fn unavailable(voice: &Voice) -> Option<String> {
 
 			return (!found).then(|| format!("the voice command `{program}` is not installed"));
 		}
-		"elevenlabs" => "ELEVENLABS_API_KEY",
+		"elevenlabs" if crate::video::elevenlabs::has_key() => return None,
+		"elevenlabs" => crate::video::elevenlabs::KEY,
 		"openai" => "OPENAI_API_KEY",
 		"cartesia" => "CARTESIA_API_KEY",
 		"hume" => "HUME_API_KEY",
@@ -483,7 +648,7 @@ fn run_command(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
 	})
 }
 
-fn api_key(variable: &str) -> Result<String> {
+pub(crate) fn api_key(variable: &str) -> Result<String> {
 	std::env::var(variable).with_context(|| {
 		format!(
 			"{variable} is not set; set it in the environment for this run, e.g. `{variable}=… \
@@ -526,69 +691,9 @@ pub fn elevenlabs_text(utterance: &Utterance<'_>) -> String {
 	}
 }
 
-#[derive(Deserialize)]
-struct ElevenLabsReply {
-	audio_base64: String,
-	#[serde(default)]
-	alignment: Option<ElevenLabsAlignment>,
-	#[serde(default)]
-	normalized_alignment: Option<ElevenLabsAlignment>,
-}
-
-#[derive(Deserialize)]
-struct ElevenLabsAlignment {
-	characters: Vec<String>,
-	character_start_times_seconds: Vec<f32>,
-	character_end_times_seconds: Vec<f32>,
-}
-
-impl ElevenLabsAlignment {
-	fn timed(&self) -> Vec<Timed> {
-		self.characters
-			.iter()
-			.zip(&self.character_start_times_seconds)
-			.zip(&self.character_end_times_seconds)
-			.filter_map(|((ch, start), end)| {
-				Some(Timed {
-					ch: ch.chars().next()?,
-					start: *start,
-					end: *end,
-				})
-			})
-			.collect()
-	}
-}
-
 fn elevenlabs(utterance: &Utterance<'_>, stem: &Path) -> Result<Take> {
-	let key = api_key("ELEVENLABS_API_KEY")?;
-	let voice_id = utterance.voice.id.as_deref().unwrap_or_default();
-	let model = utterance.voice.model.as_deref().unwrap_or("eleven_v4");
-	let url = format!(
-		"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps?output_format=mp3_44100_128"
-	);
-	let body = serde_json::json!({ "text": elevenlabs_text(utterance), "model_id": model });
-	let mut response = agent()
-		.post(&url)
-		.header("xi-api-key", &key)
-		.send_json(&body)
-		.context("could not reach ElevenLabs")?;
-	check_status("ElevenLabs", &mut response)?;
-
-	let reply: ElevenLabsReply = response
-		.body_mut()
-		.read_json()
-		.context("ElevenLabs sent an unexpected reply")?;
 	let audio = stem.with_extension("mp3");
-	let bytes = base64::engine::general_purpose::STANDARD
-		.decode(reply.audio_base64)
-		.context("ElevenLabs audio was not valid base64")?;
-	std::fs::write(&audio, bytes)
-		.with_context(|| format!("could not write {}", audio.display()))?;
-
-	let alignment = reply
-		.normalized_alignment
-		.or(reply.alignment)
-		.map(|a| a.timed());
+	let alignment = crate::video::elevenlabs::speak(utterance, &audio)?;
 
 	Ok(Take { audio, alignment })
 }
@@ -727,7 +832,7 @@ fn write_audio(
 	})
 }
 
-fn normalise(input: &Path, output: &Path) -> Result<()> {
+pub(crate) fn normalise(input: &Path, output: &Path) -> Result<()> {
 	let status = Command::new("ffmpeg")
 		.args(["-y", "-loglevel", "error", "-i"])
 		.arg(input)
@@ -955,6 +1060,37 @@ mod tests {
 	}
 
 	#[test]
+	fn a_voice_id_is_one_safe_path_segment() {
+		for id in [
+			"",
+			"   ",
+			"../escape",
+			"/tmp/escape",
+			"voice/../other",
+			"voice?query",
+			"voice#fragment",
+			"voice 1",
+			"vöice",
+		] {
+			for provider in ["elevenlabs", "cartesia", "hume"] {
+				let mut voice = voice(provider);
+				voice.id = Some(id.into());
+				let error = voice.validate().unwrap_err().to_string();
+				assert!(
+					error.contains("not a voice id"),
+					"{provider} {id:?}: {error}"
+				);
+			}
+		}
+
+		for id in ["voice-123", "21m00Tcm4TlvDq8ikWAM", "voice_1"] {
+			let mut voice = voice("elevenlabs");
+			voice.id = Some(id.into());
+			assert!(voice.validate().is_ok(), "{id}");
+		}
+	}
+
+	#[test]
 	fn trims_silence_but_keeps_a_little_padding() {
 		let mut samples = vec![0.0; 48_000];
 		samples.extend(std::iter::repeat_n(0.5, 4800));
@@ -1027,30 +1163,6 @@ mod tests {
 	}
 
 	#[test]
-	fn elevenlabs_alignment_becomes_timed_letters() {
-		let reply: ElevenLabsReply = serde_json::from_str(
-			r#"{"audio_base64":"","alignment":{"characters":["H","i"],"character_start_times_seconds":[0.0,0.1],"character_end_times_seconds":[0.1,0.25]}}"#,
-		)
-		.unwrap();
-		let timed = reply.alignment.unwrap().timed();
-		assert_eq!(
-			timed,
-			vec![
-				Timed {
-					ch: 'H',
-					start: 0.0,
-					end: 0.1
-				},
-				Timed {
-					ch: 'i',
-					start: 0.1,
-					end: 0.25
-				}
-			]
-		);
-	}
-
-	#[test]
 	fn a_take_is_cached_under_the_key_it_was_first_written_with() {
 		let voice = Voice::default();
 		let delivery = Delivery {
@@ -1079,6 +1191,20 @@ mod tests {
 		let explicit: Voice = toml::from_str("name = \"Daniel\"\nrate = 158\n").unwrap();
 		assert_eq!(explicit.rate(), 158);
 		assert!(format!("{explicit:?}").contains("rate: 158"));
+
+		// The ElevenLabs settings join the key only when set, and the fallback never does.
+		let eleven: Voice =
+			toml::from_str("provider = \"elevenlabs\"\nid = \"abc\"\nfallback = \"Moira\"\n")
+				.unwrap();
+		assert!(
+			format!("{eleven:?}").ends_with("style: None }"),
+			"{eleven:?}"
+		);
+		let steadier = Voice {
+			stability: Some(0.7),
+			..eleven
+		};
+		assert!(format!("{steadier:?}").ends_with("style: None, stability: 0.7 }"));
 
 		let unset: Voice = toml::from_str("name = \"Moira\"\n").unwrap();
 		assert_eq!(unset.rate, None);

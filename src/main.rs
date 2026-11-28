@@ -472,8 +472,41 @@ enum PropAction {
 enum VoiceAction {
 	/// The voice providers, and which can speak right now.
 	Providers,
-	/// The macOS voices the offline `say` provider can use.
-	List,
+	/// The voices a provider can use: the macOS voices for `say` (the default), or your
+	/// `ElevenLabs` library with `--provider elevenlabs`.
+	List {
+		/// `say` or `elevenlabs`.
+		#[arg(long, default_value = "say")]
+		provider: String,
+		/// `ElevenLabs` only: voices whose name, description or labels match.
+		#[arg(long)]
+		search: Option<String>,
+	},
+	/// Design `ElevenLabs` voices for a cast member (or `narrator`) from a casting note, and save
+	/// the previews to listen to. Keep one with `fables voice keep`.
+	Design {
+		/// A cast id, or `narrator`.
+		who: String,
+		/// A casting note: "A warm, gravelly grandad with a soft Welsh lilt, slow and kind".
+		description: String,
+		/// A line of 100 to 1,000 characters for the previews to read; left out, `ElevenLabs`
+		/// writes one.
+		#[arg(long)]
+		sample: Option<String>,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+	},
+	/// Keep a designed voice by its number: it joins your `ElevenLabs` library and becomes the
+	/// character's voice in the cast file, with their old macOS voice as the fallback. For
+	/// `narrator`, prints the `world.toml` table to paste instead.
+	Keep {
+		/// A cast id, or `narrator`.
+		who: String,
+		/// The preview's number from `fables voice design`.
+		number: usize,
+		#[arg(long, default_value = "out")]
+		out: PathBuf,
+	},
 	/// Speak a line in a cast member's voice (or `narrator`), and save it as a WAV.
 	Audition {
 		/// A cast id, or `narrator`.
@@ -730,9 +763,30 @@ fn run(cli: Cli) -> Result<()> {
 
 					Ok(())
 				}
-				VoiceAction::List => {
-					for (name, language) in Studio::say_voices()? {
-						say!("{name:<28} {language}")?;
+				VoiceAction::List { provider, search } => voice_list(&provider, search.as_deref()),
+				VoiceAction::Design {
+					who,
+					description,
+					sample,
+					out,
+				} => voice_design(&world()?, &who, &description, sample.as_deref(), &out),
+				VoiceAction::Keep { who, number, out } => {
+					let world = world()?;
+					let kept =
+						fables::studio::keep_voice(&world, &who, number, &out.join("voices"))?;
+
+					if let Some(table) = &kept.world_toml {
+						say!(
+							"  kept as ElevenLabs voice `{}`; the narrator lives in world.toml, \
+							 so put this there:\n{table}",
+							kept.voice_id
+						)?;
+					} else {
+						say!(
+							"  {who} now speaks with their designed ElevenLabs voice ({}); hear \
+							 it with `fables voice audition {who} \"Hello!\"`",
+							world.cast_file().display()
+						)?;
 					}
 
 					Ok(())
@@ -1831,6 +1885,63 @@ fn puppet_sheet(world: &World, id: &str, out: &Path) -> Result<()> {
 		done(&sheet, started)?;
 	}
 
+	Ok(())
+}
+
+fn voice_list(provider: &str, search: Option<&str>) -> Result<()> {
+	match provider {
+		"say" => {
+			anyhow::ensure!(
+				search.is_none(),
+				"`--search` is for `--provider elevenlabs`"
+			);
+
+			for (name, language) in Studio::say_voices()? {
+				say!("{name:<28} {language}")?;
+			}
+		}
+		"elevenlabs" => {
+			let voices = Studio::elevenlabs_voices(search)?;
+
+			if voices.is_empty() {
+				say!(
+					"  no voices{}",
+					search.map_or(String::new(), |s| format!(" match \"{s}\""))
+				)?;
+			}
+
+			for voice in voices {
+				say!(
+					"{:<22} {:<24} {}",
+					voice.voice_id,
+					voice.name,
+					voice.summary()
+				)?;
+			}
+		}
+		other => anyhow::bail!("`fables voice list` knows `say` and `elevenlabs`, not `{other}`"),
+	}
+
+	Ok(())
+}
+
+fn voice_design(
+	world: &World,
+	who: &str,
+	description: &str,
+	sample: Option<&str>,
+	out: &Path,
+) -> Result<()> {
+	let started = Instant::now();
+	let designed =
+		fables::studio::design_voice(world, who, description, sample, &out.join("voices"))?;
+
+	for voice in &designed {
+		say!("  {}. {:.1}s", voice.number, voice.seconds)?;
+		done(&voice.path, started)?;
+	}
+
+	say!("  keep one with `fables voice keep {who} <number>`")?;
 	Ok(())
 }
 

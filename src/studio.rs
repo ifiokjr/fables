@@ -58,6 +58,7 @@ use crate::stage::ShotSize;
 use crate::stage::Travel;
 use crate::story::Story;
 use crate::story::Transition;
+use crate::video::elevenlabs;
 use crate::video::frames::Format;
 use crate::video::voice;
 use crate::video::voice::Delivery;
@@ -126,6 +127,21 @@ pub struct MemberReport {
 	/// How a person is drawn: `puppet` (their part file), `template` (their world's drawing
 	/// style's template) or `parametric` (the older puppet). `None` for animals and things.
 	pub drawn: Option<&'static str>,
+}
+
+/// What a kept designed voice became.
+#[derive(Clone, Debug, Serialize)]
+pub struct KeptVoice {
+	/// The cast id, or `narrator`.
+	pub who: String,
+	/// The voice's id in the `ElevenLabs` library.
+	pub voice_id: String,
+	/// The cast file that now names the voice; `None` for the narrator.
+	pub cast_file: Option<PathBuf>,
+	/// For the narrator: the `world.toml` table to paste, since the narrator lives there.
+	pub world_toml: Option<String>,
+	/// The cast member as they now read, for a character; `None` for the narrator.
+	pub member: Option<MemberReport>,
 }
 
 /// A new world.
@@ -372,7 +388,7 @@ const RULES: [&str; 8] = [
 ];
 
 /// A voice to cast: which provider speaks and as whom (see `voice_providers`).
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 pub struct VoiceChoice {
 	/// `say`, `command`, `elevenlabs`, `openai`, `cartesia` or `hume`.
 	pub provider: String,
@@ -387,6 +403,21 @@ pub struct VoiceChoice {
 	pub style: Option<String>,
 	/// Words per minute, for `say`.
 	pub rate: Option<u32>,
+	/// `elevenlabs`: 0 to 1; lower is more expressive, higher steadier.
+	#[serde(default)]
+	pub stability: Option<f32>,
+	/// `elevenlabs`: 0 to 1, how closely a take keeps to the voice's own sound.
+	#[serde(default)]
+	pub similarity: Option<f32>,
+	/// `elevenlabs`: 0 to 1, exaggerates the voice's own style (not on `eleven_v4`).
+	#[serde(default)]
+	pub exaggeration: Option<f32>,
+	/// `elevenlabs`: 0.7 to 1.2 (not on `eleven_v4`).
+	#[serde(default)]
+	pub speed: Option<f32>,
+	/// The macOS voice that reads in its place where it cannot record (default Daniel).
+	#[serde(default)]
+	pub fallback: Option<String>,
 }
 
 impl VoiceChoice {
@@ -400,6 +431,11 @@ impl VoiceChoice {
 			id: self.id.clone(),
 			model: self.model.clone(),
 			style: self.style.clone(),
+			stability: self.stability,
+			similarity: self.similarity,
+			exaggeration: self.exaggeration,
+			speed: self.speed,
+			fallback: self.fallback.clone(),
 		}
 	}
 
@@ -418,9 +454,21 @@ impl VoiceChoice {
 		text("id", self.id.as_ref());
 		text("model", self.model.as_ref());
 		text("style", self.style.as_ref());
+		text("fallback", self.fallback.as_ref());
 
 		if let Some(rate) = self.rate {
 			lines.push(format!("rate = {rate}"));
+		}
+
+		for (key, value) in [
+			("stability", self.stability),
+			("similarity", self.similarity),
+			("exaggeration", self.exaggeration),
+			("speed", self.speed),
+		] {
+			if let Some(value) = value {
+				lines.push(format!("{key} = {value}"));
+			}
 		}
 
 		lines.join("\n") + "\n"
@@ -906,7 +954,7 @@ impl Studio {
 			report(
 				"elevenlabs",
 				false,
-				key("ELEVENLABS_API_KEY"),
+				elevenlabs::has_key(),
 				"ELEVENLABS_API_KEY and a voice id",
 			),
 			report("openai", false, key("OPENAI_API_KEY"), "OPENAI_API_KEY"),
@@ -944,35 +992,42 @@ impl Studio {
 
 	/// Gives a cast member their own voice, replacing any they had.
 	pub fn cast_voice(&self, folder: &str, id: &str, choice: &VoiceChoice) -> Result<MemberReport> {
-		let world = self.world(folder)?;
-		check_slug("character", id)?;
-		choice.voice().validate()?;
-		ensure!(
-			world.cast()?.member(id).is_some(),
-			"`{id}` is not in {}'s cast",
-			world.name
-		);
-		let cast_file = world.cast_file();
-		let before = std::fs::read_to_string(&cast_file)?;
-		let mut cast = without_table(&before, &format!("[{id}.voice]"));
+		cast_voice(&self.world(folder)?, id, choice)
+	}
 
-		if !cast.ends_with("\n\n") {
-			cast.push('\n');
-		}
+	/// The voices in the `ElevenLabs` account's library, optionally only those matching
+	/// `search`. Needs `ELEVENLABS_API_KEY`.
+	pub fn elevenlabs_voices(search: Option<&str>) -> Result<Vec<elevenlabs::LibraryVoice>> {
+		elevenlabs::voices(search)
+	}
 
-		cast.push_str(&choice.table(id));
-		std::fs::write(&cast_file, &cast)?;
+	/// Designs `ElevenLabs` voices for a cast member from a casting note, as previews to listen
+	/// to; `voice_keep` keeps one. Previews are saved under the root's `out/voices`.
+	pub fn design_voice(
+		&self,
+		folder: &str,
+		who: &str,
+		description: &str,
+		sample: Option<&str>,
+	) -> Result<Vec<DesignedVoice>> {
+		design_voice(
+			&self.world(folder)?,
+			who,
+			description,
+			sample,
+			&self.root.join("out/voices"),
+		)
+	}
 
-		match world.cast() {
-			Ok(cast) => {
-				let member = cast.member(id).context("the character left the cast")?;
-				Ok(member_report(&world, member))
-			}
-			Err(error) => {
-				std::fs::write(&cast_file, before)?;
-				Err(error.context(format!("`{id}`'s voice was not changed")))
-			}
-		}
+	/// Keeps a designed voice (by its number, from 1) and casts it; for the narrator, returns
+	/// the `world.toml` table to paste.
+	pub fn keep_voice(&self, folder: &str, who: &str, number: usize) -> Result<KeptVoice> {
+		keep_voice(
+			&self.world(folder)?,
+			who,
+			number,
+			&self.root.join("out/voices"),
+		)
 	}
 
 	/// Speaks a line in a cast member's voice (or the narrator's), with a mood's delivery.
@@ -2438,6 +2493,202 @@ pub fn sheets_for(world: &World, id: &str, kinds: &[SheetKind], px: u32) -> Resu
 		.collect()
 }
 
+/// Gives a cast member of `world` their own voice, replacing any they had.
+pub fn cast_voice(world: &World, id: &str, choice: &VoiceChoice) -> Result<MemberReport> {
+	check_slug("character", id)?;
+	choice.voice().validate()?;
+	ensure!(
+		world.cast()?.member(id).is_some(),
+		"`{id}` is not in {}'s cast",
+		world.name
+	);
+	let cast_file = world.cast_file();
+	let before = std::fs::read_to_string(&cast_file)?;
+	let mut cast = without_table(&before, &format!("[{id}.voice]"));
+
+	if !cast.ends_with("\n\n") {
+		cast.push('\n');
+	}
+
+	cast.push_str(&choice.table(id));
+	std::fs::write(&cast_file, &cast)?;
+
+	match world.cast() {
+		Ok(cast) => {
+			let member = cast.member(id).context("the character left the cast")?;
+			Ok(member_report(world, member))
+		}
+		Err(error) => {
+			std::fs::write(&cast_file, before)?;
+			Err(error.context(format!("`{id}`'s voice was not changed")))
+		}
+	}
+}
+
+/// One voice `ElevenLabs` designed from a casting note, to listen to before keeping it.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct DesignedVoice {
+	/// Its number, for `voice keep`.
+	pub number: usize,
+	/// The preview, as MP3.
+	pub path: PathBuf,
+	pub seconds: f32,
+	#[serde(skip)]
+	#[schemars(skip)]
+	pub mp3: Vec<u8>,
+}
+
+/// What a design left behind for `keep_voice`: the note and the designed voices' ids.
+#[derive(Debug, Deserialize, Serialize)]
+struct Design {
+	description: String,
+	ids: Vec<String>,
+}
+
+fn design_file(dir: &Path, who: &str) -> PathBuf {
+	dir.join(format!("{who}-design.json"))
+}
+
+/// Designs `ElevenLabs` voices for a cast member (or `narrator`) from a casting note, saving
+/// each preview as `<who>-design-<n>.mp3` in `dir`. A child-like voice may be refused by
+/// `ElevenLabs`' policy; describe an adult performing the character, as studios cast them.
+pub fn design_voice(
+	world: &World,
+	who: &str,
+	description: &str,
+	sample: Option<&str>,
+	dir: &Path,
+) -> Result<Vec<DesignedVoice>> {
+	check_slug("character", who)?;
+	ensure!(
+		who == "narrator" || world.cast()?.member(who).is_some(),
+		"`{who}` is not in {}'s cast",
+		world.name
+	);
+	ensure!(
+		(20..=1000).contains(&description.chars().count()),
+		"describe the voice in 20 to 1,000 characters, like a casting note: \"A warm, gravelly \
+		 grandad with a soft Welsh lilt, slow and kind\""
+	);
+
+	if let Some(sample) = sample {
+		ensure!(
+			(100..=1000).contains(&sample.chars().count()),
+			"the sample line must be 100 to 1,000 characters; leave it out to let ElevenLabs \
+			 write one"
+		);
+	}
+
+	let previews = elevenlabs::design(description, sample)?;
+	ensure!(
+		!previews.is_empty(),
+		"ElevenLabs designed no voices; try another description"
+	);
+	std::fs::create_dir_all(dir).with_context(|| format!("could not create {}", dir.display()))?;
+	let mut designed = Vec::new();
+
+	for (index, preview) in previews.iter().enumerate() {
+		let path = dir.join(format!("{who}-design-{}.mp3", index + 1));
+		std::fs::write(&path, &preview.audio)
+			.with_context(|| format!("could not write {}", path.display()))?;
+		designed.push(DesignedVoice {
+			number: index + 1,
+			path,
+			seconds: preview.seconds,
+			mp3: preview.audio.clone(),
+		});
+	}
+
+	let design = Design {
+		description: description.to_owned(),
+		ids: previews
+			.into_iter()
+			.map(|preview| preview.generated_voice_id)
+			.collect(),
+	};
+	let file = design_file(dir, who);
+	std::fs::write(&file, serde_json::to_vec_pretty(&design)?)
+		.with_context(|| format!("could not write {}", file.display()))?;
+
+	Ok(designed)
+}
+
+/// Keeps designed voice `number` (from [`design_voice`]): saves it to the `ElevenLabs` library
+/// and casts it as the member's voice. A member who spoke with a macOS voice keeps it as the
+/// `fallback`, so the books still read where `ElevenLabs` cannot. The narrator's voice lives in
+/// `world.toml`, so for `narrator` the table to paste there is returned in [`KeptVoice`].
+pub fn keep_voice(world: &World, who: &str, number: usize, dir: &Path) -> Result<KeptVoice> {
+	// Checked before the design file is read: `who` names the file, and an escaping id must not
+	// touch anything outside `dir`.
+	check_slug("character", who)?;
+	let cast = world.cast()?;
+	let member = cast.member(who);
+
+	if who != "narrator" && member.is_none() {
+		bail!("`{who}` is not in {}'s cast", world.name);
+	}
+
+	let file = design_file(dir, who);
+	let design: Design = serde_json::from_slice(&std::fs::read(&file).with_context(|| {
+		format!(
+			"no design for `{who}` yet; design one first ({})",
+			file.display()
+		)
+	})?)
+	.with_context(|| format!("{} is not a voice design", file.display()))?;
+	let id = number
+		.checked_sub(1)
+		.and_then(|index| design.ids.get(index))
+		.with_context(|| {
+			format!(
+				"there is no designed voice {number}; pick 1 to {}",
+				design.ids.len()
+			)
+		})?;
+	let name = match member {
+		Some(member) => format!("{}: {}", world.name, member.name),
+		None => format!("{}: narrator", world.name),
+	};
+	let voice_id = elevenlabs::keep(&name, &design.description, id)?;
+	let _ = std::fs::remove_file(&file);
+
+	let Some(member) = member else {
+		return Ok(KeptVoice {
+			who: who.to_owned(),
+			voice_id: voice_id.clone(),
+			cast_file: None,
+			world_toml: Some(format!(
+				"[narrator]\nprovider = \"elevenlabs\"\nid = \"{voice_id}\""
+			)),
+			member: None,
+		});
+	};
+	let before = member.voice.clone();
+	let fallback = before.as_ref().and_then(|voice| {
+		if voice.provider == "say" {
+			Some(voice.name.clone())
+		} else {
+			voice.fallback.clone()
+		}
+	});
+	let choice = VoiceChoice {
+		provider: "elevenlabs".into(),
+		id: Some(voice_id.clone()),
+		style: before.as_ref().and_then(|voice| voice.style.clone()),
+		fallback,
+		..VoiceChoice::default()
+	};
+	let report = cast_voice(world, who, &choice)?;
+
+	Ok(KeptVoice {
+		who: who.to_owned(),
+		voice_id,
+		cast_file: Some(world.cast_file()),
+		world_toml: None,
+		member: Some(report),
+	})
+}
+
 /// Speaks a line in a world's cast member's voice (`narrator` for the narrator's), with a mood's
 /// delivery, caching takes in `cache`.
 pub fn audition(
@@ -3499,10 +3750,8 @@ mod tests {
 			VoiceChoice {
 				provider: "say".into(),
 				name: Some(name.into()),
-				id: None,
-				model: None,
-				style: None,
 				rate: Some(170),
+				..VoiceChoice::default()
 			}
 		};
 		studio
@@ -3527,6 +3776,33 @@ mod tests {
 			studio.cast_voice("nibbleton", "nell", &bad).is_err(),
 			"a library voice needs an id"
 		);
+
+		let eleven = VoiceChoice {
+			provider: "elevenlabs".into(),
+			id: Some("abc123".into()),
+			stability: Some(0.35),
+			fallback: Some("Moira".into()),
+			..VoiceChoice::default()
+		};
+		studio.cast_voice("nibbleton", "nell", &eleven).unwrap();
+		let world = studio.world("nibbleton").unwrap();
+		let voice = world
+			.cast()
+			.unwrap()
+			.member("nell")
+			.unwrap()
+			.voice
+			.clone()
+			.unwrap();
+		assert_eq!(voice.stability, Some(0.35));
+		assert_eq!(voice.fallback.as_deref(), Some("Moira"));
+
+		let wild = VoiceChoice {
+			stability: Some(2.0),
+			..eleven
+		};
+		let error = studio.cast_voice("nibbleton", "nell", &wild).unwrap_err();
+		assert!(format!("{error:#}").contains("out of range"), "{error:#}");
 	}
 
 	#[test]
@@ -3977,6 +4253,65 @@ mod tests {
 		assert!(
 			studio.read_story("nibbleton", "nell-nibbles").is_err(),
 			"nothing is left behind"
+		);
+	}
+
+	#[test]
+	fn keep_voice_refuses_a_name_that_escapes_its_folder_before_touching_it() {
+		elevenlabs::use_account(Some(elevenlabs::Account::default()));
+		let (dir, studio) = studio();
+		let world = studio.world("nibbleton").unwrap();
+		let voices = dir.path().join("out/voices");
+		std::fs::create_dir_all(&voices).unwrap();
+
+		let design =
+			r#"{"description":"A warm storyteller with a soft Welsh lilt","ids":["designed"]}"#;
+		// A relative escape would land here, beside `voices`.
+		let relative = voices.parent().unwrap().join("escape-design.json");
+		std::fs::write(&relative, design).unwrap();
+		// An absolute one would replace the whole path.
+		let outside = tempfile::tempdir().unwrap();
+		let escape = outside.path().join("escape");
+		let outside_design = outside.path().join("escape-design.json");
+		std::fs::write(&outside_design, design).unwrap();
+
+		for who in ["../escape".to_owned(), escape.display().to_string()] {
+			let error = format!("{:#}", keep_voice(&world, &who, 1, &voices).unwrap_err());
+			assert!(error.contains("character name"), "{who}: {error}");
+		}
+
+		assert_eq!(
+			std::fs::read_to_string(&relative).unwrap(),
+			design,
+			"the design beside the folder is untouched"
+		);
+		assert_eq!(
+			std::fs::read_to_string(&outside_design).unwrap(),
+			design,
+			"the design outside the folder is untouched"
+		);
+		assert!(!voices.join("escape-design.json").exists());
+	}
+
+	#[test]
+	fn keep_voice_checks_the_cast_before_spending_a_keep() {
+		elevenlabs::use_account(Some(elevenlabs::Account::default()));
+		let (dir, studio) = studio();
+		let world = studio.world("nibbleton").unwrap();
+		let voices = dir.path().join("out/voices");
+		std::fs::create_dir_all(&voices).unwrap();
+		let design = voices.join("ghost-design.json");
+		std::fs::write(
+			&design,
+			r#"{"description":"A warm storyteller with a soft Welsh lilt","ids":["designed"]}"#,
+		)
+		.unwrap();
+
+		let error = format!("{:#}", keep_voice(&world, "ghost", 1, &voices).unwrap_err());
+		assert!(error.contains("not in Nibbleton's cast"), "{error}");
+		assert!(
+			design.is_file(),
+			"the design is kept for a name that can use it"
 		);
 	}
 
