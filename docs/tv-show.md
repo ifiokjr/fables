@@ -20,7 +20,8 @@ Facts about providers were checked on 16 October 2026. Prices and policies chang
 | Lip-sync | Nine mouth shapes from the Preston Blair chart that 2D studios use. With ElevenLabs, timings are exact per letter. Otherwise the text is paced through the voiced parts of the audio, so mouths close on pauses. |
 | Acting | Listeners turn their eyes to the speaker. Speakers nod into stressed syllables and raise their brows on shouts. Moves wind up and overshoot, hair follows through, characters walk on and off, hops squash on landing, the camera bumps on big impacts, and the background has parallax depth. |
 | Caching | Every take is stored by voice, text and mood, so editing one line re-records one line. API costs only apply to changed lines. |
-| Providers | `say` (macOS, offline), `command` (any TTS program: Piper, mlx-audio, a script), `elevenlabs`, `openai`. |
+| Providers | `say` (macOS, offline), `command` (any TTS program: Piper, mlx-audio, a script), `elevenlabs`, `openai`, `cartesia`. |
+| ElevenLabs | Voice design from a casting note, sound effects and ambience as well as voices, and a macOS fallback when there is no key: see [`elevenlabs.md`](elevenlabs.md). |
 
 ```toml
 # worlds/kerfuffle/cast.toml

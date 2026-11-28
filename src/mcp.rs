@@ -90,7 +90,9 @@ Changes that would break a figure are refused with the part check's findings. A 
 To make a book:
 1. `guide` for the director's rules: topics overview, story, staging, camera, light, acting, \
 	 mixing, sound and workflow.
-2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them.
+2. `voice_cast` gives characters their voices; `voice_audition` lets you hear them. With \
+	 ELEVENLABS_API_KEY set, `voice_library` lists ElevenLabs voices to cast, and `voice_design` \
+	 then `voice_keep` make a new one from a casting note.
 3. `flow_list` shows the story flows a book can take, with each one's page and word budgets; \
 	 `flow_describe` prints one flow's beats. `story_start` returns the whole laid-out story.md \
 	 for a flow, with the star and friend staged; fill in the [bracketed] lines and `story_write` \
@@ -180,6 +182,34 @@ pub struct AuditionParams {
 	pub line: String,
 	/// A mood to deliver it in, e.g. `cross`, `happy`, `sad`.
 	pub mood: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LibraryParams {
+	/// Only voices whose name, description or labels match, e.g. `british` or `grandad`.
+	pub search: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DesignParams {
+	pub world: String,
+	/// A cast id, or `narrator`.
+	pub who: String,
+	/// A casting note of 20 to 1,000 characters: "A warm, gravelly grandad with a soft Welsh
+	/// lilt, slow and kind". Describe an adult performing a child, as studios cast them.
+	pub description: String,
+	/// A line of 100 to 1,000 characters for the previews to read; left out, `ElevenLabs` writes
+	/// one.
+	pub sample: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct KeepParams {
+	pub world: String,
+	/// A cast id.
+	pub who: String,
+	/// The designed voice's number, from `voice_design`.
+	pub number: usize,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -986,6 +1016,63 @@ impl StudioServer {
 	}
 
 	#[tool(
+		description = "List the voices in the ElevenLabs account's library (ids to cast with \
+		               voice_cast), optionally only those matching a search. Needs \
+		               ELEVENLABS_API_KEY."
+	)]
+	#[expect(
+		clippy::unused_self,
+		reason = "every tool is a method, so the router can call it"
+	)]
+	fn voice_library(&self, Parameters(params): Parameters<LibraryParams>) -> CallToolResult {
+		json(Studio::elevenlabs_voices(params.search.as_deref()))
+	}
+
+	#[tool(
+		description = "Design ElevenLabs voices for a character (or the narrator) from a casting \
+		               note. Returns each numbered preview as audio; listen, then keep one with \
+		               voice_keep. Needs ELEVENLABS_API_KEY."
+	)]
+	fn voice_design(&self, Parameters(params): Parameters<DesignParams>) -> CallToolResult {
+		match self.studio.design_voice(
+			&params.world,
+			&params.who,
+			&params.description,
+			params.sample.as_deref(),
+		) {
+			Ok(designed) => {
+				let mut blocks = Vec::new();
+
+				for voice in designed {
+					blocks.push(ContentBlock::text(format!(
+						"Voice {} ({:.1}s)",
+						voice.number, voice.seconds
+					)));
+					blocks.push(ContentBlock::audio(
+						base64::engine::general_purpose::STANDARD.encode(&voice.mp3),
+						"audio/mpeg",
+					));
+				}
+
+				CallToolResult::success(blocks)
+			}
+			Err(error) => failed(&error),
+		}
+	}
+
+	#[tool(
+		description = "Keep a designed voice by its number: it is saved to the ElevenLabs library \
+		               and cast as the character's voice, with their old macOS voice kept as the \
+		               fallback."
+	)]
+	fn voice_keep(&self, Parameters(params): Parameters<KeepParams>) -> CallToolResult {
+		json(
+			self.studio
+				.keep_voice(&params.world, &params.who, params.number),
+		)
+	}
+
+	#[tool(
 		description = "Hear a line in a character's voice (or the narrator's), delivered in a \
 		               mood. Returns the audio. Takes are cached, so a line is only paid for once."
 	)]
@@ -1055,6 +1142,9 @@ mod tests {
 			"voice_providers",
 			"voice_list",
 			"voice_cast",
+			"voice_library",
+			"voice_design",
+			"voice_keep",
 			"voice_audition",
 			"story_write",
 			"story_read",

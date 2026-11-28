@@ -236,10 +236,14 @@ pub struct Setup {
 }
 
 /// A sound effect at a moment in the video.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Cue {
 	pub time: f32,
+	/// The built-in effect, which plays unless a recorded one is in the timeline's foley.
 	pub sound: Sound,
+	/// The script's own description of the effect (`@sfx bonk "a spoon on a pot"`), for a
+	/// recorded effect.
+	pub described: Option<std::sync::Arc<str>>,
 }
 
 #[derive(Clone, Debug)]
@@ -259,6 +263,9 @@ pub struct Timeline {
 	pub holds: Vec<Span>,
 	/// The ambience changes, the first at time zero; an empty list means no ambience at all.
 	pub ambience: Vec<AmbienceCue>,
+	/// Recorded effects and ambience that play in place of the built-in ones; empty unless
+	/// the book asks for them (see [`foley`](crate::video::foley)).
+	pub foley: crate::video::foley::Foley,
 }
 
 impl Timeline {
@@ -350,6 +357,7 @@ pub fn build(
 			dropouts: Vec::new(),
 			holds: Vec::new(),
 			ambience: Vec::new(),
+			foley: crate::video::foley::Foley::default(),
 		},
 	};
 	let mut cursor = builder.title_shot(0.0)?;
@@ -563,7 +571,11 @@ fn is_strong(mood: Mood) -> bool {
 
 impl<S: Speaker> Builder<'_, S> {
 	fn cue(&mut self, time: f32, sound: Sound) {
-		self.timeline.cues.push(Cue { time, sound });
+		self.timeline.cues.push(Cue {
+			time,
+			sound,
+			described: None,
+		});
 	}
 
 	/// Speaks `text` and returns the speech index and its length.
@@ -817,9 +829,15 @@ impl<S: Speaker> Builder<'_, S> {
 					opening = false;
 					t += seconds.max(0.0);
 				}
-				Beat::Sfx { name, .. } => {
+				Beat::Sfx {
+					name, described, ..
+				} => {
 					if let Some(sound) = Sound::parse(name) {
-						self.cue(t, sound);
+						self.timeline.cues.push(Cue {
+							time: t,
+							sound,
+							described: described.as_deref().map(std::sync::Arc::from),
+						});
 					}
 				}
 				Beat::Hold { seconds, .. } => {
@@ -1180,6 +1198,7 @@ fn auto_cues(
 				cues.push(Cue {
 					time: time + action,
 					sound: Sound::Pop,
+					described: None,
 				});
 			}
 			Some(previous) => {
@@ -1187,6 +1206,7 @@ fn auto_cues(
 					cues.push(Cue {
 						time: time + fall,
 						sound: Sound::Bonk,
+						described: None,
 					});
 				}
 
@@ -1194,6 +1214,7 @@ fn auto_cues(
 					cues.push(Cue {
 						time: time + action,
 						sound: Sound::Boing,
+						described: None,
 					});
 				}
 
@@ -1201,6 +1222,7 @@ fn auto_cues(
 					cues.push(Cue {
 						time: time + action,
 						sound: Sound::Tweet,
+						described: None,
 					});
 				}
 			}

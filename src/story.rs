@@ -292,6 +292,10 @@ pub struct Meta {
 	/// The narrator; without one, the world's narrator reads (see [`Story::narrator`]).
 	#[serde(default)]
 	pub voice: Option<Voice>,
+	/// Who makes the sound effects and ambience; without one, the world's `[sound]` table
+	/// says, and without that they are synthesised (see [`foley`](crate::video::foley)).
+	#[serde(default)]
+	pub sound: Option<crate::video::foley::SoundSource>,
 	#[serde(default)]
 	pub video: VideoOptions,
 }
@@ -507,6 +511,9 @@ pub enum Beat {
 	},
 	Sfx {
 		name: String,
+		/// What the effect should sound like when it is recorded rather than synthesised
+		/// (`@sfx bonk "a spoon on a pot"`); the named built-in plays otherwise.
+		described: Option<String>,
 		line: usize,
 	},
 	/// A dead stop: the voice, the music, the ambience and the performance's idle movement.
@@ -727,6 +734,12 @@ impl Story {
 pub fn parse(source: &str) -> Result<Story> {
 	let (meta_src, body, body_start) = split_front_matter(source)?;
 	let meta: Meta = toml::from_str(meta_src).context("front matter is not valid")?;
+
+	if let Some(sound) = &meta.sound {
+		sound
+			.validate()
+			.context("the front matter's `[sound]` table")?;
+	}
 	let pages = parse_pages(body, body_start)?;
 
 	if pages.is_empty() {
@@ -912,6 +925,37 @@ fn without_comment(direction: &str) -> &str {
 		.map_or(direction, |at| &direction[..at])
 }
 
+/// The longest description an `@sfx` may carry.
+const MAX_SFX_DESCRIPTION: usize = 300;
+
+/// Splits `sfx bonk "a spoon on a pot"` into the direction before the quote and the
+/// description inside it. Curly quotes count as straight ones.
+fn sfx_description(direction: &str, line: usize) -> Result<(String, Option<String>)> {
+	let direction = direction.replace(['\u{201C}', '\u{201D}'], "\"");
+	let Some((head, rest)) = direction.split_once('"') else {
+		return Ok((direction, None));
+	};
+	let example = "e.g. `@sfx bonk \"a wooden spoon tapping a pot\"`";
+	let Some((text, tail)) = rest.split_once('"') else {
+		bail!("line {line}: the `@sfx` description needs a closing quote, {example}");
+	};
+	ensure!(
+		tail.trim().is_empty(),
+		"line {line}: put the `@sfx` description last, {example}"
+	);
+	let text = text.trim();
+	ensure!(
+		!text.is_empty(),
+		"line {line}: the `@sfx` description is empty, {example}"
+	);
+	ensure!(
+		text.chars().count() <= MAX_SFX_DESCRIPTION,
+		"line {line}: keep the `@sfx` description under {MAX_SFX_DESCRIPTION} characters"
+	);
+
+	Ok((head.to_owned(), Some(text.to_owned())))
+}
+
 fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
 	let mut words = direction.split_whitespace();
 	let Some(actor) = words.next() else {
@@ -937,9 +981,11 @@ fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
 			Ok(Beat::Pause { seconds, line })
 		}
 		"sfx" => {
-			let name = tokens
-				.first()
-				.map(|token| token.key.clone())
+			let (head, described) = sfx_description(direction, line)?;
+			let name = head
+				.split_whitespace()
+				.nth(1)
+				.map(str::to_owned)
 				.with_context(|| format!("line {line}: `@sfx` needs a sound name"))?;
 
 			Sound::parse(&name).with_context(|| {
@@ -949,7 +995,11 @@ fn parse_direction(direction: &str, line: usize) -> Result<Beat> {
 				)
 			})?;
 
-			Ok(Beat::Sfx { name, line })
+			Ok(Beat::Sfx {
+				name,
+				described,
+				line,
+			})
 		}
 		"hold" => {
 			let value = tokens
@@ -1583,6 +1633,57 @@ Hello.
 		assert!(message.contains("line 6"), "{message}");
 		assert!(message.contains("unknown sound `kazoo`"), "{message}");
 		assert!(message.contains("heartbeat"), "{message}");
+	}
+
+	#[test]
+	fn a_scripts_sound_table_is_checked_when_it_is_read() {
+		let source = |table: &str| {
+			format!("+++\ntitle = \"T\"\nauthor = \"A\"\n[sound]\n{table}+++\n# park\nHi.\n")
+		};
+		let story = parse(&source("provider = \"elevenlabs\"\n")).unwrap();
+		assert_eq!(story.meta.sound.unwrap().provider, "elevenlabs");
+
+		let error = parse(&source(
+			"provider = \"elevenlabs\"\n[sound.effects]\nkazoo = \"x\"\n",
+		))
+		.unwrap_err();
+		assert!(format!("{error:#}").contains("`kazoo`"), "{error:#}");
+	}
+
+	#[test]
+	fn a_sound_can_be_described_for_recording() {
+		let sfx = |direction: &str| {
+			let story = parse(&format!(
+				"+++\ntitle = \"T\"\nauthor = \"A\"\n+++\n# park\n{direction}\nHi.\n"
+			))?;
+			match &story.pages[0].beats[0] {
+				Beat::Sfx {
+					name, described, ..
+				} => anyhow::Ok((name.clone(), described.clone())),
+				other => panic!("{other:?}"),
+			}
+		};
+
+		assert_eq!(
+			sfx("@sfx bonk \"a wooden spoon tapping a pot\"").unwrap(),
+			("bonk".into(), Some("a wooden spoon tapping a pot".into()))
+		);
+		assert_eq!(
+			sfx("@sfx bonk \u{201C}a spoon on a pot\u{201D} // curly").unwrap(),
+			("bonk".into(), Some("a spoon on a pot".into()))
+		);
+		assert_eq!(sfx("@sfx boing").unwrap(), ("boing".into(), None));
+
+		for (direction, says) in [
+			("@sfx bonk \"no end", "closing quote"),
+			("@sfx bonk \"\"", "is empty"),
+			("@sfx bonk \"a pot\" loud", "last"),
+			("@sfx \"a pot\"", "needs a sound name"),
+			("@sfx kazoo \"a pot\"", "unknown sound `kazoo`"),
+		] {
+			let message = format!("{:#}", sfx(direction).unwrap_err());
+			assert!(message.contains(says), "{direction}: {message}");
+		}
 	}
 
 	#[test]

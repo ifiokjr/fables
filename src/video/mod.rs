@@ -7,11 +7,14 @@
 pub mod acting;
 pub mod audio;
 pub mod director;
+pub mod elevenlabs;
 pub mod ffmpeg;
+pub mod foley;
 pub mod frames;
 pub mod lipsync;
 pub mod motion;
 pub mod perform;
+pub mod recording;
 pub mod timeline;
 pub mod voice;
 
@@ -66,19 +69,32 @@ pub struct Options {
 	pub preview: bool,
 }
 
-/// Narrates the story and lays out the timeline (shared by every format).
+/// Narrates the story and lays out the timeline (shared by every format). Every new line is
+/// recorded before the timeline is laid out, online voices a few at a time; a voice that
+/// cannot record here is stood in for (see [`recording`]).
 pub fn plan(story: &Story, cast: &Cast, cache: &Path) -> Result<Timeline> {
 	let rehearsals = rehearse(story, cast)?;
+
+	// A first read, timed by estimate, finds every line the video will speak.
+	let mut lines = Vec::new();
+	timeline::build(story, cast, &rehearsals, |line: &voice::Utterance<'_>| {
+		lines.push(recording::Line::of(line));
+		Ok(voice::silent(line, voice::estimated_seconds(line)))
+	})?;
+	let session = recording::Session::prepare(&lines, cast, cache, &mut |note| {
+		eprintln!("  {note}");
+	})?;
+
 	let mut spoken = 0;
 	let mut characters = std::collections::BTreeSet::new();
-	let timeline = timeline::build(story, cast, &rehearsals, |line: &voice::Utterance<'_>| {
+	let mut timeline = timeline::build(story, cast, &rehearsals, |line: &voice::Utterance<'_>| {
 		spoken += 1;
 
 		if line.delivery.mood.is_some() {
-			characters.insert(line.voice.name.clone());
+			characters.insert(format!("{:?}", line.voice));
 		}
 
-		voice::speak(line, cache)
+		session.speak(line, cache)
 	})?;
 
 	let own_voices = cast.members.values().any(|member| member.voice.is_some());
@@ -91,6 +107,11 @@ pub fn plan(story: &Story, cast: &Cast, cache: &Path) -> Result<Timeline> {
 			story.meta.video.cast_voices && !own_voices
 		)
 	);
+
+	let sounds = cache.parent().unwrap_or(cache).join("sound");
+	timeline.foley = foley::gather(story, &timeline, &sounds, true, &mut |note| {
+		eprintln!("  {note}");
+	})?;
 
 	Ok(timeline)
 }
