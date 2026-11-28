@@ -43,8 +43,7 @@ bytes when two runs disagree, and run the old and new binaries back to back
 
 Before is `main` at a6d87f9; after is this branch. The video's output includes the 33 MB
 `soundtrack.wav` written beside it; the MP4 itself went from 74 to 23 MB at preview size. The
-animatic is unchanged apart from run-to-run noise. Every page and every video frame is the
-same, pixel for pixel: the proofs and ePub pages of all 21 books decode identically, and the
+animatic is unchanged apart from run-to-run noise. Every page and every raw RGBA video frame piped into ffmpeg is the same, pixel for pixel (x264 encoding changed as noted below): the proofs and ePub pages of all 21 books decode identically, and the
 raw frames fables hands ffmpeg hash identically, at preview and at 1080p.
 
 ## What changed, and why

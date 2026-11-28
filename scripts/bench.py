@@ -69,6 +69,8 @@ def stand_in_voices(world: Path) -> None:
     """Points the narrator and every character voice in a world copy at [`voice`]."""
     command = json.dumps([sys.executable, str(Path(__file__).resolve()), "voice", "{out}"])
     header = re.compile(r"^\[(narrator|[^\]]+\.voice)\]\s*$")
+    table_header = re.compile(r"^\s*\[.*\]\s*(?:#.*)?$")
+    voice_key = re.compile(r"^\s*(provider|command|id|model)\s*=")
 
     for name in ("world.toml", "cast.toml"):
         path = world / name
@@ -77,16 +79,22 @@ def stand_in_voices(world: Path) -> None:
             continue
 
         lines = []
+        in_voice_table = False
 
         for line in path.read_text().splitlines():
-            if line.strip().startswith("provider") and lines and lines[-1].startswith("command ="):
-                continue  # the stand-in already names its provider
-
-            lines.append(line)
-
             if header.match(line):
+                in_voice_table = True
+                lines.append(line)
                 lines.append('provider = "command"')
                 lines.append(f"command = {command}")
+                continue
+
+            if table_header.match(line):
+                in_voice_table = False
+            elif in_voice_table and voice_key.match(line):
+                continue
+
+            lines.append(line)
 
         if name == "world.toml" and not any(header.match(line) for line in lines):
             # A world without a narrator reads with the default voice; give it the stand-in.
