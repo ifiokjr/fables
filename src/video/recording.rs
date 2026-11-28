@@ -102,8 +102,19 @@ impl Session {
 		cache: &Path,
 		report: &mut dyn FnMut(String),
 	) -> Result<Session> {
-		let new: Vec<&Line> = lines
+		// A line repeated word for word in the same voice and delivery is one take, however
+		// often the book says it: it is counted, paid for and recorded once.
+		let mut seen = std::collections::HashSet::new();
+		let takes: Vec<&Line> = lines
 			.iter()
+			.filter(|line| seen.insert(voice::cache_key(&line.voice, line.delivery, &line.text)))
+			.collect();
+		let cached = takes
+			.iter()
+			.filter(|line| voice::is_cached(&line.utterance(), cache))
+			.count();
+		let new: Vec<&Line> = takes
+			.into_iter()
 			.filter(|line| !voice::is_cached(&line.utterance(), cache))
 			.collect();
 		let mut speakers = BTreeMap::new();
@@ -164,7 +175,7 @@ impl Session {
 			.collect();
 
 		if !online.is_empty() {
-			record(&online, lines.len() - new.len(), cache, report)?;
+			record(&online, cached, cache, report)?;
 		}
 
 		Ok(Session { speakers })

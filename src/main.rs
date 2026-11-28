@@ -497,7 +497,8 @@ enum VoiceAction {
 		out: PathBuf,
 	},
 	/// Keep a designed voice by its number: it joins your `ElevenLabs` library and becomes the
-	/// character's voice in the cast file, with their old macOS voice as the fallback.
+	/// character's voice in the cast file, with their old macOS voice as the fallback. For
+	/// `narrator`, prints the `world.toml` table to paste instead.
 	Keep {
 		/// A cast id, or `narrator`.
 		who: String,
@@ -771,12 +772,23 @@ fn run(cli: Cli) -> Result<()> {
 				} => voice_design(&world()?, &who, &description, sample.as_deref(), &out),
 				VoiceAction::Keep { who, number, out } => {
 					let world = world()?;
-					fables::studio::keep_voice(&world, &who, number, &out.join("voices"))?;
-					say!(
-						"  {who} now speaks with their designed ElevenLabs voice ({}); hear it \
-						 with `fables voice audition {who} \"Hello!\"`",
-						world.cast_file().display()
-					)?;
+					let kept =
+						fables::studio::keep_voice(&world, &who, number, &out.join("voices"))?;
+
+					if let Some(table) = &kept.world_toml {
+						say!(
+							"  kept as ElevenLabs voice `{}`; the narrator lives in world.toml, \
+							 so put this there:\n{table}",
+							kept.voice_id
+						)?;
+					} else {
+						say!(
+							"  {who} now speaks with their designed ElevenLabs voice ({}); hear \
+							 it with `fables voice audition {who} \"Hello!\"`",
+							world.cast_file().display()
+						)?;
+					}
+
 					Ok(())
 				}
 				VoiceAction::Audition {

@@ -204,9 +204,22 @@ impl Voice {
 			"command" => {
 				bail!("voice provider `command` needs `command = [\"program\", \"{{out}}\", …]`")
 			}
-			"elevenlabs" | "cartesia" | "hume" if self.id.is_some() => Ok(()),
 			provider @ ("elevenlabs" | "cartesia" | "hume") => {
-				bail!("voice provider `{provider}` needs `id` (a voice id from its voice library)")
+				let id = self.id.as_deref().with_context(|| {
+					format!(
+						"voice provider `{provider}` needs `id` (a voice id from its voice \
+						 library)"
+					)
+				})?;
+
+				if !is_safe_id(id) {
+					bail!(
+						"`{id}` is not a voice id; use the provider's id, made of letters, \
+						 digits, `-` and `_`"
+					);
+				}
+
+				Ok(())
 			}
 			other => {
 				bail!(
@@ -220,6 +233,16 @@ impl Voice {
 
 /// Every voice provider, by its `provider` name.
 pub const PROVIDERS: [&str; 6] = ["say", "command", "elevenlabs", "openai", "cartesia", "hume"];
+
+/// Whether `id` is one safe path segment. A provider id is used in request paths, so anything
+/// that could move the path (`/`, `..`), start a query or fragment (`?`, `#`), or carry
+/// whitespace is refused before a request is built.
+pub(crate) fn is_safe_id(id: &str) -> bool {
+	!id.trim().is_empty()
+		&& id
+			.chars()
+			.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+}
 
 /// How a line should be delivered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -327,14 +350,9 @@ pub fn speak(utterance: &Utterance<'_>, cache: &Path) -> Result<Speech> {
 	let alignment_file = stem.with_extension("align.json");
 
 	if !wav.is_file() {
-		let take = record(utterance, &stem)?;
-		normalise(&take.audio, &wav)?;
-		let _ = std::fs::remove_file(&take.audio);
-
-		if let Some(alignment) = take.alignment {
-			std::fs::write(&alignment_file, serde_json::to_vec(&alignment)?)
-				.with_context(|| format!("could not write {}", alignment_file.display()))?;
-		}
+		let scratch = scratch(&stem);
+		let take = record(utterance, &scratch)?;
+		settle(take, &scratch, &wav, &alignment_file)?;
 	}
 
 	let (samples, trimmed) = read_wav(&wav)?;
@@ -373,6 +391,72 @@ struct Take {
 pub fn is_cached(utterance: &Utterance<'_>, cache: &Path) -> bool {
 	let key = cache_key(utterance.voice, utterance.delivery, utterance.text);
 	cache.join(format!("{:016x}.wav", seed_of(&key))).is_file()
+}
+
+/// A unique scratch stem beside `stem` for a take being written, so two threads recording the
+/// same line never write the same temporary file: `<name>-<pid>-<n>`.
+pub(crate) fn scratch(stem: &Path) -> PathBuf {
+	static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+	let name = stem
+		.file_stem()
+		.map_or_else(|| "take".into(), |name| name.to_string_lossy().into_owned());
+	let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+	stem.with_file_name(format!("{name}-{}-{next}", std::process::id()))
+}
+
+/// Commits a take atomically: the audio is normalised and the timings written beside it under
+/// scratch names, the timings are renamed into place, and the WAV settles last. The WAV is the
+/// cache's commit marker, so a take another thread or a later run can see always has the
+/// alignment that belongs to it.
+fn settle(take: Take, scratch: &Path, wav: &Path, alignment_file: &Path) -> Result<()> {
+	let Take { audio, alignment } = take;
+	let partial = scratch.with_extension("wav");
+	let partial_alignment = scratch.with_extension("align.json");
+	let written = write_take(
+		&audio,
+		alignment,
+		&partial,
+		&partial_alignment,
+		alignment_file,
+		wav,
+	);
+
+	// The raw provider reply is scratch for every path, settled or not.
+	let _ = std::fs::remove_file(&audio);
+
+	if written.is_err() {
+		let _ = std::fs::remove_file(&partial);
+		let _ = std::fs::remove_file(&partial_alignment);
+	}
+
+	written
+}
+
+fn write_take(
+	audio: &Path,
+	alignment: Option<Vec<Timed>>,
+	partial: &Path,
+	partial_alignment: &Path,
+	alignment_file: &Path,
+	wav: &Path,
+) -> Result<()> {
+	normalise(audio, partial)?;
+
+	if let Some(alignment) = alignment {
+		std::fs::write(partial_alignment, serde_json::to_vec(&alignment)?)
+			.with_context(|| format!("could not write {}", partial_alignment.display()))?;
+	}
+
+	if partial_alignment.is_file() {
+		std::fs::rename(partial_alignment, alignment_file)
+			.with_context(|| format!("could not write {}", alignment_file.display()))?;
+	}
+
+	std::fs::rename(partial, wav).with_context(|| format!("could not write {}", wav.display()))?;
+
+	Ok(())
 }
 
 /// Why `voice` cannot record on this machine, if it cannot: its program is not installed, or
@@ -972,6 +1056,37 @@ mod tests {
 			voice.id = None;
 			let error = voice.validate().unwrap_err().to_string();
 			assert!(error.contains("needs `id`"), "{provider}: {error}");
+		}
+	}
+
+	#[test]
+	fn a_voice_id_is_one_safe_path_segment() {
+		for id in [
+			"",
+			"   ",
+			"../escape",
+			"/tmp/escape",
+			"voice/../other",
+			"voice?query",
+			"voice#fragment",
+			"voice 1",
+			"vöice",
+		] {
+			for provider in ["elevenlabs", "cartesia", "hume"] {
+				let mut voice = voice(provider);
+				voice.id = Some(id.into());
+				let error = voice.validate().unwrap_err().to_string();
+				assert!(
+					error.contains("not a voice id"),
+					"{provider} {id:?}: {error}"
+				);
+			}
+		}
+
+		for id in ["voice-123", "21m00Tcm4TlvDq8ikWAM", "voice_1"] {
+			let mut voice = voice("elevenlabs");
+			voice.id = Some(id.into());
+			assert!(voice.validate().is_ok(), "{id}");
 		}
 	}
 

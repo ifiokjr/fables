@@ -49,7 +49,7 @@ fallback = "Junior"     # the macOS voice that reads where ElevenLabs cannot (de
 # exaggeration = 0.3    # 0 to 1, and speed = 0.7 to 1.2: older models only, not eleven_v4
 ```
 
-The narrator is the same table under `[narrator]` in `world.toml`, or `[voice]` in one script's front matter.
+The narrator is the same table under `[narrator]` in `world.toml`, or `[voice]` in one script's front matter. `fables voice keep narrator 2` saves the voice but cannot choose between those places, so it prints the `[narrator]` table to paste into `world.toml`.
 
 Hear any of them before a whole book: `fables voice audition stinky "NOPE!" --mood defiant`.
 
@@ -109,7 +109,7 @@ Before it records, fables says how many characters it is about to spend and how 
 
 - Every take is cached in `out/<book>/cache/voice`, keyed by the voice, the mood and the words; every sound in `out/<book>/cache/sound`, keyed by its description. Editing one line re-records one line; re-rendering, or rendering in another page skin, records nothing.
 - Each take is asked for with a seed made from its cache key, so a line recorded again after the cache is cleared comes back as close to the first take as the service allows.
-- A busy reply from ElevenLabs (too many requests at once) made no audio, so fables waits and asks again, up to four times. Any other refusal (a wrong voice id, an empty plan) stops the build with ElevenLabs' own message and is never retried. The takes that did record are kept, so the next run only does the rest.
+- A busy reply from ElevenLabs (too many requests at once) made no audio, so fables waits and asks again, up to four times. A reply that says the plan is out (`quota_exceeded`), or any other refusal (a wrong voice id), stops the build at once with ElevenLabs' own message and is never retried. The takes that did record are kept, so the next run only does the rest.
 - A Kerfuffle book is about 2,400 characters. Check [elevenlabs.io/pricing](https://elevenlabs.io/pricing) for what that is on your plan.
 
 ## When ElevenLabs cannot speak

@@ -3,7 +3,8 @@
 //! Every call fables makes to `ElevenLabs` goes through here, with the key from
 //! `ELEVENLABS_API_KEY`. A busy reply (too many requests at once, or the service under load)
 //! made no audio and cost nothing, so it is waited out and sent again, a few times at most;
-//! any other failure is reported once, with `ElevenLabs`' own message, and never retried.
+//! a reply that says the plan is out (`quota_exceeded`) or any other refusal is reported once,
+//! with `ElevenLabs`' own message, and never retried.
 //!
 //! Speech is recorded with timestamps, so lip-sync is exact to the letter. Models that take
 //! direction as audio tags (`eleven_v3`, `eleven_v4`) hear the line's mood as a tag such as
@@ -48,12 +49,23 @@ const API: &str = "https://api.elevenlabs.io";
 
 /// The account fables calls `ElevenLabs` with when it is not read from the environment: for
 /// a program that embeds fables and holds the key itself, and for tests.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Account {
 	/// The API key; `None` means there is none, whatever the environment says.
 	pub key: Option<String>,
 	/// The API host; `None` is the global one.
 	pub host: Option<String>,
+}
+
+impl std::fmt::Debug for Account {
+	/// Redacts the key: an `Account` is printed in test failures and debug logs, and a live key
+	/// must never leave the process that holds it.
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("Account")
+			.field("key", &self.key.as_ref().map(|_| "<redacted>"))
+			.field("host", &self.host)
+			.finish()
+	}
 }
 
 static ACCOUNT: std::sync::RwLock<Option<Account>> = std::sync::RwLock::new(None);
@@ -139,20 +151,31 @@ fn call(
 	send: impl Fn(&ureq::Agent) -> Result<Response, ureq::Error>,
 ) -> Result<Response> {
 	let agent = agent();
+	call_with(&agent, what, send)
+}
+
+/// [`call`], with an agent of the caller's making, so a test can point it at a stand-in.
+fn call_with(
+	agent: &ureq::Agent,
+	what: &str,
+	send: impl Fn(&ureq::Agent) -> Result<Response, ureq::Error>,
+) -> Result<Response> {
 	let mut attempt = 0;
 
 	loop {
 		let mut response =
-			send(&agent).with_context(|| format!("could not reach ElevenLabs for {what}"))?;
+			send(agent).with_context(|| format!("could not reach ElevenLabs for {what}"))?;
 		let status = response.status().as_u16();
 
 		if (200..300).contains(&status) {
 			return Ok(response);
 		}
 
-		let busy = status == 429 || status == 503;
+		// The body says whether a 429 is the service busy (no audio was made, so asking again
+		// costs nothing) or the plan has run out (asking again would only stall the build).
+		let body = response.body_mut().read_to_string().unwrap_or_default();
 
-		if busy && attempt < RETRIES {
+		if busy(status, &body) && attempt < RETRIES {
 			let wait = response
 				.headers()
 				.get("retry-after")
@@ -165,8 +188,43 @@ fn call(
 			continue;
 		}
 
-		let body = response.body_mut().read_to_string().unwrap_or_default();
 		bail!("ElevenLabs refused {what} ({status}): {}", reason(&body));
+	}
+}
+
+/// Whether a failed reply is worth sending again: the service was busy rather than refusing
+/// the request. A 429 whose `detail.status` names a non-transient reason (the plan is out of
+/// characters, the key cannot spend) fails at once, with `ElevenLabs`' own message.
+fn busy(status: u16, body: &str) -> bool {
+	match status {
+		503 => true,
+		429 => {
+			let named = serde_json::from_str::<serde_json::Value>(body)
+				.ok()
+				.and_then(|value| {
+					value
+						.get("detail")?
+						.get("status")?
+						.as_str()
+						.map(str::to_owned)
+				});
+
+			match named.as_deref() {
+				// A 429 with no reason is still the rate limit, which clears.
+				None => true,
+				Some(name) => {
+					matches!(
+						name,
+						"too_many_concurrent_requests"
+							| "concurrent_limit_exceeded"
+							| "rate_limit_exceeded"
+							| "system_busy" | "service_unavailable"
+							| "overloaded"
+					)
+				}
+			}
+		}
+		_ => false,
 	}
 }
 
@@ -291,8 +349,18 @@ impl Alignment {
 /// Records a line with its timings. Writes the audio to `audio` and returns the per-letter
 /// alignment.
 pub fn speak(utterance: &Utterance<'_>, audio: &Path) -> Result<Option<Vec<Timed>>> {
-	let key = key()?;
 	let voice_id = utterance.voice.id.as_deref().unwrap_or_default();
+
+	// Checked again here, not only in `Voice::validate`: this value becomes a path segment,
+	// and a `Voice` built in code can reach here without being validated first.
+	if !voice::is_safe_id(voice_id) {
+		bail!(
+			"`{voice_id}` is not a voice id; use the provider's id, made of letters, digits, `-` \
+			 and `_`"
+		);
+	}
+
+	let key = key()?;
 	let url = format!("{}/v1/text-to-speech/{voice_id}/with-timestamps", api());
 	let body = speech_body(utterance);
 	let mut response = call("a line of speech", |agent| {
@@ -482,13 +550,23 @@ impl Allowance {
 /// The plan's allowance, if the key may read it (a key can be limited so it cannot).
 pub fn allowance() -> Option<Allowance> {
 	let key = key().ok()?;
-	let mut response = call("the plan's allowance", |agent| {
-		agent
-			.get(&format!("{}/v1/user/subscription", api()))
-			.header("xi-api-key", &key)
-			.call()
-	})
-	.ok()?;
+
+	// One short read that never retries: the allowance is a note before recording, and a slow
+	// or busy subscription endpoint must not hold up the build or spend retry time on itself.
+	let agent: ureq::Agent = ureq::Agent::config_builder()
+		.http_status_as_error(false)
+		.timeout_global(Some(Duration::from_secs(5)))
+		.build()
+		.into();
+	let mut response = agent
+		.get(&format!("{}/v1/user/subscription", api()))
+		.header("xi-api-key", &key)
+		.call()
+		.ok()?;
+
+	if !response.status().is_success() {
+		return None;
+	}
 
 	response.body_mut().read_json().ok()
 }
@@ -759,5 +837,130 @@ mod tests {
 		assert_eq!(body["auto_generate_text"], true);
 		assert!(body.get("text").is_none());
 		assert_eq!(body["model_id"], DESIGN_MODEL);
+	}
+
+	/// A stand-in that answers the next `replies.len()` requests, counting the connections it
+	/// saw, so a test can prove how many attempts were made.
+	fn stand_in(
+		replies: Vec<(&'static str, &'static str)>,
+	) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+		use std::io::BufRead as _;
+		use std::io::Read as _;
+		use std::io::Write as _;
+		use std::net::TcpListener;
+
+		let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+		let address = format!("http://{}", listener.local_addr().unwrap());
+		let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+		let seen = std::sync::Arc::clone(&count);
+
+		std::thread::spawn(move || {
+			for (status, body) in replies {
+				let Ok((mut stream, _)) = listener.accept() else {
+					return;
+				};
+				seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+				let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+				let mut length = 0;
+
+				loop {
+					let mut header = String::new();
+
+					if reader.read_line(&mut header).unwrap_or(0) == 0 || header.trim().is_empty() {
+						break;
+					}
+
+					if let Some((name, value)) = header.split_once(':')
+						&& name.eq_ignore_ascii_case("content-length")
+					{
+						length = value.trim().parse().unwrap_or(0);
+					}
+				}
+
+				let mut body_bytes = vec![0; length];
+				let _ = reader.read_exact(&mut body_bytes);
+				let response = format!(
+					"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: \
+					 {}\r\nConnection: close\r\n\r\n{body}",
+					body.len()
+				);
+				let _ = stream.write_all(response.as_bytes());
+			}
+		});
+
+		(address, count)
+	}
+
+	#[test]
+	fn a_quota_reply_is_refused_once_without_a_retry() {
+		let (host, count) = stand_in(vec![(
+			"429 Too Many Requests",
+			r#"{"detail":{"status":"quota_exceeded","message":"You have 12 credits left."}}"#,
+		)]);
+
+		let error = call_with(&agent(), "a line of speech", |agent| {
+			agent
+				.get(&format!("{host}/v1/text-to-speech/voice-123"))
+				.call()
+		})
+		.unwrap_err()
+		.to_string();
+
+		assert!(error.contains("You have 12 credits left."), "{error}");
+		assert_eq!(
+			count.load(std::sync::atomic::Ordering::SeqCst),
+			1,
+			"a quota refusal is final"
+		);
+	}
+
+	#[test]
+	fn a_busy_reply_is_retried() {
+		let (host, count) = stand_in(vec![
+			(
+				"429 Too Many Requests",
+				r#"{"detail":{"status":"too_many_concurrent_requests","message":"busy"}}"#,
+			),
+			("200 OK", "{}"),
+		]);
+
+		let response = call_with(&agent(), "a line of speech", |agent| {
+			agent
+				.get(&format!("{host}/v1/text-to-speech/voice-123"))
+				.call()
+		})
+		.unwrap();
+
+		assert_eq!(response.status().as_u16(), 200);
+		assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
+	}
+
+	#[test]
+	fn an_account_never_prints_its_key() {
+		let account = Account {
+			key: Some("sk-live-secret".into()),
+			host: Some("https://example.test".into()),
+		};
+		let shown = format!("{account:?}");
+
+		assert!(!shown.contains("sk-live-secret"), "{shown}");
+		assert!(shown.contains("<redacted>"), "{shown}");
+		assert!(shown.contains("example.test"), "{shown}");
+		assert_eq!(
+			format!("{:?}", Account::default()),
+			"Account { key: None, host: None }"
+		);
+	}
+
+	#[test]
+	fn speak_refuses_an_unsafe_voice_id_before_building_the_url() {
+		let mut v4 = voice(None);
+		v4.id = Some("../escape".into());
+		let error = speak(&cross(&v4), Path::new("/nonexistent/escape.mp3"))
+			.unwrap_err()
+			.to_string();
+
+		assert!(error.contains("not a voice id"), "{error}");
 	}
 }

@@ -129,6 +129,21 @@ pub struct MemberReport {
 	pub drawn: Option<&'static str>,
 }
 
+/// What a kept designed voice became.
+#[derive(Clone, Debug, Serialize)]
+pub struct KeptVoice {
+	/// The cast id, or `narrator`.
+	pub who: String,
+	/// The voice's id in the `ElevenLabs` library.
+	pub voice_id: String,
+	/// The cast file that now names the voice; `None` for the narrator.
+	pub cast_file: Option<PathBuf>,
+	/// For the narrator: the `world.toml` table to paste, since the narrator lives there.
+	pub world_toml: Option<String>,
+	/// The cast member as they now read, for a character; `None` for the narrator.
+	pub member: Option<MemberReport>,
+}
+
 /// A new world.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct WorldBrief {
@@ -1004,8 +1019,9 @@ impl Studio {
 		)
 	}
 
-	/// Keeps a designed voice (by its number, from 1) and casts it.
-	pub fn keep_voice(&self, folder: &str, who: &str, number: usize) -> Result<MemberReport> {
+	/// Keeps a designed voice (by its number, from 1) and casts it; for the narrator, returns
+	/// the `world.toml` table to paste.
+	pub fn keep_voice(&self, folder: &str, who: &str, number: usize) -> Result<KeptVoice> {
 		keep_voice(
 			&self.world(folder)?,
 			who,
@@ -2600,8 +2616,18 @@ pub fn design_voice(
 /// Keeps designed voice `number` (from [`design_voice`]): saves it to the `ElevenLabs` library
 /// and casts it as the member's voice. A member who spoke with a macOS voice keeps it as the
 /// `fallback`, so the books still read where `ElevenLabs` cannot. The narrator's voice lives in
-/// `world.toml`, so for `narrator` the table to paste there is returned in the error instead.
-pub fn keep_voice(world: &World, who: &str, number: usize, dir: &Path) -> Result<MemberReport> {
+/// `world.toml`, so for `narrator` the table to paste there is returned in [`KeptVoice`].
+pub fn keep_voice(world: &World, who: &str, number: usize, dir: &Path) -> Result<KeptVoice> {
+	// Checked before the design file is read: `who` names the file, and an escaping id must not
+	// touch anything outside `dir`.
+	check_slug("character", who)?;
+	let cast = world.cast()?;
+	let member = cast.member(who);
+
+	if who != "narrator" && member.is_none() {
+		bail!("`{who}` is not in {}'s cast", world.name);
+	}
+
 	let file = design_file(dir, who);
 	let design: Design = serde_json::from_slice(&std::fs::read(&file).with_context(|| {
 		format!(
@@ -2619,8 +2645,6 @@ pub fn keep_voice(world: &World, who: &str, number: usize, dir: &Path) -> Result
 				design.ids.len()
 			)
 		})?;
-	let cast = world.cast()?;
-	let member = cast.member(who);
 	let name = match member {
 		Some(member) => format!("{}: {}", world.name, member.name),
 		None => format!("{}: narrator", world.name),
@@ -2629,10 +2653,15 @@ pub fn keep_voice(world: &World, who: &str, number: usize, dir: &Path) -> Result
 	let _ = std::fs::remove_file(&file);
 
 	let Some(member) = member else {
-		bail!(
-			"kept as ElevenLabs voice `{voice_id}`; the narrator lives in world.toml, so put this \
-			 there:\n[narrator]\nprovider = \"elevenlabs\"\nid = \"{voice_id}\""
-		);
+		return Ok(KeptVoice {
+			who: who.to_owned(),
+			voice_id: voice_id.clone(),
+			cast_file: None,
+			world_toml: Some(format!(
+				"[narrator]\nprovider = \"elevenlabs\"\nid = \"{voice_id}\""
+			)),
+			member: None,
+		});
 	};
 	let before = member.voice.clone();
 	let fallback = before.as_ref().and_then(|voice| {
@@ -2644,13 +2673,20 @@ pub fn keep_voice(world: &World, who: &str, number: usize, dir: &Path) -> Result
 	});
 	let choice = VoiceChoice {
 		provider: "elevenlabs".into(),
-		id: Some(voice_id),
+		id: Some(voice_id.clone()),
 		style: before.as_ref().and_then(|voice| voice.style.clone()),
 		fallback,
 		..VoiceChoice::default()
 	};
+	let report = cast_voice(world, who, &choice)?;
 
-	cast_voice(world, who, &choice)
+	Ok(KeptVoice {
+		who: who.to_owned(),
+		voice_id,
+		cast_file: Some(world.cast_file()),
+		world_toml: None,
+		member: Some(report),
+	})
 }
 
 /// Speaks a line in a world's cast member's voice (`narrator` for the narrator's), with a mood's
@@ -4217,6 +4253,65 @@ mod tests {
 		assert!(
 			studio.read_story("nibbleton", "nell-nibbles").is_err(),
 			"nothing is left behind"
+		);
+	}
+
+	#[test]
+	fn keep_voice_refuses_a_name_that_escapes_its_folder_before_touching_it() {
+		elevenlabs::use_account(Some(elevenlabs::Account::default()));
+		let (dir, studio) = studio();
+		let world = studio.world("nibbleton").unwrap();
+		let voices = dir.path().join("out/voices");
+		std::fs::create_dir_all(&voices).unwrap();
+
+		let design =
+			r#"{"description":"A warm storyteller with a soft Welsh lilt","ids":["designed"]}"#;
+		// A relative escape would land here, beside `voices`.
+		let relative = voices.parent().unwrap().join("escape-design.json");
+		std::fs::write(&relative, design).unwrap();
+		// An absolute one would replace the whole path.
+		let outside = tempfile::tempdir().unwrap();
+		let escape = outside.path().join("escape");
+		let outside_design = outside.path().join("escape-design.json");
+		std::fs::write(&outside_design, design).unwrap();
+
+		for who in ["../escape".to_owned(), escape.display().to_string()] {
+			let error = format!("{:#}", keep_voice(&world, &who, 1, &voices).unwrap_err());
+			assert!(error.contains("character name"), "{who}: {error}");
+		}
+
+		assert_eq!(
+			std::fs::read_to_string(&relative).unwrap(),
+			design,
+			"the design beside the folder is untouched"
+		);
+		assert_eq!(
+			std::fs::read_to_string(&outside_design).unwrap(),
+			design,
+			"the design outside the folder is untouched"
+		);
+		assert!(!voices.join("escape-design.json").exists());
+	}
+
+	#[test]
+	fn keep_voice_checks_the_cast_before_spending_a_keep() {
+		elevenlabs::use_account(Some(elevenlabs::Account::default()));
+		let (dir, studio) = studio();
+		let world = studio.world("nibbleton").unwrap();
+		let voices = dir.path().join("out/voices");
+		std::fs::create_dir_all(&voices).unwrap();
+		let design = voices.join("ghost-design.json");
+		std::fs::write(
+			&design,
+			r#"{"description":"A warm storyteller with a soft Welsh lilt","ids":["designed"]}"#,
+		)
+		.unwrap();
+
+		let error = format!("{:#}", keep_voice(&world, "ghost", 1, &voices).unwrap_err());
+		assert!(error.contains("not in Nibbleton's cast"), "{error}");
+		assert!(
+			design.is_file(),
+			"the design is kept for a name that can use it"
 		);
 	}
 

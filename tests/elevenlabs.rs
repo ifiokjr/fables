@@ -3,8 +3,9 @@
 //! The stand-in answers the endpoints fables calls with real audio (WAV that ffmpeg decodes,
 //! as it decodes `ElevenLabs`' MP3), records every request, and turns the first speech request
 //! away as busy. One book is voiced and its sounds recorded, then voiced again: the second run
-//! must not call the service at all. Then the key is taken away and a new line falls back
-//! without a call.
+//! must not call the service at all. A line the book repeats is paid for once, a kept narrator
+//! design comes back as the `world.toml` table, and the key is taken away so a new line falls
+//! back without a call.
 //!
 //! Everything runs in one test, because the account is set for the whole process.
 
@@ -30,6 +31,8 @@ struct Request {
 	target: String,
 	key: Option<String>,
 	body: serde_json::Value,
+	/// The status the stand-in answered a speech request with; `200` for the other endpoints.
+	status: u16,
 }
 
 /// A WAV of `seconds` of a soft tone at 44.1 kHz, as a service would send it.
@@ -106,16 +109,23 @@ fn serve() -> (String, Arc<Mutex<Vec<Request>>>) {
 			let mut body = vec![0; length];
 			reader.read_exact(&mut body).unwrap();
 			let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+			let mut status = 200;
+
+			if target.starts_with("/v1/text-to-speech/") && !turned_away {
+				turned_away = true;
+				status = 429;
+			}
+
 			log.lock().unwrap().push(Request {
 				method: method.clone(),
 				target: target.clone(),
 				key,
 				body: body.clone(),
+				status,
 			});
 
 			if target.starts_with("/v1/text-to-speech/") {
-				if !turned_away {
-					turned_away = true;
+				if status == 429 {
 					respond(
 						&mut stream,
 						"429 Too Many Requests",
@@ -163,6 +173,16 @@ fn serve() -> (String, Arc<Mutex<Vec<Request>>>) {
 					"application/json",
 					"",
 					br#"{"character_count":100,"character_limit":10000,"tier":"starter"}"#,
+				);
+			} else if method == "POST" && target == "/v1/text-to-voice" {
+				let designed = body["generated_voice_id"].as_str().unwrap_or("unnamed");
+				let reply = serde_json::json!({ "voice_id": format!("kept-{designed}") });
+				respond(
+					&mut stream,
+					"200 OK",
+					"application/json",
+					"",
+					reply.to_string().as_bytes(),
 				);
 			} else {
 				respond(&mut stream, "404 Not Found", "application/json", "", b"{}");
@@ -213,6 +233,10 @@ ambience = true
 "Hello, pot!" said Pip.
 @sfx bonk "a wooden spoon tapping a pot"
 The pot went bong.
+
+# garden
+@pip happy talk
+"Hello, pot!" said Pip.
 "#;
 
 fn book(world: &World, source: &str) -> (Story, Cast) {
@@ -305,6 +329,14 @@ fn a_book_is_voiced_and_scored_by_elevenlabs_once() {
 		unique.len() + 1,
 		"one line was sent twice, after the busy reply, and no other: {texts:?}"
 	);
+	let repeated = speech
+		.iter()
+		.filter(|request| request.status == 200 && request.body["text"] == "[cheerful] Hello, pot!")
+		.count();
+	assert_eq!(
+		repeated, 1,
+		"a line the book says twice is recorded and paid for once: {texts:?}"
+	);
 
 	// Lip-sync came from the timings, and the speech is real audio.
 	assert!(
@@ -312,6 +344,15 @@ fn a_book_is_voiced_and_scored_by_elevenlabs_once() {
 			.speeches
 			.iter()
 			.all(|speech| !speech.samples.is_empty())
+	);
+	assert_eq!(
+		timeline
+			.speeches
+			.iter()
+			.filter(|speech| speech.text == "Hello, pot!")
+			.count(),
+		2,
+		"the book says the repeated line twice"
 	);
 
 	// Sounds: the described cue, the world's own pop, the built-in page turn and a looping bed.
@@ -366,6 +407,43 @@ fn a_book_is_voiced_and_scored_by_elevenlabs_once() {
 	assert_eq!(again.speeches.len(), timeline.speeches.len());
 	assert!(!again.foley.is_empty());
 
+	// A kept narrator design is a result, not an error: the table to paste comes back.
+	let voices = dir.path().join("out/voices");
+	std::fs::create_dir_all(&voices).unwrap();
+	let design = voices.join("narrator-design.json");
+	std::fs::write(
+		&design,
+		r#"{"description":"A warm storyteller with a soft Welsh lilt","ids":["designed-narrator"]}"#,
+	)
+	.unwrap();
+	let kept = fables::studio::keep_voice(&world, "narrator", 1, &voices).unwrap();
+
+	assert_eq!(kept.who, "narrator");
+	assert_eq!(kept.voice_id, "kept-designed-narrator");
+	assert!(kept.cast_file.is_none());
+	assert!(kept.member.is_none());
+	assert_eq!(
+		kept.world_toml.as_deref(),
+		Some("[narrator]\nprovider = \"elevenlabs\"\nid = \"kept-designed-narrator\"")
+	);
+	assert!(!design.exists(), "the design is spent once kept");
+
+	let kept_requests: Vec<Request> = seen
+		.lock()
+		.unwrap()
+		.iter()
+		.filter(|request| request.target == "/v1/text-to-voice")
+		.cloned()
+		.collect();
+	assert_eq!(kept_requests.len(), 1);
+	assert_eq!(kept_requests[0].body["voice_name"], "Foley: narrator");
+	assert_eq!(
+		kept_requests[0].body["generated_voice_id"],
+		"designed-narrator"
+	);
+	assert_eq!(kept_requests[0].key.as_deref(), Some("test-key"));
+	let settled = seen.lock().unwrap().len();
+
 	// Without the key, a new line is never sent: it falls back, and the cached ones still play.
 	elevenlabs::use_account(Some(elevenlabs::Account {
 		key: None,
@@ -376,7 +454,7 @@ fn a_book_is_voiced_and_scored_by_elevenlabs_once() {
 		&BOOK.replace("The pot went bong.", "The pot went BONG."),
 	);
 	let fallen = video::plan(&story, &cast, &cache).unwrap();
-	assert_eq!(seen.lock().unwrap().len(), before, "no key, no call");
+	assert_eq!(seen.lock().unwrap().len(), settled, "no key, no call");
 	assert_eq!(fallen.speeches.len(), timeline.speeches.len());
 	assert!(
 		!fallen.foley.is_empty(),

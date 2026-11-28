@@ -297,10 +297,14 @@ pub fn gather(
 		.with_context(|| format!("could not create {}", cache.display()))?;
 	let path =
 		|request: &SoundRequest| cache.join(format!("{:016x}.wav", seed_of(&request.cache_key())));
+	// Two names can ask for the same sound (two beds with one description, say), and a sound
+	// repeated in the script is one recording: take each cache key once before recording.
+	let mut seen = std::collections::HashSet::new();
 	let missing: Vec<&SoundRequest> = wanted
 		.iter()
 		.map(|(_, request)| request)
 		.filter(|request| !path(request).is_file())
+		.filter(|request| seen.insert(request.cache_key()))
 		.collect();
 
 	if !missing.is_empty() {
@@ -365,11 +369,16 @@ pub fn gather(
 }
 
 fn record_sound(request: &SoundRequest, wav: &Path) -> Result<()> {
-	let raw = wav.with_extension("mp3");
+	let scratch = crate::video::voice::scratch(wav);
+	let raw = scratch.with_extension("mp3");
 	elevenlabs::sound(request, &raw)?;
-	let normalised = crate::video::voice::normalise(&raw, wav);
+	let partial = scratch.with_extension("wav");
+	let normalised = crate::video::voice::normalise(&raw, &partial);
 	let _ = std::fs::remove_file(&raw);
-	normalised
+	normalised?;
+
+	// The WAV settles last, so a reader never sees a half-written sound.
+	std::fs::rename(&partial, wav).with_context(|| format!("could not write {}", wav.display()))
 }
 
 /// Reads a cached recording, untrimmed: a loop must keep every sample to stay seamless.

@@ -206,7 +206,7 @@ pub struct DesignParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct KeepParams {
 	pub world: String,
-	/// A cast id.
+	/// A cast id, or `narrator`.
 	pub who: String,
 	/// The designed voice's number, from `voice_design`.
 	pub number: usize,
@@ -1063,7 +1063,7 @@ impl StudioServer {
 	#[tool(
 		description = "Keep a designed voice by its number: it is saved to the ElevenLabs library \
 		               and cast as the character's voice, with their old macOS voice kept as the \
-		               fallback."
+		               fallback. For `narrator`, returns the `world.toml` table to paste instead."
 	)]
 	fn voice_keep(&self, Parameters(params): Parameters<KeepParams>) -> CallToolResult {
 		json(
